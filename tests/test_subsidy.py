@@ -211,8 +211,14 @@ def test_special_category(quote_v1):
 
 def test_no_central_subsidy_stated(quote_v1):
     quote_v1["subsidy_central"] = None
+    quote_v1["module_groups"] = []  # no subsidy is checked before capacity
     r = c2(quote_v1)
-    assert r["status"] == "missing" and "78,000" in r["message"]
+    assert r["status"] == "needs_confirmation"
+    assert r["message"] == ("This quote doesn't mention the central subsidy. If you plan to apply, "
+                            "ask the vendor what they expect it to be.")
+    assert r["question"] == "subsidy_not_stated"
+    quote_v1["subsidy_state"] = amount_field("Rs. 10,000")
+    assert c2(quote_v1)["question"] == "subsidy_not_stated"
 
 
 def test_unparsed_central_subsidy(quote_v1):

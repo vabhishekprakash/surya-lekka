@@ -13,7 +13,6 @@ from rules import load_cfa_rules
 from .common import (
     CONSISTENT,
     INCONSISTENT,
-    MISSING,
     NEEDS_CONFIRMATION,
     OUT_OF_SCOPE,
     UnusableNumber,
@@ -35,6 +34,8 @@ NON_HOUSEHOLD = {"rwa", "group_housing", "other_non_household"}
 DCR_NOTE = ("The central subsidy also requires DCR (domestic content) panels and cells. "
             "This was not verified from the quote.")
 PENDING_NOTE = "The rule values used here are pending verification against the MNRE sources."
+NO_SUBSIDY_MESSAGE = ("This quote doesn't mention the central subsidy. If you plan to apply, ask the vendor "
+                      "what they expect it to be.")
 
 
 def _norm_name(name):
@@ -171,6 +172,8 @@ def check_central_subsidy(quote, rules=None):
                       "The quote gives one subsidy figure without saying how much is central and how much "
                       "is state. Ask the vendor for the central and state amounts separately.",
                       sub_evidence, question="subsidy_breakdown")
+    if value_of(central_f) is None:
+        return result(NEEDS_CONFIRMATION, NO_SUBSIDY_MESSAGE, sub_evidence, question="subsidy_not_stated")
 
     dc = dc_capacity(quote)
     if dc is None:
@@ -203,11 +206,6 @@ def check_central_subsidy(quote, rules=None):
     except UnusableNumber:
         return result(NEEDS_CONFIRMATION, "Please confirm the central subsidy amount on the quote.",
                       evidence, rule)
-    if stated is None:
-        return result(MISSING,
-                      f"The quote does not state a central subsidy amount. The central rule gives up to "
-                      f"Rs {format_inr(expected)} for {dc_text} kWp of panels.", evidence, rule)
-
     params = {"stated": format_inr(stated), "rule": format_inr(expected), "dc_kwp": dc_text}
     if abs(stated - expected) <= TOLERANCE_INR:
         return result(CONSISTENT,
