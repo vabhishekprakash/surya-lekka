@@ -1,0 +1,284 @@
+{
+  "sample_id": "S2",
+  "description": "Problem quote: 5 x 500 W = 2.5 kWp stated as 3 kWp; central subsidy Rs 85,800 promised in a general-category state (the rule gives Rs 69,000 for 2.5 kWp).",
+  "pdf": "samples/S2.pdf",
+  "pages": {
+    "1": [
+      "Example Solar Pvt Ltd",
+      "Plot 0, Example Industrial Area, Sample City 000000 | Phone +91 00000 00000",
+      "Vendor reg. no. EX-VR-0002",
+      "Quotation No. EXS-S2 | Date 02/10/2026",
+      "To: Sample Household, Sample City",
+      "Rooftop solar system: 3 kWp (DC)",
+      "Solar modules: Example PV EXM-500, 500 W",
+      "No. of modules: 5",
+      "DCR declaration: modules and cells are DCR (domestic content)",
+      "Inverter: Example Inverters EXI-3K, 3 kW on-grid"
+    ],
+    "2": [
+      "Price breakup",
+      "Base price Rs. 1,50,000",
+      "GST @ 8.9% (extra) Rs. 13,350",
+      "Net meter charges Rs. 2,500 (included in Grand Total)",
+      "Discount Rs. 0",
+      "Grand Total Rs. 1,65,850/-",
+      "No other charges apply.",
+      "Central subsidy Rs. 85,800",
+      "Net cost after central subsidy Rs. 80,050"
+    ]
+  },
+  "quote": {
+    "_contract": "Synthetic sample. Every value is made up.",
+    "contract_version": "v1",
+    "processing_complete": true,
+    "pages_processed": [
+      1,
+      2
+    ],
+    "options": [],
+    "module_groups": [
+      {
+        "group_id": "G1",
+        "option_id": null,
+        "count": {
+          "value": 5,
+          "evidence_text": "No. of modules: 5",
+          "page": 1,
+          "batch": 1
+        },
+        "wattage": {
+          "value": {
+            "raw": "500 W",
+            "parsed": "500",
+            "unit": "W",
+            "parse_status": "ok"
+          },
+          "evidence_text": "Solar modules: Example PV EXM-500, 500 W",
+          "page": 1,
+          "batch": 1
+        },
+        "make_model": {
+          "value": "Example PV EXM-500",
+          "evidence_text": "Solar modules: Example PV EXM-500, 500 W",
+          "page": 1,
+          "batch": 1
+        },
+        "make_model_alternatives": []
+      }
+    ],
+    "inverters": [
+      {
+        "inverter_id": "I1",
+        "option_id": null,
+        "make_model": {
+          "value": "Example Inverters EXI-3K",
+          "evidence_text": "Inverter: Example Inverters EXI-3K, 3 kW on-grid",
+          "page": 1,
+          "batch": 1
+        },
+        "rating": {
+          "value": {
+            "raw": "3 kW",
+            "parsed": "3",
+            "unit": "kW",
+            "parse_status": "ok"
+          },
+          "evidence_text": "Inverter: Example Inverters EXI-3K, 3 kW on-grid",
+          "page": 1,
+          "batch": 1
+        },
+        "make_model_alternatives": []
+      }
+    ],
+    "stated_capacity": {
+      "value": {
+        "raw": "3 kWp",
+        "parsed": "3",
+        "unit": "kWp",
+        "parse_status": "ok"
+      },
+      "evidence_text": "Rooftop solar system: 3 kWp (DC)",
+      "page": 1,
+      "batch": 1
+    },
+    "dcr_declaration": {
+      "value": true,
+      "evidence_text": "DCR declaration: modules and cells are DCR (domestic content)",
+      "page": 1,
+      "batch": 1
+    },
+    "vendor_registration": {
+      "value": "EX-VR-0002",
+      "evidence_text": "Vendor reg. no. EX-VR-0002",
+      "page": 1,
+      "batch": 1
+    },
+    "base_price": {
+      "value": {
+        "raw": "Rs. 1,50,000",
+        "parsed": "150000",
+        "parse_status": "ok"
+      },
+      "evidence_text": "Base price Rs. 1,50,000",
+      "page": 2,
+      "batch": 1
+    },
+    "gst_amount": {
+      "value": {
+        "raw": "Rs. 13,350",
+        "parsed": "13350",
+        "parse_status": "ok"
+      },
+      "evidence_text": "GST @ 8.9% (extra) Rs. 13,350",
+      "page": 2,
+      "batch": 1
+    },
+    "extra_charges": [
+      {
+        "charge_id": "E1",
+        "option_id": null,
+        "label": {
+          "value": "Net meter charges",
+          "evidence_text": "Net meter charges Rs. 2,500 (included in Grand Total)",
+          "page": 2,
+          "batch": 1
+        },
+        "amount": {
+          "value": {
+            "raw": "Rs. 2,500",
+            "parsed": "2500",
+            "parse_status": "ok"
+          },
+          "evidence_text": "Net meter charges Rs. 2,500 (included in Grand Total)",
+          "page": 2,
+          "batch": 1
+        },
+        "included_in_total": {
+          "value": "yes",
+          "evidence_text": "Net meter charges Rs. 2,500 (included in Grand Total)",
+          "page": 2,
+          "batch": 1
+        },
+        "total_label": "Grand Total"
+      }
+    ],
+    "discount": {
+      "value": {
+        "raw": "Rs. 0",
+        "parsed": "0",
+        "parse_status": "ok"
+      },
+      "evidence_text": "Discount Rs. 0",
+      "page": 2,
+      "batch": 1
+    },
+    "gross_total": {
+      "value": {
+        "raw": "Rs. 1,65,850/-",
+        "parsed": "165850",
+        "parse_status": "ok"
+      },
+      "evidence_text": "Grand Total Rs. 1,65,850/-",
+      "page": 2,
+      "batch": 1
+    },
+    "subsidy_central": {
+      "value": {
+        "raw": "Rs. 85,800",
+        "parsed": "85800",
+        "parse_status": "ok"
+      },
+      "evidence_text": "Central subsidy Rs. 85,800",
+      "page": 2,
+      "batch": 1
+    },
+    "subsidy_state": null,
+    "subsidy_combined": null,
+    "subsidy_unspecified": null,
+    "net_cost": {
+      "value": {
+        "raw": "Rs. 80,050",
+        "parsed": "80050",
+        "parse_status": "ok"
+      },
+      "evidence_text": "Net cost after central subsidy Rs. 80,050",
+      "page": 2,
+      "batch": 1
+    },
+    "flags": {
+      "model_proposed": {
+        "multiple_options": {
+          "value": false,
+          "evidence_text": null,
+          "page": null,
+          "batch": 1
+        },
+        "capacity_basis": {
+          "value": "dc_kwp",
+          "evidence_text": "Rooftop solar system: 3 kWp (DC)",
+          "page": 1,
+          "batch": 1
+        },
+        "gst_treatment": {
+          "value": "excluded",
+          "evidence_text": "GST @ 8.9% (extra) Rs. 13,350",
+          "page": 2,
+          "batch": 1
+        },
+        "extra_charges_complete": {
+          "value": true,
+          "evidence_text": "No other charges apply.",
+          "page": 2,
+          "batch": 1
+        },
+        "net_cost_subsidy_basis": {
+          "value": "central",
+          "evidence_text": "Net cost after central subsidy Rs. 80,050",
+          "page": 2,
+          "batch": 1
+        },
+        "consumer_type": null
+      },
+      "user_confirmed": {}
+    }
+  },
+  "user_inputs": {
+    "confirmations": {
+      "state": "Telangana",
+      "consumer_type": "individual_household",
+      "portal_application_on_or_after_cutoff": true
+    }
+  },
+  "expected": {
+    "findings": [
+      {
+        "check_id": "C1_capacity",
+        "item": null,
+        "status": "inconsistent"
+      },
+      {
+        "check_id": "C2_central_subsidy",
+        "item": null,
+        "status": "inconsistent"
+      },
+      {
+        "check_id": "C3_gross_total",
+        "item": null,
+        "status": "consistent"
+      },
+      {
+        "check_id": "C3_net_cost",
+        "item": null,
+        "status": "consistent"
+      },
+      {
+        "check_id": "C4_missing_details",
+        "item": null,
+        "status": "consistent"
+      }
+    ],
+    "question_ids": [
+      "subsidy_higher"
+    ]
+  }
+}

@@ -1,0 +1,338 @@
+{
+  "sample_id": "S3",
+  "description": "Incomplete quote: alternative brands, no panel wattage, extras outside the total, GST basis unclear, one subsidy figure with no central/state split.",
+  "pdf": "samples/S3.pdf",
+  "pages": {
+    "1": [
+      "Example Solar Pvt Ltd",
+      "Plot 0, Example Industrial Area, Sample City 000000 | Phone +91 00000 00000",
+      "Quotation No. EXS-S3 | Date 03/10/2026",
+      "To: Sample Household, Sample City",
+      "Rooftop solar system: 3 kW",
+      "Solar modules: Example PV / Sample Energy or equivalent",
+      "No. of modules: 6",
+      "Inverter: Example Inverters / Sample Power, 3 kW"
+    ],
+    "2": [
+      "Price breakup",
+      "Base price Rs. 1,85,000",
+      "GST as applicable",
+      "Elevated structure Rs. 12,000 (extra, not in Total)",
+      "Civil work at actuals (extra)",
+      "Discount Rs. 0",
+      "Total Rs. 1,85,000",
+      "Subsidy Rs. 78,000",
+      "Effective cost after subsidy Rs. 1,07,000"
+    ]
+  },
+  "quote": {
+    "_contract": "Synthetic sample. Every value is made up.",
+    "contract_version": "v1",
+    "processing_complete": true,
+    "pages_processed": [
+      1,
+      2
+    ],
+    "options": [],
+    "module_groups": [
+      {
+        "group_id": "G1",
+        "option_id": null,
+        "count": {
+          "value": 6,
+          "evidence_text": "No. of modules: 6",
+          "page": 1,
+          "batch": 1
+        },
+        "wattage": null,
+        "make_model": {
+          "value": "Example PV",
+          "evidence_text": "Solar modules: Example PV / Sample Energy or equivalent",
+          "page": 1,
+          "batch": 1
+        },
+        "make_model_alternatives": [
+          {
+            "value": "Sample Energy",
+            "evidence_text": "Solar modules: Example PV / Sample Energy or equivalent",
+            "page": 1,
+            "batch": 1
+          },
+          {
+            "value": "equivalent",
+            "evidence_text": "Solar modules: Example PV / Sample Energy or equivalent",
+            "page": 1,
+            "batch": 1
+          }
+        ]
+      }
+    ],
+    "inverters": [
+      {
+        "inverter_id": "I1",
+        "option_id": null,
+        "make_model": {
+          "value": "Example Inverters",
+          "evidence_text": "Inverter: Example Inverters / Sample Power, 3 kW",
+          "page": 1,
+          "batch": 1
+        },
+        "rating": {
+          "value": {
+            "raw": "3 kW",
+            "parsed": "3",
+            "unit": "kW",
+            "parse_status": "ok"
+          },
+          "evidence_text": "Inverter: Example Inverters / Sample Power, 3 kW",
+          "page": 1,
+          "batch": 1
+        },
+        "make_model_alternatives": [
+          {
+            "value": "Sample Power",
+            "evidence_text": "Inverter: Example Inverters / Sample Power, 3 kW",
+            "page": 1,
+            "batch": 1
+          }
+        ]
+      }
+    ],
+    "stated_capacity": {
+      "value": {
+        "raw": "3 kW",
+        "parsed": "3",
+        "unit": "kW",
+        "parse_status": "ok"
+      },
+      "evidence_text": "Rooftop solar system: 3 kW",
+      "page": 1,
+      "batch": 1
+    },
+    "dcr_declaration": null,
+    "vendor_registration": null,
+    "base_price": {
+      "value": {
+        "raw": "Rs. 1,85,000",
+        "parsed": "185000",
+        "parse_status": "ok"
+      },
+      "evidence_text": "Base price Rs. 1,85,000",
+      "page": 2,
+      "batch": 1
+    },
+    "gst_amount": null,
+    "extra_charges": [
+      {
+        "charge_id": "E1",
+        "option_id": null,
+        "label": {
+          "value": "Elevated structure",
+          "evidence_text": "Elevated structure Rs. 12,000 (extra, not in Total)",
+          "page": 2,
+          "batch": 1
+        },
+        "amount": {
+          "value": {
+            "raw": "Rs. 12,000",
+            "parsed": "12000",
+            "parse_status": "ok"
+          },
+          "evidence_text": "Elevated structure Rs. 12,000 (extra, not in Total)",
+          "page": 2,
+          "batch": 1
+        },
+        "included_in_total": {
+          "value": "no",
+          "evidence_text": "Elevated structure Rs. 12,000 (extra, not in Total)",
+          "page": 2,
+          "batch": 1
+        },
+        "total_label": "Total"
+      },
+      {
+        "charge_id": "E2",
+        "option_id": null,
+        "label": {
+          "value": "Civil work",
+          "evidence_text": "Civil work at actuals (extra)",
+          "page": 2,
+          "batch": 1
+        },
+        "amount": {
+          "value": {
+            "raw": "at actuals",
+            "parsed": null,
+            "parse_status": "unparseable"
+          },
+          "evidence_text": "Civil work at actuals (extra)",
+          "page": 2,
+          "batch": 1
+        },
+        "included_in_total": {
+          "value": "no",
+          "evidence_text": "Civil work at actuals (extra)",
+          "page": 2,
+          "batch": 1
+        },
+        "total_label": "Total"
+      }
+    ],
+    "discount": {
+      "value": {
+        "raw": "Rs. 0",
+        "parsed": "0",
+        "parse_status": "ok"
+      },
+      "evidence_text": "Discount Rs. 0",
+      "page": 2,
+      "batch": 1
+    },
+    "gross_total": {
+      "value": {
+        "raw": "Rs. 1,85,000",
+        "parsed": "185000",
+        "parse_status": "ok"
+      },
+      "evidence_text": "Total Rs. 1,85,000",
+      "page": 2,
+      "batch": 1
+    },
+    "subsidy_central": null,
+    "subsidy_state": null,
+    "subsidy_combined": null,
+    "subsidy_unspecified": {
+      "value": {
+        "raw": "Rs. 78,000",
+        "parsed": "78000",
+        "parse_status": "ok"
+      },
+      "evidence_text": "Subsidy Rs. 78,000",
+      "page": 2,
+      "batch": 1
+    },
+    "net_cost": {
+      "value": {
+        "raw": "Rs. 1,07,000",
+        "parsed": "107000",
+        "parse_status": "ok"
+      },
+      "evidence_text": "Effective cost after subsidy Rs. 1,07,000",
+      "page": 2,
+      "batch": 1
+    },
+    "flags": {
+      "model_proposed": {
+        "multiple_options": {
+          "value": false,
+          "evidence_text": null,
+          "page": null,
+          "batch": 1
+        },
+        "capacity_basis": {
+          "value": "unspecified",
+          "evidence_text": "Rooftop solar system: 3 kW",
+          "page": 1,
+          "batch": 1
+        },
+        "gst_treatment": {
+          "value": "unclear",
+          "evidence_text": "GST as applicable",
+          "page": 2,
+          "batch": 1
+        },
+        "extra_charges_complete": null,
+        "net_cost_subsidy_basis": {
+          "value": "unspecified",
+          "evidence_text": "Effective cost after subsidy Rs. 1,07,000",
+          "page": 2,
+          "batch": 1
+        },
+        "consumer_type": null
+      },
+      "user_confirmed": {}
+    }
+  },
+  "user_inputs": {
+    "confirmations": {
+      "state": "Telangana",
+      "consumer_type": "individual_household",
+      "portal_application_on_or_after_cutoff": true
+    }
+  },
+  "expected": {
+    "findings": [
+      {
+        "check_id": "C1_capacity",
+        "item": null,
+        "status": "missing"
+      },
+      {
+        "check_id": "C2_central_subsidy",
+        "item": null,
+        "status": "needs_confirmation"
+      },
+      {
+        "check_id": "C3_gross_total",
+        "item": null,
+        "status": "needs_confirmation"
+      },
+      {
+        "check_id": "C3_net_cost",
+        "item": null,
+        "status": "needs_confirmation"
+      },
+      {
+        "check_id": "C4_missing_details",
+        "item": "panel_wattage",
+        "status": "missing"
+      },
+      {
+        "check_id": "C4_missing_details",
+        "item": "module_make_model",
+        "status": "needs_confirmation"
+      },
+      {
+        "check_id": "C4_missing_details",
+        "item": "dcr_declaration",
+        "status": "missing"
+      },
+      {
+        "check_id": "C4_missing_details",
+        "item": "inverter_make_model",
+        "status": "needs_confirmation"
+      },
+      {
+        "check_id": "C4_missing_details",
+        "item": "vendor_registration",
+        "status": "missing"
+      },
+      {
+        "check_id": "C4_missing_details",
+        "item": "gst_basis",
+        "status": "needs_confirmation"
+      },
+      {
+        "check_id": "C4_missing_details",
+        "item": "extras_outside_total",
+        "status": "needs_confirmation"
+      },
+      {
+        "check_id": "C4_missing_details",
+        "item": "net_meter",
+        "status": "needs_confirmation"
+      }
+    ],
+    "question_ids": [
+      "subsidy_breakdown",
+      "panel_wattage",
+      "module_choice",
+      "dcr",
+      "inverter_choice",
+      "vendor_registration",
+      "gst_basis",
+      "extras_outside_total",
+      "net_meter"
+    ]
+  }
+}
