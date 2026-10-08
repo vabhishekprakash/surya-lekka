@@ -1,0 +1,19 @@
+# local agent config and memory
+.claude/
+CLAUDE.md
+
+# never commit quote documents or data
+*.pdf
+data/
+eval/labels*
+eval/results*
+
+# secrets and build output
+.env
+.env.*
+.aws-sam/
+samconfig.toml
+__pycache__/
+*.pyc
+.venv/
+node_modules/
