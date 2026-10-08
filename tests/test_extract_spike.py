@@ -197,6 +197,7 @@ def test_dry_run_end_to_end(sample_dir, capsys):
     assert spike.main(args(sample_dir, "--dry-run")) == 0
     out = capsys.readouterr().out
     assert "Dry run" in out and "correct" in out and "abstained" in out
+    assert "S1: 2 pages in the file, 2 rendered, 0 skipped" in out
     for text in ("1,80,000", "EX-VR-0001", "Example PV", "Net meter"):
         assert text not in out  # never prints document text
     (run_dir,) = (sample_dir / "out").iterdir()

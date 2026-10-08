@@ -233,15 +233,18 @@ def run(args):
     run_dir = out_root / datetime.now().strftime("%Y%m%d-%H%M%S")
     rendered = {}
     for d in docs:
-        pages, skipped = render_document(paths[d], dpi=args.dpi, max_pages=args.max_pages)
-        rendered[d] = (pages, skipped)
+        result = render_document(paths[d], dpi=args.dpi, max_pages=args.max_pages)
+        pages, skipped = result.pages, result.skipped
+        rendered[d] = result
         largest = max((len(p.jpeg) for p in pages), default=0)
-        print(f"{d}: {len(pages)} pages rendered, {len(skipped)} skipped, largest image {largest // 1024} KB")
+        print(f"{d}: {result.page_count} pages in the file, {len(pages)} rendered, {len(skipped)} skipped, "
+              f"largest image {largest // 1024} KB")
     _write(run_dir / "run.json", {"files": docs, "models": models, "region": args.region,
                                   "dry_run": args.dry_run, "dpi": args.dpi, "max_pages": args.max_pages,
                                   "retries": args.retries, "request_limit": args.request_limit,
-                                  "pages": {d: [p.page for p in rendered[d][0]] for d in docs},
-                                  "skipped": {d: rendered[d][1] for d in docs}})
+                                  "page_count": {d: rendered[d].page_count for d in docs},
+                                  "pages": {d: [p.page for p in rendered[d].pages] for d in docs},
+                                  "skipped": {d: rendered[d].skipped for d in docs}})
 
     results = {}
     try:
@@ -249,7 +252,7 @@ def run(args):
             client = DryRunClient(args.region) if args.dry_run else make_client(args.region, args.retries)
             results[model] = {}
             for d in docs:
-                pages, skipped = rendered[d]
+                pages, skipped = rendered[d].pages, rendered[d].skipped
                 r = run_document(client, model, d, pages, skipped, run_dir / _slug(model) / d, args.request_limit)
                 results[model][d] = r
                 print(f"{model} {d}: {r['batches']} batches, {len(r['failed'])} failed, {r['seconds']} s, "

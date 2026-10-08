@@ -5,10 +5,11 @@ are the original 1-based page numbers, so evidence can point back to them.
 """
 
 from dataclasses import dataclass
+from typing import NamedTuple
 
 MAX_IMAGE_BYTES = 3_750_000
 MAX_SIDE_PX = 8000
-MAX_PAGES = 8
+MAX_PAGES = 20  # product limit per document; pages past it leave processing incomplete
 DEFAULT_DPI = 150
 QUALITIES = (85, 75, 65, 55)
 MIN_DPI = 72
@@ -22,6 +23,12 @@ class PageImage:
     height: int
     dpi: int
     quality: int
+
+
+class Rendered(NamedTuple):
+    pages: list
+    skipped: list  # original page numbers not rendered
+    page_count: int  # pages in the file
 
 
 def _render_page(page, dpi, max_bytes, max_side):
@@ -46,13 +53,14 @@ def _render_page(page, dpi, max_bytes, max_side):
 
 def render_document(path, dpi=DEFAULT_DPI, max_pages=MAX_PAGES, max_bytes=MAX_IMAGE_BYTES,
                     max_side=MAX_SIDE_PX):
-    """(pages, skipped_page_numbers). A page is skipped when it is past max_pages or
-    cannot be brought under max_bytes even at low resolution."""
+    """Rendered(pages, skipped, page_count). A page is skipped when it is past max_pages
+    or cannot be brought under max_bytes even at low resolution."""
     import pymupdf
 
     pages, skipped = [], []
     with pymupdf.open(path) as doc:
-        for index in range(doc.page_count):
+        page_count = doc.page_count
+        for index in range(page_count):
             if index >= max_pages:
                 skipped.append(index + 1)
                 continue
@@ -61,4 +69,4 @@ def render_document(path, dpi=DEFAULT_DPI, max_pages=MAX_PAGES, max_bytes=MAX_IM
                 skipped.append(index + 1)
             else:
                 pages.append(image)
-    return pages, skipped
+    return Rendered(pages, skipped, page_count)
