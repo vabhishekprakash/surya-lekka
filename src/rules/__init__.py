@@ -16,7 +16,7 @@ def pending_facts(rules):
     for s in rules.get("sources", []):
         if s.get("verification") != "verified":
             out.append(s["source_id"])
-    for key in ("effective_from", "special_category"):
+    for key in ("effective_from", "special_category", "general_category"):
         fact = rules.get(key) or {}
         if fact.get("verification") != "verified":
             out.append(fact.get("fact_id", key))

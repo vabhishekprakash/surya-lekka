@@ -183,7 +183,7 @@ def test_run_checks(quote_v1):
     assert ids == ["C1_capacity", "C2_central_subsidy", "C3_gross_total", "C3_net_cost", "C4_missing_details"]
 
 
-def test_cfa_rules_pending_verification():
+def test_cfa_rules_verified():
     path = Path(__file__).parent.parent / "src" / "rules" / "cfa_rules.json"
     rules = json.loads(path.read_text(encoding="utf-8"))
-    assert rules["verification"] == "pending"
+    assert rules["verification"] == "verified" and rules["verified_on"] == "2026-10-08"

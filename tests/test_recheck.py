@@ -64,10 +64,14 @@ def test_user_values_never_shown_as_quoted(quote_v1):
 def test_confirmations_answer_gates(quote_v1):
     quote_v1["flags"]["user_confirmed"] = {}
     r = run_checks(quote_v1)
-    assert "Which state" in r["findings"][1]["message"]
-    r = run_checks(quote_v1, {"confirmations": {
-        "state": "Telangana", "portal_application_on_or_after_cutoff": True}})
+    assert "individual household" in r["findings"][1]["message"]
+    answers = {"consumer_type": "individual_household", "state": "Telangana",
+               "portal_application_on_or_after_cutoff": True, "first_system": True,
+               "prior_central_subsidy": False}
+    r = run_checks(quote_v1, {"confirmations": answers})
     assert r["findings"][1]["status"] == "consistent"
+    r = run_checks(quote_v1, {"confirmations": {**answers, "give_it_up": True}})
+    assert r["findings"][1]["status"] == "out_of_scope"
 
 
 def test_deterministic_and_idempotent(quote_v1):

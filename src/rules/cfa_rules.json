@@ -1,28 +1,46 @@
 {
   "rule_set": "central_cfa_residential",
-  "schema_version": 1,
-  "verification": "pending",
-  "verification_note": "Every fact in this file is pending review against the listed sources. Findings that use it say so.",
+  "schema_version": 2,
+  "verification": "verified",
+  "verified_on": "2026-10-08",
+  "verification_note": "Every fact below was checked against the listed sources on the date shown. Section references are to the 7 June 2024 guidelines.",
   "sources": [
     {
       "source_id": "MNRE-CFA-OG-2024",
-      "title": "MNRE CFA operational guidelines for residential rooftop solar, PM Surya Ghar: Muft Bijli Yojana (June/July 2024)",
+      "title": "Operational Guidelines for Implementation of PM Surya Ghar: Muft Bijli Yojana for the component 'CFA to Residential Consumers'",
+      "date": "2024-06-07",
       "url": "https://cdnbbsr.s3waas.gov.in/s3716e1b8c6cd17b771da77391355749f3/uploads/2024/07/202407021768035484.pdf",
-      "verification": "pending"
+      "verification": "verified",
+      "verified_on": "2026-10-08"
     },
     {
       "source_id": "MNRE-CFA-AMEND-2025-07-07",
-      "title": "MNRE amendment to the CFA operational guidelines (7 July 2025)",
+      "title": "Amendment in Guidelines for Implementation of PM-Surya Ghar: Muft Bijli Yojana for the component of 'CFA to residential consumers'",
+      "date": "2025-07-07",
       "url": "https://cdnbbsr.s3waas.gov.in/s3716e1b8c6cd17b771da77391355749f3/uploads/2025/07/202507081690964295.pdf",
-      "verification": "pending"
+      "note": "Does not change the rates, caps or effective date. Its Phase-II transitional provisions are noted but not modelled.",
+      "verification": "verified",
+      "verified_on": "2026-10-08"
+    },
+    {
+      "source_id": "PIB-2042617",
+      "title": "PIB release ID 2042617, Lok Sabha written reply, Annexure II CFA table",
+      "date": "2024-08-07",
+      "url": "https://www.pib.gov.in/PressReleasePage.aspx?PRID=2042617",
+      "role": "corroborating",
+      "verification": "verified",
+      "verified_on": "2026-10-08"
     }
   ],
   "effective_from": {
     "fact_id": "CFA-EFFECTIVE-FROM",
     "value": "2024-02-13",
-    "applies_to": "date of the subsidy application on the national portal, not the quote date",
+    "applies_to": "application received on the National Portal",
+    "not_applies_to": ["quotation date", "disbursement claim date"],
     "source_ids": ["MNRE-CFA-OG-2024"],
-    "verification": "pending"
+    "sections": ["2(c)"],
+    "verification": "verified",
+    "verified_on": "2026-10-08"
   },
   "rules": [
     {
@@ -30,6 +48,7 @@
       "description": "Central financial assistance for an individual residential household in a general-category state or UT.",
       "category": "general",
       "capacity_basis": "dc_module_kwp",
+      "capacity_basis_note": "Prorated by the rated DC capacity of the solar modules, regardless of the inverter rating.",
       "fractions": "prorated",
       "slabs": [
         {"from_kwp": "0", "to_kwp": "2", "inr_per_kwp": "30000"},
@@ -37,14 +56,17 @@
       ],
       "cap_inr": "78000",
       "effective_from": "2024-02-13",
-      "source_ids": ["MNRE-CFA-OG-2024", "MNRE-CFA-AMEND-2025-07-07"],
-      "verification": "pending"
+      "source_ids": ["MNRE-CFA-OG-2024", "PIB-2042617"],
+      "sections": ["5(h)", "5(k)"],
+      "verification": "verified",
+      "verified_on": "2026-10-08"
     },
     {
       "rule_id": "CFA-RES-SPECIAL",
       "description": "Central financial assistance for an individual residential household in a special-category state or UT.",
       "category": "special",
       "capacity_basis": "dc_module_kwp",
+      "capacity_basis_note": "Prorated by the rated DC capacity of the solar modules, regardless of the inverter rating.",
       "fractions": "prorated",
       "slabs": [
         {"from_kwp": "0", "to_kwp": "2", "inr_per_kwp": "33000"},
@@ -52,14 +74,19 @@
       ],
       "cap_inr": "85800",
       "effective_from": "2024-02-13",
-      "source_ids": ["MNRE-CFA-OG-2024", "MNRE-CFA-AMEND-2025-07-07"],
-      "verification": "pending"
+      "source_ids": ["MNRE-CFA-OG-2024", "PIB-2042617"],
+      "sections": ["5(h)", "5(k)"],
+      "verification": "verified",
+      "verified_on": "2026-10-08"
     },
     {
       "rule_id": "CFA-DCR-REQUIRED",
-      "description": "Central financial assistance requires DCR (domestic content) solar modules and cells. Never inferred from a quote.",
-      "source_ids": ["MNRE-CFA-OG-2024", "MNRE-CFA-AMEND-2025-07-07"],
-      "verification": "pending"
+      "description": "CFA requires domestically manufactured modules made from domestically manufactured cells. Any non-DCR modules make the installation ineligible for CFA. Never inferred from a quote.",
+      "source_text": "domestically manufactured modules made from domestically manufactured cells",
+      "source_ids": ["MNRE-CFA-OG-2024"],
+      "sections": ["5(m)"],
+      "verification": "verified",
+      "verified_on": "2026-10-08"
     }
   ],
   "special_category": {
@@ -71,17 +98,47 @@
     "union_territories": [
       "Jammu and Kashmir", "Ladakh", "Andaman and Nicobar Islands", "Lakshadweep"
     ],
-    "aliases": {
-      "j and k": "Jammu and Kashmir",
-      "andaman and nicobar": "Andaman and Nicobar Islands",
-      "a and n islands": "Andaman and Nicobar Islands",
-      "uttaranchal": "Uttarakhand"
-    },
     "source_ids": ["MNRE-CFA-OG-2024"],
-    "verification": "pending"
+    "sections": ["5(g)"],
+    "verification": "verified",
+    "verified_on": "2026-10-08"
+  },
+  "general_category": {
+    "fact_id": "CFA-GENERAL-CATEGORY-LIST",
+    "basis": "Every state and UT not on the 5(g) special-category list.",
+    "states": [
+      "Andhra Pradesh", "Bihar", "Chhattisgarh", "Goa", "Gujarat", "Haryana", "Jharkhand", "Karnataka",
+      "Kerala", "Madhya Pradesh", "Maharashtra", "Odisha", "Punjab", "Rajasthan", "Tamil Nadu", "Telangana",
+      "Uttar Pradesh", "West Bengal"
+    ],
+    "union_territories": [
+      "Chandigarh", "Dadra and Nagar Haveli and Daman and Diu", "Delhi", "Puducherry"
+    ],
+    "source_ids": ["MNRE-CFA-OG-2024"],
+    "sections": ["5(g)"],
+    "verification": "verified",
+    "verified_on": "2026-10-08"
+  },
+  "state_aliases": {
+    "j and k": "Jammu and Kashmir",
+    "andaman and nicobar": "Andaman and Nicobar Islands",
+    "a and n islands": "Andaman and Nicobar Islands",
+    "uttaranchal": "Uttarakhand",
+    "orissa": "Odisha",
+    "pondicherry": "Puducherry",
+    "nct of delhi": "Delhi",
+    "national capital territory of delhi": "Delhi",
+    "dadra and nagar haveli": "Dadra and Nagar Haveli and Daman and Diu",
+    "daman and diu": "Dadra and Nagar Haveli and Daman and Diu"
+  },
+  "comparison_tolerance": {
+    "inr": "1",
+    "basis": "product_policy",
+    "note": "Allowance for rounding chosen by this product. It is not an official allowance in the guidelines."
   },
   "not_covered": [
     "State top-up subsidies are not checked.",
-    "Applications made before the effective date follow earlier rules, which are not covered."
+    "Applications received on the National Portal before the effective date follow earlier rules, which are not covered.",
+    "Phase-II transitional provisions in the 7 July 2025 amendment are not modelled."
   ]
 }
