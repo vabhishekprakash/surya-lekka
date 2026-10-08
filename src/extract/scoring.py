@@ -11,7 +11,7 @@ Answer key format (plain text, written by hand):
     panel_count: 6 + 4 | 1
 
 A block starts with a line holding only the document id, written as [Q12],
-## Q12, Q12: or Q12 (the id must contain a letter and a digit). Each key line is
+## Q12, Q12: or Q12 (the id is letters then digits, such as Q12 or S1). Each key line is
 "key: value | page"; the page is optional. "not stated" (or null, none, -,
 n/a, not found, or an empty value) means the correct answer is null. For
 several panel or inverter lines, separate the values with + or ;. Lines
@@ -106,7 +106,7 @@ NOT_SAID = {"capacity_basis": {"unspecified", "unclear"}, "gst_treatment": {"unc
             "net_cost_subsidy_basis": {"unspecified"}, "subsidy_type": {"unspecified"}}
 PREDICTED_ENUM = {"capacity_basis": {"unspecified": "unclear"}}
 
-_ID = r"(?=[A-Za-z0-9_.-]*\d)(?=[A-Za-z0-9_.-]*[A-Za-z])[A-Za-z0-9_.-]+"
+_ID = r"[A-Za-z]{1,4}\d{1,4}"
 _HEADER = re.compile(
     rf"^(?:\[\s*(?P<a>{_ID})\s*\]|#{{1,6}}\s*(?P<b>{_ID})|=+\s*(?P<c>{_ID})\s*=+|-{{2,}}\s*(?P<d>{_ID})\s*-{{2,}}"
     rf"|doc(?:ument)?[\s_]*(?:id)?\s*[:=#-]?\s*(?P<e>{_ID})|(?P<f>{_ID})\s*:?)$", re.I)

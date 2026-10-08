@@ -207,6 +207,15 @@ def parse_args(argv):
     return args
 
 
+_NAME_SHAPE = re.compile(r"[A-Za-z][A-Za-z _-]{0,40}")
+
+
+def _safe_name(name):
+    """A key name as written, or a placeholder when it does not look like a field name
+    (so a stray value line is never printed)."""
+    return name if _NAME_SHAPE.fullmatch(name) else "(a line that is not a field name)"
+
+
 def describe_key(key, docs=None):
     """Field names per document, never values."""
     lines = [f"Answer key: {len(key['docs'])} document blocks"]
@@ -217,7 +226,7 @@ def describe_key(key, docs=None):
         if key["kept"].get(d):
             lines.append(f"  {d}: kept, not scored: {', '.join(key['kept'][d])}")
         if key["unknown"].get(d):
-            lines.append(f"  {d}: not recognised, not scored: {', '.join(key['unknown'][d])}")
+            lines.append(f"  {d}: not recognised, not scored: {', '.join(map(_safe_name, key['unknown'][d]))}")
         if key["duplicates"].get(d):
             lines.append(f"  {d}: given twice, last one used: {', '.join(key['duplicates'][d])}")
     if key["orphan_lines"]:

@@ -90,9 +90,9 @@ def test_header_styles_and_comments():
     key = scoring.parse_answer_key(text)
     assert {d: list(v) for d, v in key["docs"].items()} == {
         "Q12": ["gross_total"], "Q16": ["gross_total"], "Q20": ["gst_treatment"]}
-    key = scoring.parse_answer_key("[Q12]\ntotal_price: 1\ntotal_price: 2\n550\n")
+    key = scoring.parse_answer_key("[Q12]\ntotal_price: 1\ntotal_price: 2\n550\nEXM-550\n3.3kWp\n")
     assert key["duplicates"] == {"Q12": ["gross_total"]} and key["docs"]["Q12"]["gross_total"]["value"] == "2"
-    assert set(key["docs"]) == {"Q12"}  # a bare number is not a document header
+    assert set(key["docs"]) == {"Q12"}  # stray values are never document headers
 
 
 # --- scoring ---------------------------------------------------------------------------
@@ -285,11 +285,14 @@ def args(tmp, *extra):
 
 
 def test_check_key_prints_names_only(sample_dir, capsys):
+    with open(sample_dir / "key.txt", "a", encoding="utf-8") as f:
+        f.write("Rs. 1,97,000 incl. GST: 5\n")
     assert spike.main(["--check-key", "--answer-key", str(sample_dir / "key.txt")]) == 0
     out = capsys.readouterr().out
     assert "capacity_stated -> stated_capacity" in out and "options -> multiple_options" in out
     assert "kept, not scored: pages_total, contradictions" in out
     assert "not recognised, not scored: Total system cost incl everything" in out
+    assert "(a line that is not a field name)" in out
     for value in ("01/10/2026", "1,97,000", "Example PV", "78,000", "550"):
         assert value not in out
 
