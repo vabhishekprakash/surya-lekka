@@ -25,3 +25,6 @@ __pycache__/
 *.pyc
 .venv/
 node_modules/
+
+# local build output (sample page images)
+.build/
