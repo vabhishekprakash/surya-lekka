@@ -7,7 +7,7 @@ import pytest
 from extract import scoring
 from extract.dryrun import load_dry_run_wire
 from extract.merge import merge_batches
-from extract.wire_schema import to_contract, validate
+from extract.wire_schema import normalise_batch, validate
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -34,7 +34,7 @@ panel_wattage: 550 Wp + 545 Wp
 def sample_quote():
     cleaned, errors, _ = validate(load_dry_run_wire(), [1, 2])
     assert errors == []
-    return merge_batches([{"batch": 1, "pages": [1, 2], "contract": to_contract(cleaned, 1)}])
+    return merge_batches([{"batch": 1, "pages": [1, 2], "contract": normalise_batch(cleaned, 1)}])
 
 
 # --- answer key ------------------------------------------------------------------------

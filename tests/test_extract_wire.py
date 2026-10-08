@@ -4,9 +4,11 @@ import re
 from pathlib import Path
 
 import pytest
+from conftest import batch_fact, wire_fact
 
 from extract.dryrun import load_dry_run_wire
-from extract.wire_schema import AMOUNT_FIELDS, TOOL_SCHEMA, count_value, to_contract, validate
+from extract.merge import merge_batches
+from extract.wire_schema import AMOUNT_FIELDS, TOOL_SCHEMA, count_value, normalise_batch, validate
 
 ROOT = Path(__file__).resolve().parent.parent
 S1 = json.loads((ROOT / "samples" / "expected" / "S1.json").read_text(encoding="utf-8"))["quote"]
@@ -38,7 +40,11 @@ def wire():
 def contract(data, pages=(1, 2), batch=1):
     cleaned, errors, _ = validate(data, list(pages))
     assert errors == []
-    return to_contract(cleaned, batch)
+    return normalise_batch(cleaned, batch)
+
+
+def without_candidates(field):
+    return None if field is None else {k: v for k, v in field.items() if k != "candidates"}
 
 
 def test_root_has_only_type_properties_required():
@@ -54,8 +60,8 @@ def test_schema_is_shallow_and_has_no_customer_fields():
 
 
 def test_amounts_are_verbatim_strings():
-    for name in AMOUNT_FIELDS:
-        assert TOOL_SCHEMA["properties"][name]["properties"]["value"]["type"] == "string"
+    for name in ("prices", "subsidies", "capacities"):
+        assert TOOL_SCHEMA["properties"][name]["items"]["properties"]["raw"]["type"] == "string"
 
 
 def test_dry_run_wire_is_valid():
@@ -65,9 +71,11 @@ def test_dry_run_wire_is_valid():
 
 def test_normaliser_gives_the_sample_contract():
     c = contract(wire())
+    quote = merge_batches([{"batch": 1, "pages": [1, 2], "contract": c}])
+    assert quote["option_fields"] == {}
     for name in ("stated_capacity", "dcr_declaration", "vendor_registration", *AMOUNT_FIELDS):
         expected = S1[name]
-        assert c[name] == (None if expected is None else {**expected, "batch": 1}), name
+        assert without_candidates(quote[name]) == (None if expected is None else {**expected, "batch": 1}), name
     for list_name, keys in (("module_groups", ("count", "wattage", "make_model")),
                             ("inverters", ("make_model", "rating")),
                             ("extra_charges", ("label", "amount", "included_in_total"))):
@@ -102,23 +110,23 @@ def test_count_values(raw, value):
 
 def test_amounts_kept_verbatim():
     data = wire()
-    data["base_price"]["value"] = "Rs. 1,80,000/-"
-    data["discount"]["value"] = "approx 1,520"
+    wire_fact(data, "base_price")["raw"] = "Rs. 1,80,000/-"
+    wire_fact(data, "discount")["raw"] = "approx 1,520"
     c = contract(data)
-    assert c["base_price"]["value"] == {"raw": "Rs. 1,80,000/-", "parsed": "180000", "parse_status": "ok"}
-    assert c["discount"]["value"]["raw"] == "approx 1,520"
-    assert c["discount"]["value"]["parsed"] is None
+    assert batch_fact(c, "base_price")["value"] == {"raw": "Rs. 1,80,000/-", "parsed": "180000", "parse_status": "ok"}
+    assert batch_fact(c, "discount")["value"]["raw"] == "approx 1,520"
+    assert batch_fact(c, "discount")["value"]["parsed"] is None
 
 
-@pytest.mark.parametrize("absent", [None, {"value": "", "evidence": "", "page": 2},
-                                    {"value": None, "evidence": None, "page": None}])
+@pytest.mark.parametrize("absent", [None, "", "  "])
 def test_not_found_fields_become_null(absent):
     data = wire()
-    data["subsidy_central"] = absent
+    wire_fact(data, "subsidy_central")["raw"] = absent
+    data["vendor_registration"] = {"value": "", "evidence_text": "", "page": 2}
     data["give_it_up"] = {"value": "not_mentioned"}
     data["multiple_options"] = {"value": "not_stated"}
     c = contract(data)
-    assert c["subsidy_central"] is None
+    assert batch_fact(c, "subsidy_central") is None and c["vendor_registration"] is None
     assert c["flags"]["model_proposed"]["give_it_up"] is None
     assert c["flags"]["model_proposed"]["multiple_options"] is None
 
@@ -126,14 +134,17 @@ def test_not_found_fields_become_null(absent):
 def test_validation_errors_name_paths_not_values():
     secret = "Rs. 9,99,999 secret"
     cases = [
-        (lambda d: d["base_price"].update(value=999999), "input.base_price.value: expected a string"),
+        (lambda d: d["prices"][0].update(raw=999999), "input.prices[0].raw: expected a string"),
+        (lambda d: d["prices"][0].update(kind=secret), "input.prices[0].kind: not one of"),
         (lambda d: d["gst_treatment"].update(value=secret), "input.gst_treatment.value: not one of"),
-        (lambda d: d["net_cost"].update(page=7), "input.net_cost.page: page 7 is not in this batch"),
+        (lambda d: d["prices"][4].update(page=7), "input.prices[4].page: page 7 is not in this batch"),
         (lambda d: d.pop("module_groups"), "input.module_groups: required"),
+        (lambda d: d["module_groups"][0].pop("option_id"), "input.module_groups[0].option_id: required"),
         (lambda d: d["module_groups"][0].pop("page"), "input.module_groups[0].page: required"),
         (lambda d: d["inverters"][0].update(page="1"), "input.inverters[0].page: expected an integer"),
         (lambda d: d.update(extra_charges={"label": secret}), "input.extra_charges: expected an array"),
-        (lambda d: d.update(stated_capacity=secret), "input.stated_capacity: expected an object"),
+        (lambda d: d.update(capacities=secret), "input.capacities: expected an array"),
+        (lambda d: d.update(vendor_registration=secret), "input.vendor_registration: expected an object"),
     ]
     for change, message in cases:
         data = wire()
@@ -149,7 +160,7 @@ def test_unknown_keys_are_dropped():
     data["customer_name"] = "Synthetic Person"
     cleaned, errors, ignored = validate(data, [1, 2])
     assert errors == [] and ignored == ["customer_name"]
-    assert "customer_name" not in cleaned and "customer_name" not in to_contract(cleaned, 1)
+    assert "customer_name" not in cleaned and "customer_name" not in normalise_batch(cleaned, 1)
 
 
 def test_option_ids_normalised():
@@ -157,6 +168,7 @@ def test_option_ids_normalised():
     data["options"] = [{"option_id": " Option  A ", "label": "Option A: 3.3 kWp", "page": 1}]
     data["module_groups"][0]["option_id"] = "Option A"
     data["extra_charges"][0]["option_id"] = ""
+    data["inverters"][0]["option_id"] = "ALL"
     c = contract(data)
     assert c["options"][0]["option_id"] == "Option A" == c["module_groups"][0]["option_id"]
-    assert c["extra_charges"][0]["option_id"] is None
+    assert c["extra_charges"][0]["option_id"] is None and c["inverters"][0]["option_id"] is None

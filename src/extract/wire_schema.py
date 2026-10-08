@@ -1,9 +1,12 @@
 """The tool schema Nova fills in, its local validator, and the normaliser into
-quote contract v1 fields.
+quote contract v1 facts.
 
 The schema is shallow: the root has only type, properties and required, and
-every value is a verbatim string or an enum. Parsing happens here, in code,
-never in the model. There are no customer fields.
+nothing nests deeper than a list of flat objects. Every value is a verbatim
+string or an enum; parsing happens here, in code, never in the model. Prices,
+subsidies, stated capacities and every item carry an option_id ("All" when the
+quote has one option or the fact applies to every option). There are no
+customer fields.
 """
 
 import re
@@ -17,6 +20,11 @@ AMOUNT_FIELDS = (
     "base_price", "gst_amount", "discount", "gross_total",
     "subsidy_central", "subsidy_state", "subsidy_combined", "subsidy_unspecified", "net_cost",
 )
+PRICE_KINDS = ("base_price", "gst_amount", "discount", "gross_total", "net_cost")
+SUBSIDY_KINDS = {"central": "subsidy_central", "state": "subsidy_state", "combined": "subsidy_combined",
+                 "unspecified": "subsidy_unspecified"}
+FACT_FIELDS = (*AMOUNT_FIELDS, "stated_capacity")
+ALL_OPTIONS = "all"
 # Wire enum value -> contract value. None means "not stated".
 FLAG_VALUES = {
     "multiple_options": {"yes": True, "no": False, "not_stated": None},
@@ -37,25 +45,35 @@ def _text(description):
 
 _PAGE = {"type": "integer", "description": "The page number written before the page image."}
 _EVIDENCE = _text("The exact text on the page that shows this value.")
+_OPTION_ID = _text("The option this belongs to, as printed (such as 'Option A'), or 'All' when the quote has "
+                   "one option or this applies to every option.")
+_ALTERNATIVES = {"type": "array", "items": {"type": "string"},
+                 "description": "Other makes or models offered for the same item, exactly as printed."}
+_AMOUNT = "The amount exactly as printed, including Rs, commas and /-."
 
 
 def _field(description, value_description):
     return {"type": "object", "description": description,
-            "properties": {"value": _text(value_description), "evidence": _EVIDENCE, "page": _PAGE},
-            "required": ["value", "evidence", "page"]}
+            "properties": {"value": _text(value_description), "evidence_text": _EVIDENCE, "page": _PAGE},
+            "required": ["value", "evidence_text", "page"]}
 
 
 def _flag(description, values):
     return {"type": "object", "description": description,
-            "properties": {"value": {"type": "string", "enum": list(values)}, "evidence": _EVIDENCE,
+            "properties": {"value": {"type": "string", "enum": list(values)}, "evidence_text": _EVIDENCE,
                            "page": _PAGE},
             "required": ["value"]}
 
 
-_AMOUNT = "The amount exactly as printed, including Rs, commas and /-."
-_OPTION_ID = _text("The option label as printed, such as 'Option A'. Leave out when the quote has one option.")
-_ALTERNATIVES = {"type": "array", "items": {"type": "string"},
-                 "description": "Other makes or models offered for the same item, exactly as printed."}
+def _facts(description, kinds=None, raw=_AMOUNT):
+    properties = {"option_id": _OPTION_ID}
+    if kinds:
+        properties["kind"] = {"type": "string", "enum": list(kinds)}
+    properties.update({"raw": _text(raw), "evidence_text": _EVIDENCE, "page": _PAGE})
+    required = ["option_id", *(["kind"] if kinds else []), "raw", "page"]
+    return {"type": "array", "description": description,
+            "items": {"type": "object", "properties": properties, "required": required}}
+
 
 TOOL_SCHEMA = {
     "type": "object",
@@ -64,9 +82,16 @@ TOOL_SCHEMA = {
                                   "Option B with different prices)?", FLAG_VALUES["multiple_options"]),
         "options": {"type": "array", "description": "Each option the quote offers.", "items": {
             "type": "object",
-            "properties": {"option_id": _OPTION_ID, "label": _text("The option heading as printed."),
-                           "page": _PAGE},
+            "properties": {"option_id": _text("The option label as printed, such as 'Option A'."),
+                           "label": _text("The option heading as printed."), "page": _PAGE},
             "required": ["option_id", "page"]}},
+        "prices": _facts("Each price line: base_price (system price before GST and extra charges), "
+                         "gst_amount, discount, gross_total (what the customer pays before any subsidy) and "
+                         "net_cost (the cost after subsidy, if shown).", PRICE_KINDS),
+        "subsidies": _facts("Each subsidy amount: central (MNRE / PM Surya Ghar), state, combined (central "
+                            "and state as one figure) or unspecified (does not say which).", SUBSIDY_KINDS),
+        "capacities": _facts("The total system capacity the quote states.", None,
+                             "The capacity exactly as written, with its unit."),
         "module_groups": {"type": "array", "description": "Each line of solar panels (modules).", "items": {
             "type": "object",
             "properties": {
@@ -81,7 +106,7 @@ TOOL_SCHEMA = {
                 "make_model_alternatives": _ALTERNATIVES,
                 "page": _PAGE,
             },
-            "required": ["page"]}},
+            "required": ["option_id", "page"]}},
         "inverters": {"type": "array", "description": "Each inverter.", "items": {
             "type": "object",
             "properties": {
@@ -93,26 +118,7 @@ TOOL_SCHEMA = {
                 "make_model_alternatives": _ALTERNATIVES,
                 "page": _PAGE,
             },
-            "required": ["page"]}},
-        "stated_capacity": _field("The total system capacity the quote states.",
-                                  "The capacity exactly as written, with its unit."),
-        "capacity_basis": _flag("Does the quote say the stated capacity is the DC panel capacity (kWp, DC) "
-                                "or the AC/inverter capacity?", FLAG_VALUES["capacity_basis"]),
-        "dcr_declaration": _flag("What the quote says about DCR (domestic content) panels and cells.",
-                                 DCR_VALUES),
-        "vendor_registration": _field("The vendor's registration or empanelment number.",
-                                      "The number exactly as printed."),
-        "base_price": _field("The system price before GST and extra charges.", _AMOUNT),
-        "gst_amount": _field("The GST amount.", _AMOUNT),
-        "discount": _field("A discount, if one is shown.", _AMOUNT),
-        "gross_total": _field("The total the customer pays before any subsidy.", _AMOUNT),
-        "subsidy_central": _field("The central (MNRE / PM Surya Ghar) subsidy amount.", _AMOUNT),
-        "subsidy_state": _field("A state subsidy amount.", _AMOUNT),
-        "subsidy_combined": _field("A single subsidy figure described as central plus state together.",
-                                   _AMOUNT),
-        "subsidy_unspecified": _field("A subsidy figure that does not say whether it is central or state.",
-                                      _AMOUNT),
-        "net_cost": _field("The cost after subsidy, if the quote shows one.", _AMOUNT),
+            "required": ["option_id", "page"]}},
         "extra_charges": {"type": "array", "description": "Each charge listed apart from the base price and "
                           "GST, such as net meter, structure or installation charges.", "items": {
             "type": "object",
@@ -123,10 +129,16 @@ TOOL_SCHEMA = {
                 "included_in_total": {"type": "string", "enum": list(INCLUDED_VALUES),
                                       "description": "Does the quote say this charge is inside the total?"},
                 "total_label": _text("The name of the total it is or is not part of, as printed."),
-                "evidence": _EVIDENCE,
+                "evidence_text": _EVIDENCE,
                 "page": _PAGE,
             },
-            "required": ["label", "page"]}},
+            "required": ["option_id", "label", "page"]}},
+        "capacity_basis": _flag("Does the quote say the stated capacity is the DC panel capacity (kWp, DC) "
+                                "or the AC/inverter capacity?", FLAG_VALUES["capacity_basis"]),
+        "dcr_declaration": _flag("What the quote says about DCR (domestic content) panels and cells.",
+                                 DCR_VALUES),
+        "vendor_registration": _field("The vendor's registration or empanelment number.",
+                                      "The number exactly as printed."),
         "gst_treatment": _flag("Does the base price include GST?", FLAG_VALUES["gst_treatment"]),
         "extra_charges_complete": _flag("Does the quote state that there are no other charges?",
                                         FLAG_VALUES["extra_charges_complete"]),
@@ -134,12 +146,13 @@ TOOL_SCHEMA = {
                                         FLAG_VALUES["net_cost_subsidy_basis"]),
         "give_it_up": _flag("Does the quote mention the 'Give It Up' subsidy option?", FLAG_VALUES["give_it_up"]),
     },
-    "required": ["multiple_options", "module_groups", "inverters", "extra_charges"],
+    "required": ["multiple_options", "options", "prices", "subsidies", "capacities", "module_groups", "inverters",
+                 "extra_charges"],
 }
 
-SCALAR_FIELDS = ("stated_capacity", "vendor_registration", *AMOUNT_FIELDS)
+PLAIN_FIELDS = ("vendor_registration",)
 FLAG_FIELDS = tuple(FLAG_VALUES)
-ITEM_LISTS = ("options", "module_groups", "inverters", "extra_charges")
+FACT_LISTS = ("prices", "subsidies", "capacities")
 
 
 # --- local validation ------------------------------------------------------------------
@@ -149,15 +162,21 @@ def _blank(value):
 
 
 def _prune(data):
-    """Drop not-found entries: null fields, fields with a blank value, blank item strings."""
+    """Drop not-found entries: null fields, fields with a blank value, facts with a
+    blank raw value and blank item strings. A blank option_id is kept (it means All)."""
     out = {}
     for key, value in data.items():
         if isinstance(value, dict) and "value" in value:
             if not _blank(value.get("value")):
                 out[key] = value
         elif isinstance(value, list):
-            out[key] = [{k: v for k, v in item.items() if not _blank(v)} if isinstance(item, dict) else item
-                        for item in value]
+            items = []
+            for item in value:
+                if not isinstance(item, dict):
+                    items.append(item)
+                elif not (key in FACT_LISTS and _blank(item.get("raw"))):
+                    items.append({k: v for k, v in item.items() if k == "option_id" or not _blank(v)})
+            out[key] = items
         elif not _blank(value):
             out[key] = value
     return out
@@ -205,7 +224,7 @@ def validate(data, pages):
     return cleaned, errors, ignored
 
 
-# --- normaliser into contract v1 -----------------------------------------------------------
+# --- normaliser into contract v1 facts --------------------------------------------------------
 
 _COUNT = re.compile(r"\s*(\d{1,4})\s*(?:nos?\.?|numbers?|pcs\.?|pieces?|panels?|modules?|units?)?\s*", re.I)
 
@@ -226,8 +245,11 @@ def capacity_value(raw):
     return jsonable({"raw": raw, "parsed": r["parsed"], "unit": r["unit"], "parse_status": r["parse_status"]})
 
 
-def _option_id(raw):
-    return " ".join(raw.split()) if isinstance(raw, str) and raw.strip() else None
+def option_id(raw):
+    """The option label with whitespace tidied; None for All or blank."""
+    if not isinstance(raw, str) or not raw.strip() or raw.strip().casefold() == ALL_OPTIONS:
+        return None
+    return " ".join(raw.split())
 
 
 def _f(value, evidence, page, batch):
@@ -237,44 +259,46 @@ def _f(value, evidence, page, batch):
 def _item_field(item, key, convert, batch, evidence_key=None):
     if key not in item:
         return None
-    evidence = item.get(evidence_key or f"{key}_evidence")
-    return _f(convert(item[key]), evidence, item["page"], batch)
+    return _f(convert(item[key]), item.get(evidence_key or f"{key}_evidence"), item["page"], batch)
 
 
-def to_contract(data, batch):
-    """Contract v1 fields from one validated tool input. Ids are assigned at merge."""
-    out = {name: None for name in (*SCALAR_FIELDS, "dcr_declaration")}
-    for name in SCALAR_FIELDS:
+def _fact(name, item, batch):
+    convert = capacity_value if name == "stated_capacity" else amount_value
+    return {"option_id": option_id(item["option_id"]), "name": name,
+            "field": _f(convert(item["raw"]), item.get("evidence_text"), item["page"], batch)}
+
+
+def normalise_batch(data, batch):
+    """Contract v1 facts and items from one validated tool input. The merge step turns
+    these into a quote; ids are assigned there."""
+    out = {"facts": (
+        [_fact(p["kind"], p, batch) for p in data.get("prices") or []]
+        + [_fact(SUBSIDY_KINDS[s["kind"]], s, batch) for s in data.get("subsidies") or []]
+        + [_fact("stated_capacity", c, batch) for c in data.get("capacities") or []]
+    )}
+    for name in PLAIN_FIELDS:
         f = data.get(name)
-        if f is None:
-            continue
-        if name in AMOUNT_FIELDS:
-            value = amount_value(f["value"])
-        elif name == "stated_capacity":
-            value = capacity_value(f["value"])
-        else:
-            value = f["value"].strip()
-        out[name] = _f(value, f["evidence"], f["page"], batch)
+        out[name] = None if f is None else _f(f["value"].strip(), f["evidence_text"], f["page"], batch)
     dcr = data.get("dcr_declaration")
-    if dcr is not None:
-        out["dcr_declaration"] = _f(DCR_VALUES[dcr["value"]], dcr.get("evidence"), dcr.get("page"), batch)
+    out["dcr_declaration"] = (None if dcr is None
+                              else _f(DCR_VALUES[dcr["value"]], dcr.get("evidence_text"), dcr.get("page"), batch))
 
     proposed = {}
     for name in FLAG_FIELDS:
         f = data.get(name)
         value = FLAG_VALUES[name].get(f["value"]) if f is not None else None
-        proposed[name] = None if value is None else _f(value, f.get("evidence"), f.get("page"), batch)
+        proposed[name] = None if value is None else _f(value, f.get("evidence_text"), f.get("page"), batch)
     out["flags"] = {"model_proposed": proposed, "user_confirmed": {}}
 
     out["options"] = [
-        {"option_id": _option_id(o["option_id"]),
+        {"option_id": option_id(o["option_id"]),
          "label": _f(o["label"], o["label"], o["page"], batch) if "label" in o else None}
-        for o in data.get("options") or [] if _option_id(o.get("option_id"))
+        for o in data.get("options") or [] if option_id(o.get("option_id"))
     ]
     out["module_groups"] = [
         {
             "group_id": None,
-            "option_id": _option_id(g.get("option_id")),
+            "option_id": option_id(g.get("option_id")),
             "count": _item_field(g, "count", count_value, batch),
             "wattage": _item_field(g, "wattage", capacity_value, batch),
             "make_model": _item_field(g, "make_model", str.strip, batch),
@@ -286,7 +310,7 @@ def to_contract(data, batch):
     out["inverters"] = [
         {
             "inverter_id": None,
-            "option_id": _option_id(i.get("option_id")),
+            "option_id": option_id(i.get("option_id")),
             "make_model": _item_field(i, "make_model", str.strip, batch),
             "rating": _item_field(i, "rating", capacity_value, batch),
             "make_model_alternatives": [_f(a.strip(), a.strip(), i["page"], batch)
@@ -297,10 +321,10 @@ def to_contract(data, batch):
     out["extra_charges"] = [
         {
             "charge_id": None,
-            "option_id": _option_id(e.get("option_id")),
-            "label": _f(e["label"].strip(), e.get("evidence"), e["page"], batch),
-            "amount": _item_field(e, "amount", amount_value, batch, "evidence"),
-            "included_in_total": _item_field(e, "included_in_total", str, batch, "evidence"),
+            "option_id": option_id(e.get("option_id")),
+            "label": _f(e["label"].strip(), e.get("evidence_text"), e["page"], batch),
+            "amount": _item_field(e, "amount", amount_value, batch, "evidence_text"),
+            "included_in_total": _item_field(e, "included_in_total", str, batch, "evidence_text"),
             "total_label": e.get("total_label"),
         }
         for e in data.get("extra_charges") or []

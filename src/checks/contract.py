@@ -130,6 +130,20 @@ def _flag(name, proposed, confirmed):
     return plain(proposed.get(name))
 
 
+def effective_option(quote):
+    """The option whose own facts apply: the user's selection, else the only option
+    id on the quote, else None."""
+    selected = ((quote.get("flags") or {}).get("user_confirmed") or {}).get("selected_option")
+    if selected is not None:
+        return selected
+    ids = set(quote.get("option_fields") or {})
+    ids |= {o.get("option_id") for o in quote.get("options") or []}
+    for key in ("module_groups", "inverters", "extra_charges"):
+        ids |= {i.get("option_id") for i in quote.get(key) or []}
+    ids.discard(None)
+    return ids.pop() if len(ids) == 1 else None
+
+
 def normalise(quote):
     if quote.get("contract_version") != CONTRACT_VERSION:
         raise ValueError("expected a contract v1 quote")
@@ -141,11 +155,20 @@ def normalise(quote):
     def chosen(items):
         return [i for i in items or [] if selected is None or i.get("option_id") in (None, selected)]
 
+    # An option's own price, subsidy and capacity facts replace the quote-wide ones;
+    # another option's facts are never used.
+    option_fields = quote.get("option_fields") or {}
+    own = option_fields.get(effective_option(quote)) or {}
+
+    def pick(name):
+        return own[name] if name in own else quote.get(name)
+
     view = {
         "contract_version": CONTRACT_VERSION,
         "processing_complete": quote.get("processing_complete") is True,
         "pages_processed": list(quote.get("pages_processed") or []),
         "options": list(quote.get("options") or []),
+        "fact_options": sorted(option_fields),
         "selected_option": selected,
         "module_groups": [
             {
@@ -169,8 +192,8 @@ def normalise(quote):
             }
             for i in chosen(quote.get("inverters"))
         ],
-        "stated_capacity_kw": measure(quote.get("stated_capacity"), TO_KW),
-        "stated_capacity_unit": _unit(quote.get("stated_capacity")),
+        "stated_capacity_kw": measure(pick("stated_capacity"), TO_KW),
+        "stated_capacity_unit": _unit(pick("stated_capacity")),
         "dcr_declaration": plain(quote.get("dcr_declaration")),
         "vendor_registration": plain(quote.get("vendor_registration")),
         "extra_charges": [
@@ -191,7 +214,7 @@ def normalise(quote):
         "prior_central_subsidy": confirmed.get("prior_central_subsidy"),
         "user_confirmed": dict(confirmed),
     }
-    view.update({name: amount(quote.get(name)) for name in AMOUNT_FIELDS})
+    view.update({name: amount(pick(name)) for name in AMOUNT_FIELDS})
     view.update({name: _flag(name, proposed, confirmed) for name in FLAG_NAMES})
     stated = view["stated_capacity_kw"]
     if view["stated_capacity_unit"] == "kVA" and confirmed.get("capacity_basis") is None:

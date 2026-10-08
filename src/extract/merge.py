@@ -11,9 +11,8 @@ from decimal import Decimal, InvalidOperation
 
 from checks.contract import CONTRACT_VERSION
 
-from .wire_schema import AMOUNT_FIELDS, FLAG_FIELDS
+from .wire_schema import FACT_FIELDS, FLAG_FIELDS
 
-CAPACITY_FIELDS = ("stated_capacity",)
 PLAIN_FIELDS = ("vendor_registration", "dcr_declaration")
 # kW, kWp, W and Wp compare as one dimension; kVA only ever with kVA.
 DIMENSIONS = {"kw": ("kw", Decimal(1)), "kwp": ("kw", Decimal(1)), "w": ("kw", Decimal("0.001")),
@@ -196,9 +195,24 @@ def merge_batches(records, failures=(), skipped_pages=()):
             item[id_key] = f"{prefix}{n}"
         quote[list_name] = items
 
-    for name in (*CAPACITY_FIELDS, *PLAIN_FIELDS, *AMOUNT_FIELDS):
-        kind = "amount" if name in AMOUNT_FIELDS else "capacity" if name in CAPACITY_FIELDS else "plain"
-        quote[name] = m.field(name, kind, [c.get(name) for _, c in parts])
+    for name in PLAIN_FIELDS:
+        quote[name] = m.field(name, "plain", [c.get(name) for _, c in parts])
+
+    # Prices, subsidies and stated capacities: one fact per option. Facts for All
+    # are top-level fields; an option's own facts go under option_fields.
+    facts = {}
+    for _, c in parts:
+        for fact in c.get("facts") or []:
+            facts.setdefault((fact["option_id"], fact["name"]), []).append(fact["field"])
+    quote.update({name: None for name in FACT_FIELDS})
+    quote["option_fields"] = {}
+    for (oid, name), fields in facts.items():
+        kind = "capacity" if name == "stated_capacity" else "amount"
+        merged = m.field(name if oid is None else f"option_fields[{oid}].{name}", kind, fields)
+        if oid is None:
+            quote[name] = merged
+        else:
+            quote["option_fields"].setdefault(oid, {})[name] = merged
 
     proposed = {name: m.field(f"flags.{name}", "plain",
                               [(c.get("flags") or {}).get("model_proposed", {}).get(name) for _, c in parts])

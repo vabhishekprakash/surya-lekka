@@ -46,3 +46,18 @@ def capacity_field(raw, page=1, text=None):
     value = {"raw": raw, "parsed": _jsonable(v["parsed"]), "unit": v["unit"],
              "parse_status": v["parse_status"]}
     return field_v1(value, text or raw, page)
+
+
+def wire_fact(data, name):
+    """The price, subsidy or capacity fact called name in a tool input."""
+    if name == "stated_capacity":
+        return data["capacities"][0]
+    if name.startswith("subsidy_"):
+        return next(s for s in data["subsidies"] if s["kind"] == name[len("subsidy_"):])
+    return next(p for p in data["prices"] if p["kind"] == name)
+
+
+def batch_fact(part, name, option=None):
+    """The field for a fact in one normalised batch, or None."""
+    return next((f["field"] for f in part["facts"] if f["name"] == name and f["option_id"] == option), None)
+

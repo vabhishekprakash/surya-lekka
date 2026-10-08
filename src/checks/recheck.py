@@ -15,8 +15,9 @@ same result.
 import copy
 import re
 
-from .parse import parse_amount, parse_capacity
 from .common import jsonable
+from .contract import effective_option
+from .parse import parse_amount, parse_capacity
 
 USER_CORRECTED = "user_corrected"
 
@@ -50,11 +51,12 @@ def _parsed_value(kind, value):
 
 
 def _locate(quote, path):
-    """(container, key, kind) for a correction path; raises KeyError if unknown."""
-    if path in AMOUNT_PATHS:
-        return quote, path, "amount"
-    if path in CAPACITY_PATHS:
-        return quote, path, "capacity"
+    """(container, key, kind) for a correction path; raises KeyError if unknown.
+    A price, subsidy or capacity correction goes to the selected option's own fact
+    when it has one."""
+    if path in AMOUNT_PATHS or path in CAPACITY_PATHS:
+        own = (quote.get("option_fields") or {}).get(effective_option(quote)) or {}
+        return (own if path in own else quote), path, "amount" if path in AMOUNT_PATHS else "capacity"
     if path in PLAIN_PATHS:
         return quote, path, "plain"
     m = _ITEM_PATH.match(path)
@@ -85,6 +87,14 @@ def apply_user_inputs(quote, user_inputs=None):
     """Return (effective_quote, corrected_fields). corrected_fields is sorted by path."""
     q = copy.deepcopy(quote)
     user_inputs = user_inputs or {}
+    confirmations = user_inputs.get("confirmations") or {}
+    unknown = sorted(set(confirmations) - CONFIRMABLE)
+    if unknown:
+        raise KeyError(f"unknown confirmation: {', '.join(unknown)}")
+    if confirmations:  # first, so corrections reach the selected option's facts
+        flags = q.setdefault("flags", {})
+        flags.setdefault("model_proposed", {})
+        flags.setdefault("user_confirmed", {}).update(confirmations)
     corrected = []
     for path in sorted((user_inputs.get("corrections") or {})):
         container, key, kind = _locate(q, path)
@@ -96,12 +106,4 @@ def apply_user_inputs(quote, user_inputs=None):
             "original_value": None if original is None else original.get("value"),
             "corrected_value": value,
         })
-    confirmations = user_inputs.get("confirmations") or {}
-    unknown = sorted(set(confirmations) - CONFIRMABLE)
-    if unknown:
-        raise KeyError(f"unknown confirmation: {', '.join(unknown)}")
-    if confirmations:
-        flags = q.setdefault("flags", {})
-        flags.setdefault("model_proposed", {})
-        flags.setdefault("user_confirmed", {}).update(confirmations)
     return q, corrected

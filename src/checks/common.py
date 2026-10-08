@@ -149,6 +149,7 @@ def option_state(quote):
     if quote.get("selected_option") is not None:
         return "selected"
     ids = {o.get("option_id") for o in quote.get("options") or []}
+    ids |= set(quote.get("fact_options") or [])
     for key in ("module_groups", "inverters", "extra_charges"):
         ids |= {i.get("option_id") for i in quote.get(key) or []}
     ids.discard(None)

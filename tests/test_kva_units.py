@@ -2,7 +2,7 @@
 
 from decimal import Decimal
 
-from conftest import capacity_field, field_v1
+from conftest import capacity_field, wire_fact
 
 from checks import run_checks
 from checks.contract import normalise
@@ -43,8 +43,8 @@ def test_kva_inverter_rating_kept_in_kva(quote_v1):
 
 def test_kw_and_kva_from_two_batches_conflict():
     first, second = load_dry_run_wire(), on_page(load_dry_run_wire(), 3)
-    first["stated_capacity"]["value"] = "3.3 kW"
-    second["stated_capacity"]["value"] = "3.3 kVA"
+    wire_fact(first, "stated_capacity")["raw"] = "3.3 kW"
+    wire_fact(second, "stated_capacity")["raw"] = "3.3 kVA"
     quote = merge_batches([record(1, [1, 2], first), record(2, [3], second)])
     assert quote["stated_capacity"]["conflict"] is True
 
@@ -54,7 +54,7 @@ def test_scoring_keeps_kva_apart():
     assert scoring.score_field(quote, "stated_capacity", {"value": "3.3 kVA", "pages": []})["status"] == "wrong"
     assert scoring.score_field(quote, "stated_capacity", {"value": "3300 W", "pages": []})["status"] == "correct"
     wire = load_dry_run_wire()
-    wire["stated_capacity"]["value"] = "3.3 kVA"
+    wire_fact(wire, "stated_capacity")["raw"] = "3.3 kVA"
     quote = merge_batches([record(1, [1, 2], wire)])
     assert scoring.score_field(quote, "stated_capacity", {"value": "3.3 KVA", "pages": []})["status"] == "correct"
     assert scoring.score_field(quote, "stated_capacity", {"value": "3.3 kW", "pages": []})["status"] == "wrong"

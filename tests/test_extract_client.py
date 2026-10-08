@@ -77,8 +77,8 @@ def test_success(stub):
     stubber.add_response("converse", tool_response(load_dry_run_wire()), EXPECTED)
     record = extract_batch(client, MODEL, pages(1, 2), 1)
     stubber.assert_no_pending_responses()
-    assert record["contract"]["base_price"]["value"]["parsed"] == "180000"
-    assert record["contract"]["base_price"]["batch"] == 1
+    (base,) = [f["field"] for f in record["contract"]["facts"] if f["name"] == "base_price"]
+    assert base["value"]["parsed"] == "180000" and base["batch"] == 1
     assert record["usage"]["inputTokens"] == 1500 and record["stop_reason"] == "tool_use"
     assert record["pages"] == [1, 2] and record["request_bytes"] > 0 and record["seconds"] >= 0
 
@@ -86,10 +86,10 @@ def test_success(stub):
 def test_malformed_tool_input(stub):
     client, stubber = stub
     data = load_dry_run_wire()
-    data["base_price"]["value"] = 180000
+    data["prices"][0]["raw"] = 180000
     stubber.add_response("converse", tool_response(data))
     f = failure_of(client)
-    assert f.kind == "invalid_tool_input" and "input.base_price.value" in f.detail
+    assert f.kind == "invalid_tool_input" and "input.prices[0].raw" in f.detail
     assert f.record["response"]["stopReason"] == "tool_use" and not f.stops_run
 
 

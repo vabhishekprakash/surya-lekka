@@ -3,12 +3,13 @@ import json
 from pathlib import Path
 
 import pytest
+from conftest import wire_fact
 
 from checks import run_checks
 from checks.evidence import verify_evidence
 from extract.dryrun import load_dry_run_wire
 from extract.merge import merge_batches
-from extract.wire_schema import to_contract, validate
+from extract.wire_schema import normalise_batch, validate
 
 ROOT = Path(__file__).resolve().parent.parent
 SAMPLE = json.loads((ROOT / "samples" / "expected" / "S1.json").read_text(encoding="utf-8"))
@@ -18,7 +19,7 @@ ANSWERS = SAMPLE["user_inputs"]
 def record(batch, pages, data):
     cleaned, errors, _ = validate(data, pages)
     assert errors == []
-    return {"batch": batch, "pages": pages, "contract": to_contract(cleaned, batch)}
+    return {"batch": batch, "pages": pages, "contract": normalise_batch(cleaned, batch)}
 
 
 def on_page(data, page):
@@ -80,7 +81,7 @@ def test_agreeing_batches_keep_every_candidate():
 
 def test_conflicting_totals_need_confirmation_and_no_value_wins():
     def change(first, second):
-        second["gross_total"]["value"] = "Rs. 2,05,000"
+        wire_fact(second, "gross_total")["raw"] = "Rs. 2,05,000"
     quote = merge_batches(two_batches(change))
     f = quote["gross_total"]
     assert f["conflict"] is True and f["value"]["parse_status"] == "conflict" and f["value"]["raw"] is None

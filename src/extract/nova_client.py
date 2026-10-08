@@ -12,7 +12,7 @@ import time
 
 from .batching import DEFAULT_REQUEST_LIMIT_BYTES, MAX_IMAGES_PER_CALL
 from .prompt import SYSTEM_PROMPT, TOOL_DESCRIPTION, page_label
-from .wire_schema import TOOL_NAME, TOOL_SCHEMA, to_contract, validate
+from .wire_schema import TOOL_NAME, TOOL_SCHEMA, normalise_batch, validate
 
 MAX_TOKENS = 4000
 TEMPERATURE = 0
@@ -140,5 +140,5 @@ def extract_batch(client, model_id, pages, batch, size_limit=DEFAULT_REQUEST_LIM
         failure.record = record
         raise
     record["ignored_keys"] = ignored
-    record["contract"] = to_contract(cleaned, batch)
+    record["contract"] = normalise_batch(cleaned, batch)
     return record

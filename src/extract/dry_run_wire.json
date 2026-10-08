@@ -5,8 +5,63 @@
       "value": "no"
     },
     "options": [],
+    "prices": [
+      {
+        "option_id": "All",
+        "kind": "base_price",
+        "raw": "Rs. 1,80,000",
+        "evidence_text": "Base price Rs. 1,80,000",
+        "page": 2
+      },
+      {
+        "option_id": "All",
+        "kind": "gst_amount",
+        "raw": "Rs. 16,020",
+        "evidence_text": "GST @ 8.9% (extra) Rs. 16,020",
+        "page": 2
+      },
+      {
+        "option_id": "All",
+        "kind": "discount",
+        "raw": "Rs. 1,520",
+        "evidence_text": "Discount Rs. 1,520",
+        "page": 2
+      },
+      {
+        "option_id": "All",
+        "kind": "gross_total",
+        "raw": "Rs. 1,97,000/-",
+        "evidence_text": "Grand Total Rs. 1,97,000/-",
+        "page": 2
+      },
+      {
+        "option_id": "All",
+        "kind": "net_cost",
+        "raw": "Rs. 1,19,000",
+        "evidence_text": "Net cost after central subsidy Rs. 1,19,000",
+        "page": 2
+      }
+    ],
+    "subsidies": [
+      {
+        "option_id": "All",
+        "kind": "central",
+        "raw": "Rs. 78,000",
+        "evidence_text": "Central subsidy Rs. 78,000",
+        "page": 2
+      }
+    ],
+    "capacities": [
+      {
+        "option_id": "All",
+        "raw": "3.3 kWp",
+        "evidence_text": "Rooftop solar system: 3.3 kWp (DC)",
+        "page": 1
+      }
+    ],
     "module_groups": [
       {
+        "option_id": "All",
         "count": "6",
         "count_evidence": "No. of modules: 6",
         "wattage": "550 Wp",
@@ -19,6 +74,7 @@
     ],
     "inverters": [
       {
+        "option_id": "All",
         "make_model": "Example Inverters EXI-3K",
         "make_model_evidence": "Inverter: Example Inverters EXI-3K, 3 kW on-grid",
         "rating": "3 kW",
@@ -27,80 +83,46 @@
         "page": 1
       }
     ],
-    "stated_capacity": {
-      "value": "3.3 kWp",
-      "evidence": "Rooftop solar system: 3.3 kWp (DC)",
-      "page": 1
-    },
-    "capacity_basis": {
-      "value": "dc_kwp",
-      "evidence": "Rooftop solar system: 3.3 kWp (DC)",
-      "page": 1
-    },
-    "dcr_declaration": {
-      "value": "dcr",
-      "evidence": "DCR declaration: modules and cells are DCR (domestic content)",
-      "page": 1
-    },
-    "vendor_registration": {
-      "value": "EX-VR-0001",
-      "evidence": "Vendor reg. no. EX-VR-0001",
-      "page": 1
-    },
-    "base_price": {
-      "value": "Rs. 1,80,000",
-      "evidence": "Base price Rs. 1,80,000",
-      "page": 2
-    },
-    "gst_amount": {
-      "value": "Rs. 16,020",
-      "evidence": "GST @ 8.9% (extra) Rs. 16,020",
-      "page": 2
-    },
-    "discount": {
-      "value": "Rs. 1,520",
-      "evidence": "Discount Rs. 1,520",
-      "page": 2
-    },
-    "gross_total": {
-      "value": "Rs. 1,97,000/-",
-      "evidence": "Grand Total Rs. 1,97,000/-",
-      "page": 2
-    },
-    "subsidy_central": {
-      "value": "Rs. 78,000",
-      "evidence": "Central subsidy Rs. 78,000",
-      "page": 2
-    },
-    "net_cost": {
-      "value": "Rs. 1,19,000",
-      "evidence": "Net cost after central subsidy Rs. 1,19,000",
-      "page": 2
-    },
     "extra_charges": [
       {
+        "option_id": "All",
         "label": "Net meter charges",
         "amount": "Rs. 2,500",
         "included_in_total": "yes",
         "total_label": "Grand Total",
-        "evidence": "Net meter charges Rs. 2,500 (included in Grand Total)",
-        "page": 2
+        "page": 2,
+        "evidence_text": "Net meter charges Rs. 2,500 (included in Grand Total)"
       }
     ],
+    "capacity_basis": {
+      "value": "dc_kwp",
+      "page": 1,
+      "evidence_text": "Rooftop solar system: 3.3 kWp (DC)"
+    },
+    "dcr_declaration": {
+      "value": "dcr",
+      "page": 1,
+      "evidence_text": "DCR declaration: modules and cells are DCR (domestic content)"
+    },
+    "vendor_registration": {
+      "value": "EX-VR-0001",
+      "page": 1,
+      "evidence_text": "Vendor reg. no. EX-VR-0001"
+    },
     "gst_treatment": {
       "value": "excluded",
-      "evidence": "GST @ 8.9% (extra) Rs. 16,020",
-      "page": 2
+      "page": 2,
+      "evidence_text": "GST @ 8.9% (extra) Rs. 16,020"
     },
     "extra_charges_complete": {
       "value": "stated",
-      "evidence": "No other charges apply.",
-      "page": 2
+      "page": 2,
+      "evidence_text": "No other charges apply."
     },
     "net_cost_subsidy_basis": {
       "value": "central",
-      "evidence": "Net cost after central subsidy Rs. 1,19,000",
-      "page": 2
+      "page": 2,
+      "evidence_text": "Net cost after central subsidy Rs. 1,19,000"
     }
   }
 }
