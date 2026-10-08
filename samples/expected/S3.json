@@ -19,7 +19,6 @@
       "GST as applicable",
       "Elevated structure Rs. 12,000 (extra, not in Total)",
       "Civil work at actuals (extra)",
-      "Discount Rs. 0",
       "Total Rs. 1,85,000",
       "Subsidy Rs. 78,000",
       "Effective cost after subsidy Rs. 1,07,000"
@@ -178,16 +177,7 @@
         "total_label": "Total"
       }
     ],
-    "discount": {
-      "value": {
-        "raw": "Rs. 0",
-        "parsed": "0",
-        "parse_status": "ok"
-      },
-      "evidence_text": "Discount Rs. 0",
-      "page": 2,
-      "batch": 1
-    },
+    "discount": null,
     "gross_total": {
       "value": {
         "raw": "Rs. 1,85,000",

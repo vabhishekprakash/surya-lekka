@@ -10,6 +10,7 @@ from .common import (
     UnusableNumber,
     computed,
     finding,
+    format_number,
     options_finding,
     options_unresolved,
     quoted,
@@ -32,6 +33,7 @@ def check_capacity(quote):
         return finding(CHECK_ID, MISSING, "Module count and wattage were not found.", [])
 
     evidence, missing, unusable, terms = [], [], [], []
+    ranged = False
     total_w = Decimal(0)
     for i, group in enumerate(groups):
         operands = {}
@@ -44,6 +46,7 @@ def check_capacity(quote):
                 number = to_decimal(value_of(field))
             except UnusableNumber:
                 unusable.append(name)
+                ranged = ranged or isinstance(value_of(field), dict)
                 continue
             if number is None:
                 missing.append(name)
@@ -63,6 +66,7 @@ def check_capacity(quote):
             NEEDS_CONFIRMATION,
             f"Please confirm these values: {', '.join(unusable)}.",
             evidence,
+            question="exact_capacity" if ranged else "panel_details",
         )
 
     computed_kwp = total_w / 1000
@@ -78,9 +82,14 @@ def check_capacity(quote):
     try:
         stated = to_decimal(value_of(stated_field))
     except UnusableNumber:
-        return finding(CHECK_ID, NEEDS_CONFIRMATION, "Please confirm the stated capacity.", evidence)
+        return finding(CHECK_ID, NEEDS_CONFIRMATION, "Please confirm the stated capacity.", evidence,
+                       question="dc_capacity")
     if stated is None:
         return finding(CHECK_ID, MISSING, "Stated system capacity was not found.", evidence)
+
+    # The stated figure as written on the quote, for questions to the vendor.
+    stated_text = stated_field.get("raw") or f"{format_number(stated)} kW"
+    params = {"computed_kwp": format_number(computed_kwp), "stated": stated_text}
 
     if value_of(basis_field) != "dc_kwp":
         return finding(
@@ -89,16 +98,20 @@ def check_capacity(quote):
             f"Computed DC capacity is {computed_kwp} kWp. The quote does not say the stated "
             f"{stated} kW is DC module capacity, so they were not compared.",
             evidence,
+            question="capacity_basis",
+            question_params=params,
         )
 
     if abs(computed_kwp - stated) <= DC_KWP_TOLERANCE:
-        status, verb = CONSISTENT, "matches"
+        status, verb, question = CONSISTENT, "matches", None
     else:
-        status, verb = INCONSISTENT, "differs from"
+        status, verb, question = INCONSISTENT, "differs from", "capacity_mismatch"
     return finding(
         CHECK_ID,
         status,
         f"Computed DC capacity {computed_kwp} kWp (module count x wattage) {verb} the stated "
         f"{stated} kWp (tolerance {DC_KWP_TOLERANCE} kWp).",
         evidence,
+        question=question,
+        question_params=params if question else None,
     )
