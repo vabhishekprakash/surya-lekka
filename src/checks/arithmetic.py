@@ -105,9 +105,22 @@ def check_gross_total(quote):
     elif quote.get("gst_amount") is not None:
         ops.evidence.append(quoted("gst_amount", quote["gst_amount"]))
 
-    extras = []
+    extras, outside, unclear = [], [], []
     for i, extra in enumerate(quote.get("extra_charges") or []):
-        amount = ops.take(f"extra_charges[{i}].amount", extra.get("amount"))
+        name = f"extra_charges[{i}]"
+        # Contract v1 says whether each charge is inside the stated total. A
+        # charge without that key (older input) is taken as listed in the total.
+        if "included_in_total" in extra:
+            inc_field = extra["included_in_total"]
+            if inc_field is not None:
+                ops.evidence.append(quoted(f"{name}.included_in_total", inc_field))
+            included = value_of(inc_field)
+            if included != "yes":
+                (outside if included == "no" else unclear).append(name)
+                if extra.get("amount") is not None:
+                    ops.evidence.append(quoted(f"{name}.amount", extra["amount"]))
+                continue
+        amount = ops.take(f"{name}.amount", extra.get("amount"))
         if amount is not None:
             extras.append(amount)
     complete_field = quote.get("extra_charges_complete")
@@ -124,6 +137,13 @@ def check_gross_total(quote):
             "The quote does not say whether the base price includes GST.",
             ops.evidence,
         )
+    if unclear:
+        return finding(
+            GROSS_CHECK_ID,
+            NEEDS_CONFIRMATION,
+            f"Please confirm whether these charges are inside the total: {', '.join(unclear)}.",
+            ops.evidence,
+        )
     if value_of(complete_field) is not True:
         return finding(
             GROSS_CHECK_ID,
@@ -137,7 +157,10 @@ def check_gross_total(quote):
     if gst_treatment == "excluded":
         expected += gst
         formula = "base_price + gst_amount + extra_charges - discount"
-    return _compare(GROSS_CHECK_ID, ops, "gross total", expected, formula, gross, "total")
+    result = _compare(GROSS_CHECK_ID, ops, "gross total", expected, formula, gross, "total")
+    if outside:
+        result["notes"].append(f"Charges listed outside the total were not added: {', '.join(outside)}.")
+    return result
 
 
 def check_net_cost(quote):

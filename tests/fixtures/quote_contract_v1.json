@@ -1,0 +1,64 @@
+{
+  "_contract": "Quote contract v1: the extraction output the checks read. Every extracted field is null or {value, evidence_text, page, batch}; value null means not found, batch is the extraction batch that read the page. Amount values are {raw, parsed, parse_status}; capacity values are {raw, parsed, unit, parse_status}, where parsed is a decimal string or {min, max} for a range. Module groups, inverters and extra charges carry ids and option_id (null when the quote has one option). flags.model_proposed holds the model's reading, with evidence; flags.user_confirmed holds the user's answers and overrides it. extra_charges[].included_in_total is yes, no or unclear relative to total_label. All values here are synthetic.",
+  "contract_version": "v1",
+  "processing_complete": true,
+  "pages_processed": [1, 2],
+  "options": [],
+  "module_groups": [
+    {
+      "group_id": "G1",
+      "option_id": null,
+      "count": {"value": 6, "evidence_text": "No. of panels: 6", "page": 1, "batch": 1},
+      "wattage": {"value": {"raw": "545 Wp", "parsed": "545", "unit": "Wp", "parse_status": "ok"}, "evidence_text": "545 Wp mono PERC", "page": 1, "batch": 1},
+      "make_model": {"value": "Example PV EXM-545", "evidence_text": "Example PV EXM-545 545 Wp mono PERC", "page": 1, "batch": 1},
+      "make_model_alternatives": []
+    }
+  ],
+  "inverters": [
+    {
+      "inverter_id": "I1",
+      "option_id": null,
+      "make_model": {"value": "Example Inverters EXI-3K", "evidence_text": "Inverter: Example Inverters EXI-3K", "page": 1, "batch": 1},
+      "rating": {"value": {"raw": "3 kW", "parsed": "3", "unit": "kW", "parse_status": "ok"}, "evidence_text": "3 kW on-grid inverter", "page": 1, "batch": 1},
+      "make_model_alternatives": []
+    }
+  ],
+  "stated_capacity": {"value": {"raw": "3.27 kWp", "parsed": "3.27", "unit": "kWp", "parse_status": "ok"}, "evidence_text": "System size 3.27 kWp", "page": 1, "batch": 1},
+  "dcr_declaration": {"value": true, "evidence_text": "DCR modules with domestic cells", "page": 1, "batch": 1},
+  "vendor_registration": {"value": "EX-VR-0000", "evidence_text": "Vendor reg. no. EX-VR-0000", "page": 1, "batch": 1},
+  "base_price": {"value": {"raw": "Rs. 1,80,000", "parsed": "180000", "parse_status": "ok"}, "evidence_text": "Base price Rs. 1,80,000", "page": 2, "batch": 1},
+  "gst_amount": {"value": {"raw": "Rs. 16,020", "parsed": "16020", "parse_status": "ok"}, "evidence_text": "GST Rs. 16,020", "page": 2, "batch": 1},
+  "extra_charges": [
+    {
+      "charge_id": "E1",
+      "option_id": null,
+      "label": {"value": "Net meter charges", "evidence_text": "Net meter Rs. 2,500", "page": 2, "batch": 1},
+      "amount": {"value": {"raw": "Rs. 2,500", "parsed": "2500", "parse_status": "ok"}, "evidence_text": "Net meter Rs. 2,500", "page": 2, "batch": 1},
+      "included_in_total": {"value": "yes", "evidence_text": "Total Rs. 1,97,000/- (incl. net meter)", "page": 2, "batch": 1},
+      "total_label": "Total"
+    }
+  ],
+  "discount": {"value": {"raw": "Rs. 1,520", "parsed": "1520", "parse_status": "ok"}, "evidence_text": "Discount Rs. 1,520", "page": 2, "batch": 1},
+  "gross_total": {"value": {"raw": "Rs. 1,97,000/-", "parsed": "197000", "parse_status": "ok"}, "evidence_text": "Total Rs. 1,97,000/- (incl. net meter)", "page": 2, "batch": 1},
+  "subsidy_central": {"value": {"raw": "Rs. 78,000", "parsed": "78000", "parse_status": "ok"}, "evidence_text": "Central subsidy Rs. 78,000", "page": 2, "batch": 1},
+  "subsidy_state": null,
+  "subsidy_combined": null,
+  "subsidy_unspecified": null,
+  "net_cost": {"value": {"raw": "Rs. 1,19,000", "parsed": "119000", "parse_status": "ok"}, "evidence_text": "Net cost Rs. 1,19,000", "page": 2, "batch": 1},
+  "flags": {
+    "model_proposed": {
+      "multiple_options": {"value": false, "evidence_text": null, "page": null, "batch": 1},
+      "capacity_basis": {"value": "dc_kwp", "evidence_text": "System size 3.27 kWp", "page": 1, "batch": 1},
+      "gst_treatment": {"value": "excluded", "evidence_text": "GST extra as applicable", "page": 2, "batch": 1},
+      "extra_charges_complete": {"value": true, "evidence_text": "No other charges", "page": 2, "batch": 1},
+      "net_cost_subsidy_basis": {"value": "central", "evidence_text": "Net cost after central subsidy", "page": 2, "batch": 1},
+      "consumer_type": null
+    },
+    "user_confirmed": {
+      "selected_option": null,
+      "state": "Telangana",
+      "consumer_type": "individual_household",
+      "portal_application_on_or_after_cutoff": true
+    }
+  }
+}
