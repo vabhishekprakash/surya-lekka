@@ -1,2 +1,4 @@
 pytest
 jsonschema
+boto3==1.43.109
+botocore==1.43.109
