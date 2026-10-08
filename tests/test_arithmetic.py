@@ -44,12 +44,45 @@ def test_explicit_zero_is_valid(quote):
     assert check_gross_total(quote)["status"] == "consistent"
 
 
-def test_missing_discount_is_not_zero(quote):
-    quote["discount"] = None
-    quote["gross_total"] = field(198520)
+def test_absent_discount_left_out(quote):
+    for absent in (None, field(None)):
+        quote["discount"] = absent
+        quote["gross_total"] = field(198520)
+        result = check_gross_total(quote)
+        assert result["status"] == "consistent"
+        formula = result["evidence"][-1]["formula"]
+        assert formula == "base_price + gst_amount + extra_charges[0].amount"
+        assert "discount" not in result["message"]
+        assert not any(e.get("field") == "discount" or e.get("name") == "discount" for e in result["evidence"])
+
+
+def test_formula_lists_only_stated_terms(quote):
+    quote["extra_charges"] = []
+    quote["gross_total"] = field(194500)
     result = check_gross_total(quote)
-    assert result["status"] == "missing"
-    assert "discount" in result["message"]
+    assert result["evidence"][-1]["formula"] == "base_price + gst_amount - discount"
+
+
+def test_computed_values_are_labelled_computed(quote):
+    for result in (check_gross_total(quote), check_net_cost(quote)):
+        kinds = [e["kind"] for e in result["evidence"]]
+        assert kinds[-1] == "computed" and set(kinds[:-1]) == {"quoted"}
+        assert all(e.get("evidence_text") is not None or e["value"] is not None
+                   for e in result["evidence"] if e["kind"] == "quoted")
+
+
+def test_gross_mismatch_question(quote):
+    quote["gross_total"] = field(200000)
+    result = check_gross_total(quote)
+    assert result["question"] == "total_mismatch"
+    assert result["question_params"] == {"computed": "1,97,000", "stated": "2,00,000"}
+
+
+def test_net_mismatch_question(quote):
+    quote["net_cost"] = field(120000)
+    result = check_net_cost(quote)
+    assert result["question"] == "net_cost_mismatch"
+    assert result["question_params"] == {"computed": "1,19,000", "stated": "1,20,000"}
 
 
 def test_empty_extras_without_guarantee(quote):

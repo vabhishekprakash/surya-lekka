@@ -2,22 +2,21 @@ import copy
 
 from .arithmetic import check_gross_total, check_net_cost
 from .capacity import check_capacity
+from .common import USER_KINDS
 from .contract import normalise
 from .evidence import verify_evidence
 from .missing import check_missing_details
 from .questions import vendor_message, vendor_questions
-from .recheck import USER_CORRECTED, apply_user_inputs
+from .recheck import apply_user_inputs
 from .subsidy import check_central_subsidy
 
 
 def _annotate(findings, page_texts):
     for f in findings:
         for e in f["evidence"]:
-            if e.get("kind") != "quoted":
-                continue
-            if e.get("provenance") in (USER_CORRECTED, "user_confirmed"):
-                e["evidence_status"] = e["provenance"]
-            else:
+            if e.get("kind") in USER_KINDS:
+                e["evidence_status"] = e["kind"]
+            elif e.get("kind") == "quoted":
                 e["evidence_status"] = verify_evidence(e, page_texts)
 
 

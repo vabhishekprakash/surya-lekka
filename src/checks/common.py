@@ -87,10 +87,16 @@ def value_of(field):
     return field.get("value")
 
 
+USER_KINDS = ("user_corrected", "user_confirmed")
+
+
 def quoted(name, field):
-    """Evidence entry copied from an extracted field, with its source text and page."""
+    """Evidence entry for a field. kind is "quoted" for a value read from the
+    quote, or the provenance ("user_corrected", "user_confirmed") for a value
+    the user supplied; those are never presented as quoted."""
+    provenance = field.get("provenance")
     entry = {
-        "kind": "quoted",
+        "kind": provenance if provenance in USER_KINDS else "quoted",
         "field": name,
         "value": jsonable(field.get("value")),
         "evidence_text": field.get("evidence_text"),

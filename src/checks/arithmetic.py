@@ -1,6 +1,8 @@
 """C3: price, GST, extras, discount, subsidy and net cost arithmetic.
 
-All amounts are already-parsed INR values. Missing values are never treated as zero.
+All amounts are already-parsed INR values. A missing required amount is never
+treated as zero. A discount is optional: when the quote states none, it is
+left out of the relation rather than shown as a computed zero.
 """
 
 from decimal import Decimal
@@ -13,6 +15,7 @@ from .common import (
     UnusableNumber,
     computed,
     finding,
+    format_inr,
     options_finding,
     options_unresolved,
     quoted,
@@ -70,11 +73,11 @@ class _Operands:
         return None
 
 
-def _compare(check_id, ops, name, expected, formula, stated, stated_name):
+def _compare(check_id, ops, name, expected, formula, stated, stated_name, question):
     ops.evidence.append(computed(name, expected, formula))
     difference = stated - expected
     if abs(difference) <= TOLERANCE_INR:
-        status, verb = CONSISTENT, "matches"
+        status, verb, question = CONSISTENT, "matches", None
     else:
         status, verb = INCONSISTENT, "differs from"
     return finding(
@@ -83,6 +86,8 @@ def _compare(check_id, ops, name, expected, formula, stated, stated_name):
         f"Computed {name} INR {expected} ({formula}) {verb} the stated {stated_name} "
         f"INR {stated} (tolerance INR {TOLERANCE_INR}).",
         ops.evidence,
+        question=question,
+        question_params={"computed": format_inr(expected), "stated": format_inr(stated)} if question else None,
     )
 
 
@@ -93,7 +98,9 @@ def check_gross_total(quote):
     ops = _Operands()
     gross = ops.take("gross_total", quote.get("gross_total"))
     base = ops.take("base_price", quote.get("base_price"))
-    discount = ops.take("discount", quote.get("discount"))
+    discount = None
+    if value_of(quote.get("discount")) is not None:
+        discount = ops.take("discount", quote.get("discount"))
 
     gst_field = quote.get("gst_treatment")
     if gst_field is not None:
@@ -105,7 +112,7 @@ def check_gross_total(quote):
     elif quote.get("gst_amount") is not None:
         ops.evidence.append(quoted("gst_amount", quote["gst_amount"]))
 
-    extras, outside, unclear = [], [], []
+    extras, extra_names, outside, unclear = [], [], [], []
     for i, extra in enumerate(quote.get("extra_charges") or []):
         name = f"extra_charges[{i}]"
         # Contract v1 says whether each charge is inside the stated total. A
@@ -123,6 +130,7 @@ def check_gross_total(quote):
         amount = ops.take(f"{name}.amount", extra.get("amount"))
         if amount is not None:
             extras.append(amount)
+            extra_names.append(f"{name}.amount")
     complete_field = quote.get("extra_charges_complete")
     if complete_field is not None:
         ops.evidence.append(quoted("extra_charges_complete", complete_field))
@@ -152,12 +160,19 @@ def check_gross_total(quote):
             ops.evidence,
         )
 
-    expected = base + sum(extras, Decimal(0)) - discount
-    formula = "base_price + extra_charges - discount"
+    # Only amounts the quote states appear in the relation.
+    expected, terms = base, ["base_price"]
     if gst_treatment == "excluded":
         expected += gst
-        formula = "base_price + gst_amount + extra_charges - discount"
-    result = _compare(GROSS_CHECK_ID, ops, "gross total", expected, formula, gross, "total")
+        terms.append("gst_amount")
+    expected += sum(extras, Decimal(0))
+    terms += extra_names
+    formula = " + ".join(terms)
+    if discount is not None:
+        expected -= discount
+        formula += " - discount"
+    result = _compare(GROSS_CHECK_ID, ops, "gross total", expected, formula, gross, "total",
+                      "total_mismatch")
     if outside:
         result["notes"].append(f"Charges listed outside the total were not added: {', '.join(outside)}.")
     return result
@@ -195,7 +210,8 @@ def check_net_cost(quote):
 
     expected = gross - sum(subsidies, Decimal(0))
     formula = " - ".join(("gross_total",) + subsidy_fields)
-    result = _compare(NET_CHECK_ID, ops, "net cost", expected, formula, net, "net cost")
+    result = _compare(NET_CHECK_ID, ops, "net cost", expected, formula, net, "net cost",
+                      "net_cost_mismatch")
     if subsidy_fields:
         result["message"] += " Subsidy amounts are taken as stated and are not checked here."
     return result

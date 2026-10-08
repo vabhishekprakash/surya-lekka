@@ -49,8 +49,16 @@ def test_item_corrections_by_id(quote_v1):
     assert by["C2_central_subsidy"]["status"] == "inconsistent"
     assert [c["path"] for c in r["corrected_fields"]] == [
         "module_groups[G1].count", "module_groups[G1].wattage", "subsidy_central"]
-    quoted = [e for e in by["C1_capacity"]["evidence"] if e.get("field") == "module_groups[0].count"][0]
-    assert quoted["provenance"] == "user_corrected" and quoted["original_value"] == 6
+    entry = [e for e in by["C1_capacity"]["evidence"] if e.get("field") == "module_groups[0].count"][0]
+    assert entry["kind"] == "user_corrected" and entry["original_value"] == 6
+
+
+def test_user_values_never_shown_as_quoted(quote_v1):
+    r = run_checks(quote_v1, {"corrections": {"base_price": "1,80,000"}})
+    for f in r["findings"]:
+        for e in f["evidence"]:
+            if e.get("provenance"):
+                assert e["kind"] == e["provenance"] != "quoted"
 
 
 def test_confirmations_answer_gates(quote_v1):
@@ -96,9 +104,10 @@ def test_evidence_status_annotation(quote_v1):
     c1 = r["findings"][0]["evidence"]
     assert {e["field"]: e["evidence_status"] for e in c1 if e["kind"] == "quoted"}["stated_capacity_kw"] \
         == "text_matched"
-    gross = {e["field"]: e["evidence_status"] for e in r["findings"][2]["evidence"] if e["kind"] == "quoted"}
-    assert gross["base_price"] == "user_corrected"
-    assert gross["gross_total"] == "not_machine_verified"
+    gross = {e["field"]: (e["kind"], e["evidence_status"])
+             for e in r["findings"][2]["evidence"] if e["kind"] != "computed"}
+    assert gross["base_price"] == ("user_corrected", "user_corrected")
+    assert gross["gross_total"] == ("quoted", "not_machine_verified")
     quote_v1["module_groups"][0]["count"] = field_v1(6, "No. of panels: 7", 1)
     c1 = run_checks(quote_v1, page_texts=pages)["findings"][0]["evidence"]
     assert c1[0]["evidence_status"] == "mismatch"
