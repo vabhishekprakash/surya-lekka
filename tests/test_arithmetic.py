@@ -187,3 +187,9 @@ def test_cfa_rules_verified():
     path = Path(__file__).parent.parent / "src" / "rules" / "cfa_rules.json"
     rules = json.loads(path.read_text(encoding="utf-8"))
     assert rules["verification"] == "verified" and rules["verified_on"] == "2026-10-08"
+
+
+def test_unknown_option_count_blocks_arithmetic(quote):
+    quote["multiple_options"] = field(None)
+    assert check_gross_total(quote)["status"] == "needs_confirmation"
+    assert check_net_cost(quote)["status"] == "needs_confirmation"

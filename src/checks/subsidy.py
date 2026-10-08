@@ -22,6 +22,7 @@ from .common import (
     finding,
     format_inr,
     format_number,
+    options_finding,
     options_unresolved,
     quoted,
     to_decimal,
@@ -36,7 +37,7 @@ USER_CONFIRMED = "user_confirmed"
 # Gates in the order they run: (gate, what it needs to pass, result otherwise).
 GATES = (
     ("processing", "every page processed", "needs_confirmation"),
-    ("options", "one option, or the user selected one", "needs_confirmation"),
+    ("options", "one option (an unknown count is not one), or the user selected one", "needs_confirmation"),
     ("consumer_type", "user confirmed an individual household",
      "out_of_scope if confirmed RWA or group housing, else needs_confirmation"),
     ("state", "a recognised state or UT", "needs_confirmation"),
@@ -189,9 +190,8 @@ def check_central_subsidy(quote, rules=None):
         return result(NEEDS_CONFIRMATION,
                       "Not every page of the quote was processed, so the subsidy was not checked.")
     if options_unresolved(quote):
-        return result(NEEDS_CONFIRMATION,
-                      "The quote lists more than one option. Select the option you are considering first.",
-                      [quoted("multiple_options", quote["multiple_options"])])
+        f = options_finding(CHECK_ID, quote)
+        return result(NEEDS_CONFIRMATION, f["message"], f["evidence"])
 
     ct_field = quote.get("consumer_type")
     ct = value_of(ct_field)
@@ -300,9 +300,7 @@ def check_central_subsidy(quote, rules=None):
                         "wattage for every panel group")
         elif lo != hi:
             gaps.append("the panel wattage is a range")
-        single_option = (value_of(quote.get("multiple_options")) is False
-                         or quote.get("selected_option") is not None)
-        if not single_option:
+        if options_unresolved(quote):
             gaps.append("it isn't confirmed that the quote has a single option")
         if not quote.get("processing_complete"):
             gaps.append("not every page was processed")

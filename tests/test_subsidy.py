@@ -390,11 +390,24 @@ def test_higher_with_wattage_range_needs_confirmation(quote_v1):
     assert r["status"] == "needs_confirmation" and "range" in r["message"]
 
 
-def test_higher_with_option_count_unknown_needs_confirmation(quote_v1):
-    quote_v1["flags"]["model_proposed"]["multiple_options"] = None
+@pytest.mark.parametrize("flag", [None, field_v1(None, "synthetic")])
+def test_unknown_option_count_is_never_single(quote_v1, flag):
+    quote_v1["flags"]["model_proposed"]["multiple_options"] = flag
     quote_v1["subsidy_central"] = amount_field("Rs. 85,800")
     r = c2(quote_v1)
-    assert r["status"] == "needs_confirmation" and "single option" in r["message"]
+    assert r["status"] == "needs_confirmation" and "one option or several" in r["message"]
+    quote_v1["flags"]["user_confirmed"]["multiple_options"] = False
+    assert c2(quote_v1)["status"] == "inconsistent"
+
+
+def test_option_ids_on_items_mean_several_options(quote_v1):
+    quote_v1["module_groups"][0]["option_id"] = "A"
+    second = copy.deepcopy(quote_v1["module_groups"][0])
+    second["group_id"], second["option_id"] = "G2", "B"
+    quote_v1["module_groups"].append(second)
+    assert "more than one option" in c2(quote_v1)["message"]
+    quote_v1["flags"]["user_confirmed"]["selected_option"] = "A"
+    assert c2(quote_v1)["status"] == "consistent"
 
 
 def test_higher_with_selected_option_is_inconsistent(quote_v1):

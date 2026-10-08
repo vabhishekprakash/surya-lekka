@@ -134,15 +134,35 @@ def to_decimal(value):
     return number
 
 
+def option_state(quote):
+    """"selected", "single", "multiple" or "unknown".
+
+    "single" needs an explicit no to multiple options and at most one option
+    id on the quote. An unknown option count is never treated as single.
+    """
+    if quote.get("selected_option") is not None:
+        return "selected"
+    ids = {o.get("option_id") for o in quote.get("options") or []}
+    for key in ("module_groups", "inverters", "extra_charges"):
+        ids |= {i.get("option_id") for i in quote.get(key) or []}
+    ids.discard(None)
+    flag = value_of(quote.get("multiple_options"))
+    if flag is True or len(ids) > 1:
+        return "multiple"
+    return "single" if flag is False else "unknown"
+
+
 def options_unresolved(quote):
-    """True when the quote has alternative options and none is selected yet."""
-    return value_of(quote.get("multiple_options")) is True and quote.get("selected_option") is None
+    """True unless the quote has one option or the user selected one."""
+    return option_state(quote) in ("multiple", "unknown")
 
 
 def options_finding(check_id, quote):
-    return finding(
-        check_id,
-        NEEDS_CONFIRMATION,
-        "The quote lists more than one option. Select the option you are considering first.",
-        [quoted("multiple_options", quote["multiple_options"])],
-    )
+    field = quote.get("multiple_options")
+    if option_state(quote) == "multiple":
+        message = "The quote lists more than one option. Select the option you are considering first."
+    else:
+        message = ("It isn't clear whether the quote has one option or several. Please confirm this before "
+                   "the figures are checked.")
+    return finding(check_id, NEEDS_CONFIRMATION, message,
+                   [quoted("multiple_options", field)] if field is not None else [])

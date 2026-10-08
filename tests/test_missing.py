@@ -117,3 +117,9 @@ def test_options_unselected(quote_v1):
     quote_v1["flags"]["model_proposed"]["multiple_options"] = field_v1(True, "Option A / Option B")
     (only,) = check_missing_details(normalise(quote_v1))
     assert only["status"] == "needs_confirmation"
+
+
+def test_unknown_option_count_blocks_missing_details(quote_v1):
+    quote_v1["flags"]["model_proposed"]["multiple_options"] = None
+    (r,) = check_missing_details(normalise(quote_v1))
+    assert r["status"] == "needs_confirmation" and "one option or several" in r["message"]

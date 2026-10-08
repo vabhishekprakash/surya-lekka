@@ -107,3 +107,11 @@ def test_multiple_options_need_selection(quote):
 
 def test_status_values_are_allowed(quote):
     assert check_capacity(quote)["status"] in STATUSES
+
+
+def test_unknown_option_count_needs_confirmation(quote):
+    quote["multiple_options"] = None
+    r = check_capacity(quote)
+    assert r["status"] == "needs_confirmation" and "one option or several" in r["message"]
+    quote["multiple_options"] = field(None)
+    assert check_capacity(quote)["status"] == "needs_confirmation"
