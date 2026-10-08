@@ -89,13 +89,19 @@ ITEM_KINDS = {
 }
 
 
+# The fields that make two items from different batches the same item.
+ITEM_TUPLES = {
+    "module_groups": (("count", "plain"), ("wattage", "capacity"), ("make_model", "plain")),
+    "inverters": (("make_model", "plain"), ("rating", "capacity")),
+}
+
+
+def _item_tuple(list_name, item):
+    return tuple(None if item.get(key) is None else _key(kind, item[key]["value"])
+                 for key, kind in ITEM_TUPLES[list_name])
+
+
 def _item_key(list_name, item):
-    if list_name == "module_groups":
-        f = item.get("wattage")
-        return _key("capacity", f["value"]) if f else None
-    if list_name == "inverters":
-        f = item.get("make_model") or item.get("rating")
-        return _key("text" if item.get("make_model") else "capacity", f["value"]) if f else None
     f = item.get("label")
     return _key("text", f["value"]) if f else None
 
@@ -114,18 +120,52 @@ def _merge_items(m, list_name, path, items):
 
 
 def _conflicting_item(item, list_name):
-    out = dict(item)
+    """A flagged candidate item: every value, read or not, needs confirmation; what
+    the batch read is kept under candidates."""
+    out = dict(item, conflict=True)
     for key, kind in ITEM_KINDS[list_name].items():
         f = item.get(key)
-        if f is not None:
-            out[key] = {"value": _conflict_value(kind), "evidence_text": None, "page": None, "batch": None,
-                        "conflict": True, "candidates": [_candidate(f)]}
+        out[key] = {"value": _conflict_value(kind), "evidence_text": None, "page": None, "batch": None,
+                    "conflict": True, "candidates": [] if f is None else [_candidate(f)]}
     return out
+
+
+def _match_tuples(m, list_name, path, batches):
+    """Panel lines or inverters of one option reported by several batches.
+
+    Assumption: the same tuple (count, wattage and normalised make and model for
+    panels; make and model and rating for inverters) in every reporting batch, the
+    same number of times, is one item repeated on another page. It is kept once with
+    every piece of evidence. Anything else is never combined: each version is kept
+    as its own flagged candidate.
+    """
+    counts = {}
+    for b, items in batches.items():
+        for item in items:
+            counts.setdefault(repr(_item_tuple(list_name, item)), {}).setdefault(b, []).append(item)
+    out, flagged = [], []
+    for per_batch in counts.values():
+        sizes = {len(per_batch.get(b, [])) for b in batches}
+        if len(sizes) == 1:
+            for same in zip(*per_batch.values()):
+                out.append(_merge_items(m, list_name, path, list(same)))
+        else:
+            for b, items in per_batch.items():
+                flagged += [(b, item) for item in items]
+    if flagged:
+        m.conflicts.append({"field": path, "reason": "batches list different items",
+                            "candidates": [{"batch": b, "page": _item_page(item)} for b, item in flagged]})
+        out += [_conflicting_item(item, list_name) for _, item in flagged]
+    return out
+
+
+def _item_page(item):
+    return next((f["page"] for f in item.values() if isinstance(f, dict) and "page" in f), None)
 
 
 def _merge_list(m, list_name, per_batch):
     """per_batch: [(batch, [items])]. Items of one option seen in several batches are
-    matched, never added together."""
+    matched, never added together. Items from one batch are kept as listed."""
     by_option = {}
     for batch, items in per_batch:
         for item in items:
@@ -144,21 +184,7 @@ def _merge_list(m, list_name, per_batch):
                     by_label.setdefault(_item_key(list_name, item), []).append(item)
             out += [_merge_items(m, list_name, path, same) for same in by_label.values()]
             continue
-        if all(len(items) == 1 for items in groups):
-            out.append(_merge_items(m, list_name, path, [items[0] for items in groups]))
-            continue
-        keysets = [sorted(map(repr, (_item_key(list_name, i) for i in items))) for items in groups]
-        unique = all(len(set(ks)) == len(ks) for ks in keysets)
-        if unique and all(ks == keysets[0] for ks in keysets):
-            matched = {}
-            for items in groups:
-                for item in items:
-                    matched.setdefault(repr(_item_key(list_name, item)), []).append(item)
-            out += [_merge_items(m, list_name, path, same) for same in matched.values()]
-            continue
-        m.conflicts.append({"field": path, "reason": "batches list different items",
-                            "candidates": [{"batch": b, "items": len(items)} for b, items in batches.items()]})
-        out += [_conflicting_item(i, list_name) for items in groups for i in items]
+        out += _match_tuples(m, list_name, path, batches)
     return out
 
 

@@ -101,24 +101,15 @@ def test_repeated_panel_line_is_not_added_twice():
     assert by_check(quote)[("C1_capacity", None)]["status"] == "consistent"
 
 
-def test_single_lines_merge_field_by_field():
-    def change(first, second):
-        del first["module_groups"][0]["wattage"]
-        del second["module_groups"][0]["count"]
-    quote = merge_batches(two_batches(change))
-    (group,) = quote["module_groups"]
-    assert group["count"]["batch"] == 1 and group["wattage"]["batch"] == 2
-    assert by_check(quote)[("C1_capacity", None)]["status"] == "consistent"
-
-
 def test_different_panel_lines_across_batches_conflict():
     def change(first, second):
         extra = copy.deepcopy(first["module_groups"][0])
         extra.update(count="2", wattage="545 Wp")
         first["module_groups"].append(extra)
     quote = merge_batches(two_batches(change))
-    assert len(quote["module_groups"]) == 3
-    assert all(g["count"]["conflict"] for g in quote["module_groups"])
+    matched, extra = quote["module_groups"]  # 6 x 550 Wp is on both; 2 x 545 Wp only in batch 1
+    assert not matched.get("conflict") and len(matched["count"]["candidates"]) == 2
+    assert extra["conflict"] and extra["count"]["candidates"][0]["value"] == 2
     assert quote["flags"]["needs_confirmation"][0]["field"] == "module_groups[option=None]"
     checks = by_check(quote)
     assert checks[("C1_capacity", None)]["status"] == "needs_confirmation"
