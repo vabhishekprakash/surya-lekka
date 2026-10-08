@@ -1,0 +1,174 @@
+"""HTTP API handlers: create a job, read it, re-run the checks, and start a sample.
+
+The browser renders the quote's pages to JPEG and uploads them with the
+presigned POSTs from POST /jobs, then uploads manifest.json, which starts the
+worker. Every job read or change needs the job's secret token.
+"""
+
+import json
+import os
+
+from checks import run_checks
+from extract.render import MAX_IMAGE_BYTES, MAX_PAGES
+
+from .common import (
+    MANIFEST_MAX_BYTES,
+    UPLOAD_URL_SECONDS,
+    ApiError,
+    authorised_job,
+    body_json,
+    bucket_name,
+    check_gates,
+    error_response,
+    log,
+    manifest_key,
+    new_job,
+    now,
+    page_key,
+    path_param,
+    response,
+    s3,
+    table,
+)
+
+RESULT_MAX_BYTES = 350_000
+WORKER_TIMEOUT_SECONDS = 900
+
+
+def _presigned_post(key, content_type, max_bytes):
+    post = s3().generate_presigned_post(
+        Bucket=bucket_name(), Key=key, Fields={"Content-Type": content_type},
+        Conditions=[{"Content-Type": content_type}, ["content-length-range", 1, max_bytes]],
+        ExpiresIn=UPLOAD_URL_SECONDS)
+    return {"url": post["url"], "fields": post["fields"]}
+
+
+def create_job(event, context):
+    """POST /jobs {"page_count": n}"""
+    try:
+        check_gates()
+        pages = body_json(event).get("page_count")
+        if isinstance(pages, bool) or not isinstance(pages, int) or not 1 <= pages <= MAX_PAGES:
+            raise ApiError(400, "bad_page_count", f"page_count must be a whole number from 1 to {MAX_PAGES}.")
+        job_id, token = new_job(pages, "upload")
+        body = {
+            "job_id": job_id,
+            "token": token,
+            "uploads": [{"page": n, **_presigned_post(page_key(job_id, n), "image/jpeg", MAX_IMAGE_BYTES)}
+                        for n in range(1, pages + 1)],
+            "manifest": _presigned_post(manifest_key(job_id), "application/json", MANIFEST_MAX_BYTES),
+            "manifest_body": {"pages": pages},
+            "expires_in": UPLOAD_URL_SECONDS,
+        }
+    except ApiError as e:
+        log("create_refused", reason=e.code, http_status=e.status)
+        return error_response(e)
+    log("job_created", job_id=job_id, pages=pages, http_status=201)
+    return response(201, body)
+
+
+def _view(item):
+    status, reason = item["status"], item.get("reason")
+    if status == "processing" and now() - int(item.get("claimed_at", now())) > WORKER_TIMEOUT_SECONDS:
+        status, reason = "failed", "timed_out"
+    view = {"job_id": item["job_id"], "status": status, "reason": reason, "page_count": int(item["page_count"])}
+    if status == "done":
+        result = json.loads(item.get("checked") or item["result"])
+        view.update({
+            "extraction": json.loads(item["extraction"]),
+            "processing_complete": bool(item.get("processing_complete")),
+            "findings": result["findings"],
+            "questions": result["questions"],
+            "vendor_message": result["vendor_message"],
+            "corrections": json.loads(item["corrections"]) if item.get("corrections") else None,
+        })
+    return view
+
+
+def get_job(event, context):
+    """GET /jobs/{id}?t=token"""
+    try:
+        item = authorised_job(event)
+    except ApiError as e:
+        log("read_refused", reason=e.code, http_status=e.status)
+        return error_response(e)
+    view = _view(item)
+    log("job_read", job_id=item["job_id"], status=view["status"], http_status=200)
+    return response(200, view)
+
+
+def recheck(event, context):
+    """POST /jobs/{id}/checks?t=token {"corrections": {...}, "answers": {...}}
+
+    Runs the checks on the original extraction with the user's corrections and
+    answers (consumer type, state, portal date, first system, prior subsidy, Give It
+    Up, selected option). Corrections are stored with their provenance.
+    """
+    try:
+        item = authorised_job(event)
+        if item["status"] != "done":
+            raise ApiError(409, "not_ready", "The quote has not finished processing.")
+        body = body_json(event)
+        corrections = body.get("corrections") or {}
+        answers = body.get("answers", body.get("confirmations")) or {}
+        if not isinstance(corrections, dict) or not isinstance(answers, dict):
+            raise ApiError(400, "bad_inputs", "corrections and answers must be JSON objects.")
+        user_inputs = {"corrections": corrections, "confirmations": answers}
+        try:
+            result = run_checks(json.loads(item["extraction"]), user_inputs)
+        except KeyError as e:
+            raise ApiError(400, "unknown_field", str(e).strip("'\"")) from None
+        except (TypeError, ValueError, AttributeError):
+            raise ApiError(400, "bad_inputs", "A correction or answer has the wrong type.") from None
+        checked = {k: result[k] for k in ("findings", "questions", "vendor_message")}
+        stored = {"user_inputs": user_inputs,
+                  "corrected_fields": [{**c, "provenance": "user_corrected"} for c in result["corrected_fields"]]}
+        checked_text, stored_text = json.dumps(checked, default=str), json.dumps(stored, default=str)
+        if len(checked_text) + len(stored_text) > RESULT_MAX_BYTES:
+            raise ApiError(413, "too_large", "Too many corrections to store.")
+        table().update_item(
+            Key={"job_id": item["job_id"]},
+            UpdateExpression="SET #checked = :checked, #corrections = :corrections, #checked_at = :at",
+            ExpressionAttributeNames={"#checked": "checked", "#corrections": "corrections", "#checked_at": "checked_at"},
+            ExpressionAttributeValues={":checked": checked_text, ":corrections": stored_text, ":at": now()})
+    except ApiError as e:
+        log("recheck_refused", reason=e.code, http_status=e.status)
+        return error_response(e)
+    log("rechecked", job_id=item["job_id"], http_status=200)
+    return response(200, {**checked, "corrected_fields": stored["corrected_fields"]})
+
+
+def sample_ids():
+    return [s.strip() for s in os.environ.get("SAMPLE_IDS", "S1,S2,S3").split(",") if s.strip()]
+
+
+def create_sample_job(event, context):
+    """POST /samples/{sample_id}: a job from the synthetic sample pages under samples/
+    in the bucket. It runs the same worker and Nova call as an upload and counts
+    against the daily cap."""
+    from botocore.exceptions import ClientError
+
+    sample_id = path_param(event, "sample_id")
+    try:
+        if sample_id not in sample_ids():
+            raise ApiError(404, "no_such_sample", "There is no sample with that name.")
+        check_gates()
+        bucket = bucket_name()
+        try:
+            raw = s3().get_object(Bucket=bucket, Key=f"samples/{sample_id}/manifest.json")["Body"].read()
+            pages = json.loads(raw)["pages"]
+        except (ClientError, ValueError, KeyError, TypeError):
+            raise ApiError(404, "sample_missing", "The sample's pages are not available.") from None
+        if isinstance(pages, bool) or not isinstance(pages, int) or not 1 <= pages <= MAX_PAGES:
+            raise ApiError(404, "sample_missing", "The sample's pages are not available.")
+        job_id, token = new_job(pages, f"sample:{sample_id}")
+        for n in range(1, pages + 1):
+            s3().copy_object(Bucket=bucket, Key=page_key(job_id, n),
+                             CopySource={"Bucket": bucket, "Key": f"samples/{sample_id}/page-{n:02d}.jpg"})
+        s3().put_object(Bucket=bucket, Key=manifest_key(job_id), Body=json.dumps({"pages": pages}).encode(),
+                        ContentType="application/json")
+    except ApiError as e:
+        log("sample_refused", reason=e.code, http_status=e.status)
+        return error_response(e)
+    log("sample_job_created", job_id=job_id, sample_id=sample_id, pages=pages, http_status=201)
+    return response(201, {"job_id": job_id, "token": token})
