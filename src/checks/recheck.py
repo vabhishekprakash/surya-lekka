@@ -30,6 +30,7 @@ ITEM_LISTS = {
     "extra_charges": ("charge_id", {"label": "plain", "amount": "amount", "included_in_total": "plain"}),
 }
 CONFIRMABLE = {"selected_option", "state", "consumer_type", "portal_application_on_or_after_cutoff",
+               "first_system", "prior_central_subsidy", "give_it_up",
                "multiple_options", "capacity_basis", "gst_treatment", "extra_charges_complete",
                "net_cost_subsidy_basis"}
 _ITEM_PATH = re.compile(r"^(\w+)\[([^\]]+)\]\.(\w+)$")

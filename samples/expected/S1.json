@@ -237,7 +237,8 @@
           "page": 2,
           "batch": 1
         },
-        "consumer_type": null
+        "consumer_type": null,
+        "give_it_up": null
       },
       "user_confirmed": {}
     }
@@ -246,7 +247,10 @@
     "confirmations": {
       "state": "Telangana",
       "consumer_type": "individual_household",
-      "portal_application_on_or_after_cutoff": true
+      "portal_application_on_or_after_cutoff": true,
+      "first_system": true,
+      "prior_central_subsidy": false,
+      "give_it_up": false
     }
   },
   "expected": {

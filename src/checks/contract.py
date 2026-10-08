@@ -17,7 +17,7 @@ AMOUNT_FIELDS = (
 )
 FLAG_NAMES = (
     "multiple_options", "capacity_basis", "gst_treatment", "extra_charges_complete",
-    "net_cost_subsidy_basis", "consumer_type",
+    "net_cost_subsidy_basis", "consumer_type", "give_it_up",
 )
 USER_PROVENANCE = "user_confirmed"
 
@@ -168,6 +168,8 @@ def normalise(quote):
         ],
         "state": confirmed.get("state"),
         "portal_application_on_or_after_cutoff": confirmed.get("portal_application_on_or_after_cutoff"),
+        "first_system": confirmed.get("first_system"),
+        "prior_central_subsidy": confirmed.get("prior_central_subsidy"),
         "user_confirmed": dict(confirmed),
     }
     view.update({name: amount(quote.get(name)) for name in AMOUNT_FIELDS})
