@@ -28,7 +28,7 @@ def test_wattage_range_asks_which(quote_v1):
     quote_v1["module_groups"][0]["wattage"] = capacity_field("540-550 Wp")
     r = c4(quote_v1)
     assert r["panel_wattage"]["status"] == "needs_confirmation"
-    assert r["panel_wattage"]["question"] == "panel_wattage_range"
+    assert r["panel_wattage"]["question"] == "exact_capacity"
 
 
 def test_no_module_groups(quote_v1):

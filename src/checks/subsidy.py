@@ -191,7 +191,7 @@ def check_central_subsidy(quote, rules=None):
                           f"The panel capacity is a range ({format_number(lo)} to {format_number(hi)} kWp), "
                           f"which gives a central subsidy between Rs {format_inr(amount_lo)} and "
                           f"Rs {format_inr(amount_hi)}. The exact panel wattage is needed.",
-                          evidence, rule, question="dc_range")
+                          evidence, rule, question="exact_capacity")
     else:
         evidence.append(computed("dc_kwp", lo, how))
     expected = amount_lo

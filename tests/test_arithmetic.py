@@ -145,8 +145,9 @@ def test_multiple_options_block_arithmetic(quote):
     assert check_net_cost(quote)["status"] == "needs_confirmation"
 
 
-def test_run_checks(quote):
-    assert [f["check_id"] for f in run_checks(quote)] == ["C1_capacity", "C3_gross_total", "C3_net_cost"]
+def test_run_checks(quote_v1):
+    ids = [f["check_id"] for f in run_checks(quote_v1)["findings"]]
+    assert ids == ["C1_capacity", "C2_central_subsidy", "C3_gross_total", "C3_net_cost", "C4_missing_details"]
 
 
 def test_cfa_rules_pending_verification():

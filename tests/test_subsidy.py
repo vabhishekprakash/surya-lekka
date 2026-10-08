@@ -161,7 +161,7 @@ def test_ac_rating_never_used_as_dc(quote_v1):
 def test_range_with_different_amounts(quote_v1):
     set_modules(quote_v1, 4, "540-560 Wp")  # 2.16 to 2.24 kWp
     r = c2(quote_v1)
-    assert r["status"] == "needs_confirmation" and r["question"] == "dc_range"
+    assert r["status"] == "needs_confirmation" and r["question"] == "exact_capacity"
     assert "62,880" in r["message"] and "64,320" in r["message"]
 
 

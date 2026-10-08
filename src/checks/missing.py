@@ -83,7 +83,7 @@ def _modules(quote, out):
     elif ranges:
         out.append(_item("panel_wattage", NEEDS_CONFIRMATION,
                          "Panel wattage is given as a range, so the exact panel capacity is not fixed.",
-                         ev["wattage"], "panel_wattage_range"))
+                         ev["wattage"], "exact_capacity"))
     elif unsure["wattage"]:
         out.append(_item("panel_wattage", NEEDS_CONFIRMATION, "Please confirm the panel wattage.",
                          ev["wattage"], "panel_wattage"))
