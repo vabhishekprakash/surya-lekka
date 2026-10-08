@@ -23,10 +23,11 @@ FLAG_NAMES = (
 )
 USER_PROVENANCE = "user_confirmed"
 
-# Multipliers into the unit each check works in.
+# Multipliers into the unit each check works in. kVA (apparent power) is its own
+# dimension: it is never converted to or compared as kW or kWp.
 TO_WATTS = {"W": Decimal(1), "Wp": Decimal(1), "kW": Decimal(1000), "kWp": Decimal(1000)}
-TO_KW = {"kW": Decimal(1), "kWp": Decimal(1), "kVA": Decimal(1),
-         "W": Decimal("0.001"), "Wp": Decimal("0.001")}
+TO_KW = {"kW": Decimal(1), "kWp": Decimal(1), "W": Decimal("0.001"), "Wp": Decimal("0.001")}
+KVA = {"kVA": Decimal(1)}
 
 
 class Unparsed:
@@ -106,7 +107,7 @@ def measure(f, scale):
     if status == "empty":
         return _field(f, None, raw=v.get("raw"))
     factor = scale.get(unit)
-    value = Unparsed(v.get("raw"), status or "missing_status")
+    value = Unparsed(v.get("raw"), "unit_not_comparable" if status == "ok" else status or "missing_status")
     if status == "ok" and factor is not None:
         if isinstance(parsed, dict):
             lo, hi = _decimal(parsed.get("min")), _decimal(parsed.get("max"))
@@ -115,6 +116,11 @@ def measure(f, scale):
         elif (number := _decimal(parsed)) is not None:
             value = number * factor
     return _field(f, value, raw=v.get("raw"))
+
+
+def _unit(f):
+    v = (f or {}).get("value")
+    return v.get("unit") if isinstance(v, dict) else None
 
 
 def _flag(name, proposed, confirmed):
@@ -157,12 +163,14 @@ def normalise(quote):
                 "inverter_id": i.get("inverter_id"),
                 "option_id": i.get("option_id"),
                 "make_model": plain(i.get("make_model")),
-                "rating_kw": measure(i.get("rating"), TO_KW),
+                "rating_kw": None if _unit(i.get("rating")) == "kVA" else measure(i.get("rating"), TO_KW),
+                "rating_kva": measure(i.get("rating"), KVA) if _unit(i.get("rating")) == "kVA" else None,
                 "make_model_alternatives": [plain(a) for a in i.get("make_model_alternatives") or []],
             }
             for i in chosen(quote.get("inverters"))
         ],
         "stated_capacity_kw": measure(quote.get("stated_capacity"), TO_KW),
+        "stated_capacity_unit": _unit(quote.get("stated_capacity")),
         "dcr_declaration": plain(quote.get("dcr_declaration")),
         "vendor_registration": plain(quote.get("vendor_registration")),
         "extra_charges": [
@@ -185,4 +193,9 @@ def normalise(quote):
     }
     view.update({name: amount(quote.get(name)) for name in AMOUNT_FIELDS})
     view.update({name: _flag(name, proposed, confirmed) for name in FLAG_NAMES})
+    stated = view["stated_capacity_kw"]
+    if view["stated_capacity_unit"] == "kVA" and confirmed.get("capacity_basis") is None:
+        # A system size in kVA says nothing about DC panel capacity.
+        view["capacity_basis"] = {"value": "unclear", "evidence_text": stated["evidence_text"],
+                                  "page": stated["page"], "batch": stated["batch"]}
     return view

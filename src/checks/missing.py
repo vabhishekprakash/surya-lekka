@@ -135,12 +135,14 @@ def _inverters(quote, out):
     model_unsure = False
     for i, inv in enumerate(invs):
         name = f"inverters[{i}]"
-        model_f, rating_f = inv.get("make_model"), inv.get("rating_kw")
+        model_f = inv.get("make_model")
+        rating_key = "rating_kva" if inv.get("rating_kva") is not None else "rating_kw"
+        rating_f = inv.get(rating_key)
         alts = inv.get("make_model_alternatives") or []
         if model_f is not None:
             model_ev.append(quoted(f"{name}.make_model", model_f))
         if rating_f is not None:
-            rating_ev.append(quoted(f"{name}.rating_kw", rating_f))
+            rating_ev.append(quoted(f"{name}.{rating_key}", rating_f))
         if unresolved(model_f):
             model_unsure = True
         elif not value_of(model_f):

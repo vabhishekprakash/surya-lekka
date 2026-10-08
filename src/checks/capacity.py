@@ -79,6 +79,12 @@ def check_capacity(quote):
     if basis_field is not None:
         evidence.append(quoted("capacity_basis", basis_field))
 
+    if quote.get("stated_capacity_unit") == "kVA":
+        raw = stated_field.get("raw")
+        return finding(CHECK_ID, NEEDS_CONFIRMATION,
+                       f"The quote gives the system size as {raw}. kVA is not DC panel capacity, so it was not "
+                       f"compared with the computed {computed_kwp} kWp.", evidence, question="capacity_basis",
+                       question_params={"computed_kwp": format_number(computed_kwp), "stated": raw})
     try:
         stated = to_decimal(value_of(stated_field))
     except UnusableNumber:

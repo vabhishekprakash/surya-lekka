@@ -129,22 +129,23 @@ def _norm_text(s):
     return re.sub(r"[^a-z0-9]", "", str(s).casefold())
 
 
-_UNIT = {"kw": ("kw", 1), "kwp": ("kw", 1), "kva": ("kw", 1), "w": ("w", 1), "wp": ("w", 1)}
+# kW, kWp, W and Wp compare as one dimension (in kW); kVA only ever with kVA.
+_DIMENSIONS = {"kw": ("kw", Decimal(1)), "kwp": ("kw", Decimal(1)), "w": ("kw", Decimal("0.001")),
+               "wp": ("kw", Decimal("0.001")), "kva": ("kva", Decimal(1))}
 
 
 def _measure_key(parsed, unit, want):
+    """want ("kw" or "w") is the unit assumed when none is written."""
     if parsed is None:
         return None
     unit = (unit or ("kW" if want == "kw" else "W")).lower()
-    base, _ = _UNIT.get(unit, (None, None))
-    if base is None:
+    dimension, factor = _DIMENSIONS.get(unit, (None, None))
+    if dimension is None:
         return None
-    factor = Decimal(1)
-    if base != want:
-        factor = Decimal("0.001") if want == "kw" else Decimal(1000)
     if isinstance(parsed, dict):
-        return ("range", _dec(Decimal(str(parsed["min"])) * factor), _dec(Decimal(str(parsed["max"])) * factor))
-    return ("one", _dec(Decimal(str(parsed)) * factor))
+        return (dimension, "range", _dec(Decimal(str(parsed["min"])) * factor),
+                _dec(Decimal(str(parsed["max"])) * factor))
+    return (dimension, "one", _dec(Decimal(str(parsed)) * factor))
 
 
 def truth_key(kind, text):

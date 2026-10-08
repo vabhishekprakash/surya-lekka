@@ -15,7 +15,9 @@ from .wire_schema import AMOUNT_FIELDS, FLAG_FIELDS
 
 CAPACITY_FIELDS = ("stated_capacity",)
 PLAIN_FIELDS = ("vendor_registration", "dcr_declaration")
-TO_KW = {"kw": Decimal(1), "kwp": Decimal(1), "kva": Decimal(1), "w": Decimal("0.001"), "wp": Decimal("0.001")}
+# kW, kWp, W and Wp compare as one dimension; kVA only ever with kVA.
+DIMENSIONS = {"kw": ("kw", Decimal(1)), "kwp": ("kw", Decimal(1)), "w": ("kw", Decimal("0.001")),
+              "wp": ("kw", Decimal("0.001")), "kva": ("kva", Decimal(1))}
 
 
 def _dec(text):
@@ -32,12 +34,12 @@ def _key(kind, value):
             return ("amount", _dec(value.get("parsed")))
         return ("raw", " ".join(str(value.get("raw")).casefold().split()))
     if kind == "capacity":
-        factor = TO_KW.get(str(value.get("unit")).lower())
+        dimension, factor = DIMENSIONS.get(str(value.get("unit")).lower(), (None, None))
         parsed = value.get("parsed")
         if value.get("parse_status") == "ok" and factor is not None:
             if isinstance(parsed, dict):
-                return ("range", _dec(Decimal(parsed["min"]) * factor), _dec(Decimal(parsed["max"]) * factor))
-            return ("kw", _dec(Decimal(parsed) * factor))
+                return (dimension, _dec(Decimal(parsed["min"]) * factor), _dec(Decimal(parsed["max"]) * factor))
+            return (dimension, _dec(Decimal(parsed) * factor))
         return ("raw", " ".join(str(value.get("raw")).casefold().split()))
     if isinstance(value, str):
         return ("text", " ".join(value.casefold().split()))
