@@ -1,0 +1,106 @@
+{
+  "_note": "Synthetic tool input for dry runs and tests, made from sample S1. Every value is made up.",
+  "tool_input": {
+    "multiple_options": {
+      "value": "no"
+    },
+    "options": [],
+    "module_groups": [
+      {
+        "count": "6",
+        "count_evidence": "No. of modules: 6",
+        "wattage": "550 Wp",
+        "wattage_evidence": "Solar modules: Example PV EXM-550, 550 Wp",
+        "make_model": "Example PV EXM-550",
+        "make_model_evidence": "Solar modules: Example PV EXM-550, 550 Wp",
+        "make_model_alternatives": [],
+        "page": 1
+      }
+    ],
+    "inverters": [
+      {
+        "make_model": "Example Inverters EXI-3K",
+        "make_model_evidence": "Inverter: Example Inverters EXI-3K, 3 kW on-grid",
+        "rating": "3 kW",
+        "rating_evidence": "Inverter: Example Inverters EXI-3K, 3 kW on-grid",
+        "make_model_alternatives": [],
+        "page": 1
+      }
+    ],
+    "stated_capacity": {
+      "value": "3.3 kWp",
+      "evidence": "Rooftop solar system: 3.3 kWp (DC)",
+      "page": 1
+    },
+    "capacity_basis": {
+      "value": "dc_kwp",
+      "evidence": "Rooftop solar system: 3.3 kWp (DC)",
+      "page": 1
+    },
+    "dcr_declaration": {
+      "value": "dcr",
+      "evidence": "DCR declaration: modules and cells are DCR (domestic content)",
+      "page": 1
+    },
+    "vendor_registration": {
+      "value": "EX-VR-0001",
+      "evidence": "Vendor reg. no. EX-VR-0001",
+      "page": 1
+    },
+    "base_price": {
+      "value": "Rs. 1,80,000",
+      "evidence": "Base price Rs. 1,80,000",
+      "page": 2
+    },
+    "gst_amount": {
+      "value": "Rs. 16,020",
+      "evidence": "GST @ 8.9% (extra) Rs. 16,020",
+      "page": 2
+    },
+    "discount": {
+      "value": "Rs. 1,520",
+      "evidence": "Discount Rs. 1,520",
+      "page": 2
+    },
+    "gross_total": {
+      "value": "Rs. 1,97,000/-",
+      "evidence": "Grand Total Rs. 1,97,000/-",
+      "page": 2
+    },
+    "subsidy_central": {
+      "value": "Rs. 78,000",
+      "evidence": "Central subsidy Rs. 78,000",
+      "page": 2
+    },
+    "net_cost": {
+      "value": "Rs. 1,19,000",
+      "evidence": "Net cost after central subsidy Rs. 1,19,000",
+      "page": 2
+    },
+    "extra_charges": [
+      {
+        "label": "Net meter charges",
+        "amount": "Rs. 2,500",
+        "included_in_total": "yes",
+        "total_label": "Grand Total",
+        "evidence": "Net meter charges Rs. 2,500 (included in Grand Total)",
+        "page": 2
+      }
+    ],
+    "gst_treatment": {
+      "value": "excluded",
+      "evidence": "GST @ 8.9% (extra) Rs. 16,020",
+      "page": 2
+    },
+    "extra_charges_complete": {
+      "value": "stated",
+      "evidence": "No other charges apply.",
+      "page": 2
+    },
+    "net_cost_subsidy_basis": {
+      "value": "central",
+      "evidence": "Net cost after central subsidy Rs. 1,19,000",
+      "page": 2
+    }
+  }
+}
