@@ -1,8 +1,87 @@
 {
   "rule_set": "central_cfa_residential",
-  "verification_status": "pending",
-  "source_url": null,
-  "effective_date": null,
-  "rules": [],
-  "todo": "Fill from the official MNRE CFA guidelines in the rule verification block. No subsidy entitlement check may use this file until verification_status is verified."
+  "schema_version": 1,
+  "verification": "pending",
+  "verification_note": "Every fact in this file is pending review against the listed sources. Findings that use it say so.",
+  "sources": [
+    {
+      "source_id": "MNRE-CFA-OG-2024",
+      "title": "MNRE CFA operational guidelines for residential rooftop solar, PM Surya Ghar: Muft Bijli Yojana (June/July 2024)",
+      "url": "https://cdnbbsr.s3waas.gov.in/s3716e1b8c6cd17b771da77391355749f3/uploads/2024/07/202407021768035484.pdf",
+      "verification": "pending"
+    },
+    {
+      "source_id": "MNRE-CFA-AMEND-2025-07-07",
+      "title": "MNRE amendment to the CFA operational guidelines (7 July 2025)",
+      "url": "https://cdnbbsr.s3waas.gov.in/s3716e1b8c6cd17b771da77391355749f3/uploads/2025/07/202507081690964295.pdf",
+      "verification": "pending"
+    }
+  ],
+  "effective_from": {
+    "fact_id": "CFA-EFFECTIVE-FROM",
+    "value": "2024-02-13",
+    "applies_to": "date of the subsidy application on the national portal, not the quote date",
+    "source_ids": ["MNRE-CFA-OG-2024"],
+    "verification": "pending"
+  },
+  "rules": [
+    {
+      "rule_id": "CFA-RES-GENERAL",
+      "description": "Central financial assistance for an individual residential household in a general-category state or UT.",
+      "category": "general",
+      "capacity_basis": "dc_module_kwp",
+      "fractions": "prorated",
+      "slabs": [
+        {"from_kwp": "0", "to_kwp": "2", "inr_per_kwp": "30000"},
+        {"from_kwp": "2", "to_kwp": "3", "inr_per_kwp": "18000"}
+      ],
+      "cap_inr": "78000",
+      "effective_from": "2024-02-13",
+      "source_ids": ["MNRE-CFA-OG-2024", "MNRE-CFA-AMEND-2025-07-07"],
+      "verification": "pending"
+    },
+    {
+      "rule_id": "CFA-RES-SPECIAL",
+      "description": "Central financial assistance for an individual residential household in a special-category state or UT.",
+      "category": "special",
+      "capacity_basis": "dc_module_kwp",
+      "fractions": "prorated",
+      "slabs": [
+        {"from_kwp": "0", "to_kwp": "2", "inr_per_kwp": "33000"},
+        {"from_kwp": "2", "to_kwp": "3", "inr_per_kwp": "19800"}
+      ],
+      "cap_inr": "85800",
+      "effective_from": "2024-02-13",
+      "source_ids": ["MNRE-CFA-OG-2024", "MNRE-CFA-AMEND-2025-07-07"],
+      "verification": "pending"
+    },
+    {
+      "rule_id": "CFA-DCR-REQUIRED",
+      "description": "Central financial assistance requires DCR (domestic content) solar modules and cells. Never inferred from a quote.",
+      "source_ids": ["MNRE-CFA-OG-2024", "MNRE-CFA-AMEND-2025-07-07"],
+      "verification": "pending"
+    }
+  ],
+  "special_category": {
+    "fact_id": "CFA-SPECIAL-CATEGORY-LIST",
+    "states": [
+      "Arunachal Pradesh", "Assam", "Manipur", "Meghalaya", "Mizoram", "Nagaland", "Sikkim", "Tripura",
+      "Himachal Pradesh", "Uttarakhand"
+    ],
+    "union_territories": [
+      "Jammu and Kashmir", "Ladakh", "Andaman and Nicobar Islands", "Lakshadweep"
+    ],
+    "aliases": {
+      "j and k": "Jammu and Kashmir",
+      "andaman and nicobar": "Andaman and Nicobar Islands",
+      "a and n islands": "Andaman and Nicobar Islands",
+      "uttaranchal": "Uttarakhand"
+    },
+    "source_ids": ["MNRE-CFA-OG-2024"],
+    "verification": "pending"
+  },
+  "not_covered": [
+    "State top-up subsidies are not checked.",
+    "Applications made before the effective date follow earlier rules, which are not covered."
+  ]
 }

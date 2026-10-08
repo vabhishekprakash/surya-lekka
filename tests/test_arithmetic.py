@@ -149,8 +149,7 @@ def test_run_checks(quote):
     assert [f["check_id"] for f in run_checks(quote)] == ["C1_capacity", "C3_gross_total", "C3_net_cost"]
 
 
-def test_cfa_rules_placeholder_pending():
+def test_cfa_rules_pending_verification():
     path = Path(__file__).parent.parent / "src" / "rules" / "cfa_rules.json"
-    rules = json.loads(path.read_text())
-    assert rules["verification_status"] == "pending"
-    assert rules["source_url"] is None and rules["effective_date"] is None
+    rules = json.loads(path.read_text(encoding="utf-8"))
+    assert rules["verification"] == "pending"
