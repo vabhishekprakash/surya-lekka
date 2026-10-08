@@ -168,6 +168,6 @@ def test_failed_batch_or_skipped_page_marks_processing_incomplete():
 
 
 def test_no_batches_is_incomplete():
-    quote = merge_batches([], failures=[{"batch": 1, "pages": [1, 2], "kind": "refused", "code": None}])
+    quote = merge_batches([], failures=[{"batch": 1, "pages": [1, 2], "kind": "unexpected_text", "code": None}])
     assert quote["processing_complete"] is False and quote["module_groups"] == []
     json.dumps(run_checks(quote)["findings"])

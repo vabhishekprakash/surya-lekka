@@ -99,19 +99,21 @@ def test_max_tokens(stub):
     assert failure_of(client).kind == "max_tokens"
 
 
-@pytest.mark.parametrize("response", [
-    converse_response([{"text": "Sorry, I can't help with that."}], "end_turn"),
-    converse_response([{"text": "Blocked."}], "content_filtered"),
-    converse_response([], "guardrail_intervened"),
+@pytest.mark.parametrize("response,kind", [
+    (converse_response([{"text": "Here is the summary of the quote."}], "end_turn"), "unexpected_text"),
+    (converse_response([], "end_turn"), "missing_tool_output"),
+    (converse_response([{"text": "Blocked."}], "content_filtered"), "content_filtered"),
+    (converse_response([], "guardrail_intervened"), "guardrail_intervened"),
+    (tool_response(load_dry_run_wire(), stop_reason="max_tokens"), "max_tokens"),  # even with a tool block
 ])
-def test_refusal(stub, response):
+def test_stop_reasons_and_text_replies(stub, response, kind):
     client, stubber = stub
     stubber.add_response("converse", response)
-    assert failure_of(client).kind == "refused"
+    f = failure_of(client)
+    assert f.kind == kind and f.kind != "refused"
 
 
 @pytest.mark.parametrize("response,kind", [
-    (converse_response([], "end_turn"), "missing_tool_output"),
     (converse_response([{"toolUse": {"toolUseId": "a", "name": TOOL_NAME, "input": {}}},
                         {"toolUse": {"toolUseId": "b", "name": TOOL_NAME, "input": {}}}]), "multiple_tool_calls"),
     (tool_response(load_dry_run_wire(), name="other_tool"), "wrong_tool"),

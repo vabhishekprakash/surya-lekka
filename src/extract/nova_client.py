@@ -77,16 +77,17 @@ def parse_response(response, pages):
     content = ((response.get("output") or {}).get("message") or {}).get("content") or []
     tool_uses = [b["toolUse"] for b in content if "toolUse" in b]
     has_text = any(b.get("text", "").strip() for b in content)
-    if stop == "max_tokens":
+    if stop == "max_tokens":  # a failure even when a tool block came back: it may be cut short
         raise ExtractionFailure("max_tokens", "the reply reached the token limit")
     if stop in ("content_filtered", "guardrail_intervened"):
-        raise ExtractionFailure("refused", f"stop reason {stop}")
+        raise ExtractionFailure(stop, f"stop reason {stop}")
     if stop in ("malformed_model_output", "malformed_tool_use"):
         raise ExtractionFailure("malformed", f"stop reason {stop}")
     if stop not in ACCEPTED_STOPS:
         raise ExtractionFailure("unexpected_stop", f"stop reason {stop}")
     if not tool_uses:
-        raise ExtractionFailure("refused" if has_text else "missing_tool_output", "no tool call in the reply")
+        raise ExtractionFailure("unexpected_text" if has_text else "missing_tool_output",
+                                "no tool call in the reply")
     if len(tool_uses) != 1:
         raise ExtractionFailure("multiple_tool_calls", f"{len(tool_uses)} tool calls in the reply")
     if tool_uses[0].get("name") != TOOL_NAME:
