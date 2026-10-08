@@ -10,10 +10,12 @@ The answer key is plain text, one block per document:
 
 ```
 [Q12]
-stated_capacity: 3.3 kWp | 1
-base_price: Rs. 1,80,000 | 2
-discount: null
+capacity_stated: 3.3 kWp | 1
+total_price: Rs. 1,97,000 | 2
+gst: extra | 2
+subsidy: Rs. 78,000 | 2
+subsidy_type: central
 panel_count: 6 + 4 | 1
 ```
 
-The page after `|` is optional. `null`, `-` or `not found` mean the quote doesn't state it. Run `python -m src.extract.spike --help` for the field names it scores. Keys it doesn't recognise are listed and left out of the score.
+The page after `|` is optional. `not stated` means the correct answer is null. `pages_total` and `contradictions` are kept but not scored; the run warns when `pages_total` differs from the file. `python -m src.extract.spike --check-key --answer-key <file>` lists the field names it found for each document, and the ones it doesn't recognise, without any values. Run `--help` for the full list of names.

@@ -139,6 +139,9 @@ TOOL_SCHEMA = {
                                  DCR_VALUES),
         "vendor_registration": _field("The vendor's registration or empanelment number.",
                                       "The number exactly as printed."),
+        "vendor_name": _field("The vendor's company name.", "The name exactly as printed."),
+        "vendor_state": _field("The state in the vendor's own address.", "The state exactly as printed."),
+        "quote_date": _field("The date of the quotation.", "The date exactly as printed."),
         "gst_treatment": _flag("Does the base price include GST?", FLAG_VALUES["gst_treatment"]),
         "extra_charges_complete": _flag("Does the quote state that there are no other charges?",
                                         FLAG_VALUES["extra_charges_complete"]),
@@ -150,7 +153,7 @@ TOOL_SCHEMA = {
                  "extra_charges"],
 }
 
-PLAIN_FIELDS = ("vendor_registration",)
+PLAIN_FIELDS = ("vendor_registration", "vendor_name", "vendor_state", "quote_date")
 FLAG_FIELDS = tuple(FLAG_VALUES)
 FACT_LISTS = ("prices", "subsidies", "capacities")
 

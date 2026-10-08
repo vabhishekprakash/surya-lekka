@@ -11,101 +11,192 @@ from extract.wire_schema import normalise_batch, validate
 
 ROOT = Path(__file__).resolve().parent.parent
 
-KEY = """# synthetic answer key
+KEY = """# synthetic answer key, written with the hand-written key's own names
 [S1]
-stated_capacity: 3.3 kWp | 1
-Base Price: Rs. 1,80,000 | p2
-discount: 1,520 | page 2
-subsidy_state: null
-subsidy_combined: -
-panel count: 6 | 1
-total system cost incl everything: 123
-gst_amount = Rs. 99 | 2
+quote_date: 01/10/2026 | 1
+vendor_name: example solar  PVT LTD | 1
+vendor_state: not stated
+options: 1
+capacity_stated: 3.3 kWp; 3 kW inverter | 1
+capacity_basis: DC | 1
+panel_count: 6 | 1
+panel_wattage_w: 550 | 1
+panel_make: Example PV EXM-550 | 1
+inverter_rating: 3 kW | 1
+inverter_make: Example Inverters EXI-3K | 1
+total_price: Rs. 1,97,000 | 2
+gst: extra | 2
+extra_charges_outside_total: not stated
+subsidy: 78,000 | 2
+subsidy_type: central
+net_cost_stated: 1,19,000 | 2
+dcr_text: modules and cells are DCR (domestic content) | 1
+pages_total: 2
+contradictions: none
+Total system cost incl everything: 123
 
 ## S2
-dcr: yes
-net: not found
-multiple_options: no
+options: more than 1
+gst: unclear
 S3:
-panel_wattage: 550 Wp + 545 Wp
+panel_wattage_w: 550 + 545
 """
+ALIAS_TABLE = {
+    "quote_date": "quote_date", "vendor_name": "vendor_name", "vendor_state": "vendor_state",
+    "options": "multiple_options", "capacity_stated": "stated_capacity", "capacity_basis": "capacity_basis",
+    "panel_count": "panel_count", "panel_wattage_w": "panel_wattage", "panel_make": "module_make_model",
+    "inverter_rating": "inverter_rating", "inverter_make": "inverter_make_model", "total_price": "gross_total",
+    "gst": "gst_treatment", "extra_charges_outside_total": "extra_charges_outside_total", "subsidy": "subsidy",
+    "subsidy_type": "subsidy_type", "net_cost_stated": "net_cost", "dcr_text": "dcr_text",
+}
 
 
-def sample_quote():
-    cleaned, errors, _ = validate(load_dry_run_wire(), [1, 2])
+def sample_quote(change=None):
+    data = load_dry_run_wire()
+    if change:
+        change(data)
+    cleaned, errors, _ = validate(data, [1, 2])
     assert errors == []
     return merge_batches([{"batch": 1, "pages": [1, 2], "contract": normalise_batch(cleaned, 1)}])
 
 
+def truth(value, *pages):
+    return {"value": value, "pages": list(pages)}
+
+
 # --- answer key ------------------------------------------------------------------------
+
+def test_alias_table_covers_every_key_name():
+    assert scoring.ALIASES == ALIAS_TABLE
+    assert set(ALIAS_TABLE.values()) <= set(scoring.FIELDS)
+    assert scoring.KEPT == ("pages_total", "contradictions")
+
 
 def test_parse_answer_key():
     key = scoring.parse_answer_key("stray: 1\n" + KEY)
     assert set(key["docs"]) == {"S1", "S2", "S3"}
     s1 = key["docs"]["S1"]
-    assert s1["stated_capacity"] == {"value": "3.3 kWp", "pages": [1]}
-    assert s1["base_price"] == {"value": "Rs. 1,80,000", "pages": [2]}
-    assert s1["discount"]["pages"] == [2]
-    assert s1["subsidy_state"]["value"] is None and s1["subsidy_combined"]["value"] is None
-    assert s1["panel_count"]["value"] == "6"
-    assert s1["gst_amount"]["value"] == "Rs. 99"
-    assert key["unknown"] == {"S1": ["total system cost incl everything"]}
-    assert key["docs"]["S2"] == {"dcr_declaration": {"value": "yes", "pages": []},
-                                 "net_cost": {"value": None, "pages": []},
-                                 "multiple_options": {"value": "no", "pages": []}}
+    assert set(s1) == set(ALIAS_TABLE.values())
+    assert s1["stated_capacity"] == {"value": "3.3 kWp; 3 kW inverter", "pages": [1], "key": "capacity_stated"}
+    assert s1["vendor_state"]["value"] is None and s1["extra_charges_outside_total"]["value"] is None
+    assert key["kept"]["S1"]["pages_total"]["value"] == "2" and "contradictions" in key["kept"]["S1"]
+    assert key["unknown"] == {"S1": ["Total system cost incl everything"]}
+    assert set(key["docs"]["S2"]) == {"multiple_options", "gst_treatment"}
     assert key["orphan_lines"] == 1
 
 
 def test_header_styles_and_comments():
-    text = "== Q12 ==\nbase_price: 1\n# a comment line\n// another\n-- Q16 --\nbase_price: 2\nDocument: Q20\ngst: 3\n"
+    text = "== Q12 ==\ntotal_price: 1\n# a comment line\n// another\n-- Q16 --\ntotal_price: 2\nDocument: Q20\ngst: extra\n"
     key = scoring.parse_answer_key(text)
     assert {d: list(v) for d, v in key["docs"].items()} == {
-        "Q12": ["base_price"], "Q16": ["base_price"], "Q20": ["gst_amount"]}
-    key = scoring.parse_answer_key("[Q12]\nbase_price: 1\nbase_price: 2\n550\n")
-    assert key["duplicates"] == {"Q12": ["base_price"]} and key["docs"]["Q12"]["base_price"]["value"] == "2"
+        "Q12": ["gross_total"], "Q16": ["gross_total"], "Q20": ["gst_treatment"]}
+    key = scoring.parse_answer_key("[Q12]\ntotal_price: 1\ntotal_price: 2\n550\n")
+    assert key["duplicates"] == {"Q12": ["gross_total"]} and key["docs"]["Q12"]["gross_total"]["value"] == "2"
     assert set(key["docs"]) == {"Q12"}  # a bare number is not a document header
 
 
 # --- scoring ---------------------------------------------------------------------------
 
-def test_score_statuses():
-    quote = sample_quote()
+def test_every_key_scores_against_the_sample():
     key = scoring.parse_answer_key(KEY)["docs"]["S1"]
-    scores = scoring.score_document(quote, key)
-    assert scores["stated_capacity"] == {"status": "correct", "conflict": False, "page_ok": True}
-    assert scores["base_price"]["status"] == "correct" and scores["base_price"]["page_ok"] is True
-    assert scores["discount"]["status"] == "correct"
-    assert scores["gst_amount"]["status"] == "wrong"
-    assert scores["subsidy_state"]["status"] == "abstained"
-    assert scores["panel_count"]["status"] == "correct"
-    quote["discount"] = None
-    assert scoring.score_field(quote, "discount", key["discount"])["status"] == "missing"
-    assert scoring.score_field(quote, "net_cost", {"value": None, "pages": []})["status"] == "falsely_populated"
-    wrong_page = scoring.score_field(quote, "base_price", {"value": "180000", "pages": [1]})
-    assert wrong_page == {"status": "correct", "conflict": False, "page_ok": False}
+    scores = scoring.score_document(sample_quote(), key)
+    expected = {k: "correct" for k in key}
+    expected.update(vendor_state="abstained", extra_charges_outside_total="abstained")
+    assert {k: v["status"] for k, v in scores.items()} == expected
+    assert scores["stated_capacity"]["notes"] == ["3 kW inverter"]
+    assert scores["stated_capacity"]["page_ok"] is True and scores["gross_total"]["page_ok"] is True
 
 
-def test_flags_lists_and_units():
+def test_options_values():
+    quote = sample_quote()
+    assert scoring.score_field(quote, "multiple_options", truth("1"))["status"] == "correct"
+    assert scoring.score_field(quote, "multiple_options", truth("more than 1"))["status"] == "wrong"
+
+
+def test_gst_is_the_basis_not_the_amount():
+    quote = sample_quote()
+    assert scoring.score_field(quote, "gst_treatment", truth("extra"))["status"] == "correct"
+    assert scoring.score_field(quote, "gst_treatment", truth("included"))["status"] == "wrong"
+    assert scoring.score_field(quote, "gst_treatment", truth("Rs. 16,020"))["status"] == "wrong"
+
+
+def test_capacity_and_wattage_matching():
     quote = sample_quote()
     score = scoring.score_field
-    assert score(quote, "multiple_options", {"value": "no", "pages": []})["status"] == "correct"
-    assert score(quote, "dcr_declaration", {"value": "yes", "pages": []})["status"] == "correct"
-    assert score(quote, "capacity_basis", {"value": "DC kWp", "pages": []})["status"] == "correct"
-    assert score(quote, "panel_wattage", {"value": "0.55 kW", "pages": []})["status"] == "correct"
-    assert score(quote, "stated_capacity", {"value": "3300 W", "pages": []})["status"] == "correct"
-    assert score(quote, "inverter_rating", {"value": "3", "pages": []})["status"] == "correct"
-    assert score(quote, "panel_count", {"value": "6 + 4", "pages": []})["status"] == "wrong"
-    assert score(quote, "module_make_model", {"value": "example pv exm 550", "pages": []})["status"] == "correct"
-    assert score(quote, "give_it_up", {"value": None, "pages": []})["status"] == "abstained"
+    assert score(quote, "stated_capacity", truth("3300 W"))["status"] == "correct"
+    assert score(quote, "stated_capacity", truth("3.3 kWp (DC)"))["status"] == "correct"
+    assert score(quote, "stated_capacity", truth("3.3 kVA"))["status"] == "wrong"
+    assert score(quote, "panel_wattage", truth("550 Wp"))["status"] == "correct"
+    assert score(quote, "panel_wattage", truth("540-560"))["status"] == "wrong"
+    ranged = sample_quote(lambda d: d["module_groups"][0].update(wattage="540-560 Wp"))
+    assert score(ranged, "panel_wattage", truth("540-560"))["status"] == "correct"
+    assert score(quote, "capacity_basis", truth("AC"))["status"] == "wrong"
+    unclear = sample_quote(lambda d: d["capacity_basis"].update(value="unspecified"))
+    assert score(unclear, "capacity_basis", truth("unclear"))["status"] == "correct"
+    assert score(unclear, "capacity_basis", truth(None))["status"] == "abstained"
+
+
+def test_text_ignores_case_and_whitespace_only():
+    quote = sample_quote()
+    score = scoring.score_field
+    assert score(quote, "module_make_model", truth("example pv  exm-550"))["status"] == "correct"
+    assert score(quote, "module_make_model", truth("Example PV EXM 550"))["status"] == "wrong"
+    assert score(quote, "vendor_name", truth("Example Solar"))["status"] == "wrong"
+
+
+def test_subsidy_and_subsidy_type():
+    quote = sample_quote()
+    score = scoring.score_field
+    assert score(quote, "subsidy", truth("Rs 78000"), {"subsidy_type": truth("central")})["status"] == "correct"
+    assert score(quote, "subsidy", truth("Rs 78000"), {"subsidy_type": truth("state")})["status"] == "missing"
+    assert score(quote, "subsidy_type", truth("central"))["status"] == "correct"
+    assert score(quote, "subsidy_type", truth("combined"))["status"] == "wrong"
+    assert score(quote, "subsidy_type", truth(None))["status"] == "falsely_populated"
+    unspecified = sample_quote(lambda d: d["subsidies"][0].update(kind="unspecified"))
+    assert score(unspecified, "subsidy_type", truth(None))["status"] == "abstained"
+    assert score(unspecified, "subsidy", truth("78,000"), {"subsidy_type": truth(None)})["status"] == "correct"
+
+
+def test_extra_charges_outside_total():
+    outside = sample_quote(lambda d: d["extra_charges"][0].update(included_in_total="no"))
+    score = scoring.score_field
+    assert score(outside, "extra_charges_outside_total", truth("Net meter Rs 2,500"))["status"] == "correct"
+    assert score(outside, "extra_charges_outside_total", truth("2500; 5000"))["status"] == "wrong"
+    assert score(outside, "extra_charges_outside_total", truth(None))["status"] == "falsely_populated"
+    assert score(sample_quote(), "extra_charges_outside_total", truth("2500"))["status"] == "missing"
+
+
+def test_dcr_text():
+    quote = sample_quote()
+    score = scoring.score_field
+    assert score(quote, "dcr_text", truth("DCR declaration: modules and cells are DCR"))["status"] == "correct"
+    assert score(quote, "dcr_text", truth("Non-DCR panels"))["status"] == "wrong"
+    assert score(quote, "dcr_text", truth(None))["status"] == "falsely_populated"
+    no_dcr = sample_quote(lambda d: d.pop("dcr_declaration"))
+    assert score(no_dcr, "dcr_text", truth(None))["status"] == "abstained"
+    assert score(no_dcr, "dcr_text", truth("DCR"))["status"] == "missing"
+
+
+def test_score_statuses_and_pages():
+    quote = sample_quote()
+    assert scoring.score_field(quote, "discount", truth("1,520", 2)) == {
+        "status": "correct", "conflict": False, "page_ok": True}
+    assert scoring.score_field(quote, "base_price", truth("180000", 1))["page_ok"] is False
+    assert scoring.score_field(quote, "gst_amount", truth("Rs. 99"))["status"] == "wrong"
+    assert scoring.score_field(quote, "subsidy_state", truth(None))["status"] == "abstained"
+    assert scoring.score_field(quote, "net_cost", truth(None))["status"] == "falsely_populated"
+    assert scoring.score_field(sample_quote(lambda d: d["prices"].pop(2)), "discount",
+                               truth("1,520"))["status"] == "missing"
+    assert scoring.score_field(quote, "panel_count", truth("6 + 4"))["status"] == "wrong"
 
 
 def test_conflict_scores_as_missing_or_falsely_populated():
     quote = sample_quote()
     quote["gross_total"] = {"value": {"raw": None, "parsed": None, "parse_status": "conflict"},
                             "conflict": True, "candidates": []}
-    assert scoring.score_field(quote, "gross_total", {"value": "197000", "pages": []}) == {
+    assert scoring.score_field(quote, "gross_total", truth("197000")) == {
         "status": "missing", "conflict": True, "page_ok": None}
-    assert scoring.score_field(quote, "gross_total", {"value": None, "pages": []})["status"] == "falsely_populated"
+    assert scoring.score_field(quote, "gross_total", truth(None))["status"] == "falsely_populated"
 
 
 def test_summary():
@@ -193,12 +284,30 @@ def args(tmp, *extra):
             "--in", str(tmp / "in"), "--out", str(tmp / "out"), "--answer-key", str(tmp / "key.txt"), *extra]
 
 
+def test_check_key_prints_names_only(sample_dir, capsys):
+    assert spike.main(["--check-key", "--answer-key", str(sample_dir / "key.txt")]) == 0
+    out = capsys.readouterr().out
+    assert "capacity_stated -> stated_capacity" in out and "options -> multiple_options" in out
+    assert "kept, not scored: pages_total, contradictions" in out
+    assert "not recognised, not scored: Total system cost incl everything" in out
+    for value in ("01/10/2026", "1,97,000", "Example PV", "78,000", "550"):
+        assert value not in out
+
+
+def test_pages_total_warning(sample_dir, capsys):
+    (sample_dir / "key.txt").write_text("[S1]\npages_total: 3\n[S2]\npages_total: 2\n", encoding="utf-8")
+    assert spike.main(args(sample_dir, "--dry-run")) == 0
+    out = capsys.readouterr().out
+    assert out.count("warning: the answer key says") == 1
+    assert "warning: the answer key says 3 pages, the file has 2" in out
+
+
 def test_dry_run_end_to_end(sample_dir, capsys):
     assert spike.main(args(sample_dir, "--dry-run")) == 0
     out = capsys.readouterr().out
     assert "Dry run" in out and "correct" in out and "abstained" in out
     assert "S1: 2 pages in the file, 2 rendered, 0 skipped" in out
-    for text in ("1,80,000", "EX-VR-0001", "Example PV", "Net meter"):
+    for text in ("1,80,000", "1,97,000", "EX-VR-0001", "Example PV", "Net meter", "01/10/2026"):
         assert text not in out  # never prints document text
     (run_dir,) = (sample_dir / "out").iterdir()
     assert {p.name for p in run_dir.iterdir()} == {
@@ -208,7 +317,7 @@ def test_dry_run_end_to_end(sample_dir, capsys):
     assert batch["usage"]["inputTokens"] == 1500 and batch["pages"] == [1, 2] and "seconds" in batch
     assert json.loads((doc / "quote.json").read_text(encoding="utf-8"))["processing_complete"] is True
     scores = json.loads((run_dir / "scores.json").read_text(encoding="utf-8"))
-    assert scores["apac.amazon.nova-pro-v1:0"]["scores"]["S1"]["base_price"]["status"] == "correct"
+    assert scores["apac.amazon.nova-pro-v1:0"]["scores"]["S1"]["gross_total"]["status"] == "correct"
 
 
 def test_out_inside_repo_refused(sample_dir, capsys):

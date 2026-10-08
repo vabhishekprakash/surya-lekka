@@ -185,22 +185,56 @@ def parse_args(argv):
                                 formatter_class=argparse.RawDescriptionHelpFormatter,
                                 epilog=scoring.__doc__.split("\n\n", 1)[1]
                                 + "\nFields scored: " + ", ".join(scoring.FIELDS) + ".")
-    p.add_argument("--files", required=True, help="comma-separated document ids, e.g. Q12,Q16")
-    p.add_argument("--models", required=True, help="comma-separated inference profile ids")
+    p.add_argument("--files", help="comma-separated document ids, e.g. Q12,Q16")
+    p.add_argument("--models", help="comma-separated inference profile ids")
     p.add_argument("--region", default="ap-south-1")
-    p.add_argument("--in", dest="in_dir", required=True, type=Path)
-    p.add_argument("--out", dest="out_dir", required=True, type=Path)
+    p.add_argument("--in", dest="in_dir", type=Path)
+    p.add_argument("--out", dest="out_dir", type=Path)
     p.add_argument("--answer-key", type=Path)
+    p.add_argument("--check-key", action="store_true",
+                   help="only list the answer key's field names per document, then stop")
     p.add_argument("--dry-run", action="store_true", help="stubbed replies, no AWS calls")
     p.add_argument("--dpi", type=int, default=DEFAULT_DPI)
     p.add_argument("--max-pages", type=int, default=MAX_PAGES)
     p.add_argument("--retries", type=int, default=0, help="botocore retries per call (default 0)")
     p.add_argument("--request-limit", type=int, default=DEFAULT_REQUEST_LIMIT_BYTES,
                    help="largest serialised request in bytes")
-    return p.parse_args(argv)
+    args = p.parse_args(argv)
+    needed = ["answer_key"] if args.check_key else ["files", "models", "in_dir", "out_dir"]
+    missing = [n for n in needed if getattr(args, n) is None]
+    if missing:
+        p.error("missing: " + ", ".join("--" + n.replace("_dir", "").replace("_", "-") for n in missing))
+    return args
+
+
+def describe_key(key, docs=None):
+    """Field names per document, never values."""
+    lines = [f"Answer key: {len(key['docs'])} document blocks"]
+    for d in docs or list(key["docs"]):
+        fields = key["docs"].get(d, {})
+        named = [f"{t['key']} -> {f}" if scoring.key_name(t["key"]) != f else f for f, t in fields.items()]
+        lines.append(f"  {d}: {len(fields)} scored: {', '.join(named) or '-'}")
+        if key["kept"].get(d):
+            lines.append(f"  {d}: kept, not scored: {', '.join(key['kept'][d])}")
+        if key["unknown"].get(d):
+            lines.append(f"  {d}: not recognised, not scored: {', '.join(key['unknown'][d])}")
+        if key["duplicates"].get(d):
+            lines.append(f"  {d}: given twice, last one used: {', '.join(key['duplicates'][d])}")
+    if key["orphan_lines"]:
+        lines.append(f"  {key['orphan_lines']} key lines before the first document header were ignored")
+    return "\n".join(lines)
+
+
+def read_key(path):
+    if not path.is_file():
+        raise RunStopped("--answer-key file not found.")
+    return scoring.parse_answer_key(path.read_text(encoding="utf-8-sig"))
 
 
 def run(args):
+    if args.check_key:
+        print(describe_key(read_key(args.answer_key)))
+        return 0
     docs = [d.strip() for d in args.files.split(",") if d.strip()]
     models = [m.strip() for m in args.models.split(",") if m.strip()]
     out_root = args.out_dir.resolve()
@@ -210,20 +244,10 @@ def run(args):
         raise RunStopped("--in is not a folder.")
     paths = {d: find_document(args.in_dir, d) for d in docs}
 
-    key = {"docs": {}, "unknown": {}, "orphan_lines": 0, "duplicates": {}}
+    key = {"docs": {}, "kept": {}, "unknown": {}, "orphan_lines": 0, "duplicates": {}}
     if args.answer_key:
-        if not args.answer_key.is_file():
-            raise RunStopped("--answer-key file not found.")
-        key = scoring.parse_answer_key(args.answer_key.read_text(encoding="utf-8-sig"))
-        print(f"Answer key: {len(key['docs'])} document blocks")
-        for d in docs:
-            print(f"  {d}: {len(key['docs'].get(d, {}))} fields")
-        for d, keys in key["unknown"].items():
-            print(f"  {d}: keys not recognised, not scored: {', '.join(keys)}")
-        for d, keys in key["duplicates"].items():
-            print(f"  {d}: keys given twice, last one used: {', '.join(keys)}")
-        if key["orphan_lines"]:
-            print(f"  {key['orphan_lines']} key lines before the first document header were ignored")
+        key = read_key(args.answer_key)
+        print(describe_key(key, docs))
 
     if args.dry_run:
         print("Dry run: stubbed replies, no AWS calls.")
@@ -239,6 +263,9 @@ def run(args):
         largest = max((len(p.jpeg) for p in pages), default=0)
         print(f"{d}: {result.page_count} pages in the file, {len(pages)} rendered, {len(skipped)} skipped, "
               f"largest image {largest // 1024} KB")
+        stated = ((key["kept"].get(d) or {}).get("pages_total") or {}).get("value")
+        if stated and stated.strip().isdigit() and int(stated) != result.page_count:
+            print(f"  warning: the answer key says {int(stated)} pages, the file has {result.page_count}")
     _write(run_dir / "run.json", {"files": docs, "models": models, "region": args.region,
                                   "dry_run": args.dry_run, "dpi": args.dpi, "max_pages": args.max_pages,
                                   "retries": args.retries, "request_limit": args.request_limit,

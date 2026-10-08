@@ -12,7 +12,7 @@ from extract.wire_schema import AMOUNT_FIELDS, TOOL_SCHEMA, count_value, normali
 
 ROOT = Path(__file__).resolve().parent.parent
 S1 = json.loads((ROOT / "samples" / "expected" / "S1.json").read_text(encoding="utf-8"))["quote"]
-CUSTOMER = re.compile(r"customer|name|phone|mobile|email|address|consumer", re.I)
+CUSTOMER = re.compile(r"customer|consumer|buyer|client|phone|mobile|email|address|^name$", re.I)
 
 
 def keys_and_depth(schema, depth=0):

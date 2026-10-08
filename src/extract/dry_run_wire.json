@@ -123,6 +123,16 @@
       "value": "central",
       "page": 2,
       "evidence_text": "Net cost after central subsidy Rs. 1,19,000"
+    },
+    "vendor_name": {
+      "value": "Example Solar Pvt Ltd",
+      "evidence_text": "Example Solar Pvt Ltd",
+      "page": 1
+    },
+    "quote_date": {
+      "value": "01/10/2026",
+      "evidence_text": "Quotation No. EXS-S1 | Date 01/10/2026",
+      "page": 1
     }
   }
 }
