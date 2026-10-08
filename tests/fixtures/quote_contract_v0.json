@@ -1,0 +1,27 @@
+{
+  "_contract": "Assumed check input until spike/schema_v0.json exists. Every extracted field is null or {value, evidence_text, page}; value null means not found. Amounts are already-parsed INR numbers or numeric strings. capacity_basis: dc_kwp | ac_kw | unspecified. gst_treatment: included | excluded (does base_price include GST). extra_charges_complete is true only when the quote or the user confirms the list is complete. net_cost_subsidy_basis: none | central | state | central_and_state | combined. selected_option is set by the user, not extracted. All values here are synthetic.",
+  "multiple_options": {"value": false, "evidence_text": null, "page": null},
+  "selected_option": null,
+  "module_groups": [
+    {
+      "count": {"value": 6, "evidence_text": "No. of panels: 6", "page": 1},
+      "wattage_w": {"value": 545, "evidence_text": "545 Wp mono PERC", "page": 1}
+    }
+  ],
+  "stated_capacity_kw": {"value": "3.27", "evidence_text": "System size 3.27 kWp", "page": 1},
+  "capacity_basis": {"value": "dc_kwp", "evidence_text": "3.27 kWp", "page": 1},
+  "base_price": {"value": 180000, "evidence_text": "Base price Rs. 1,80,000", "page": 2},
+  "gst_treatment": {"value": "excluded", "evidence_text": "GST extra as applicable", "page": 2},
+  "gst_amount": {"value": 16020, "evidence_text": "GST Rs. 16,020", "page": 2},
+  "extra_charges": [
+    {"label": "Net meter charges", "amount": {"value": 2500, "evidence_text": "Net meter Rs. 2,500", "page": 2}}
+  ],
+  "extra_charges_complete": {"value": true, "evidence_text": "No other charges", "page": 2},
+  "discount": {"value": 1520, "evidence_text": "Discount Rs. 1,520", "page": 2},
+  "gross_total": {"value": 197000, "evidence_text": "Total Rs. 1,97,000/-", "page": 2},
+  "subsidy_central": {"value": 78000, "evidence_text": "Central subsidy Rs. 78,000", "page": 2},
+  "subsidy_state": null,
+  "subsidy_combined": null,
+  "net_cost_subsidy_basis": {"value": "central", "evidence_text": "Net cost after central subsidy", "page": 2},
+  "net_cost": {"value": 119000, "evidence_text": "Net cost Rs. 1,19,000", "page": 2}
+}

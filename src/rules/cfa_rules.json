@@ -1,0 +1,8 @@
+{
+  "rule_set": "central_cfa_residential",
+  "verification_status": "pending",
+  "source_url": null,
+  "effective_date": null,
+  "rules": [],
+  "todo": "Fill from the official MNRE CFA guidelines in the rule verification block. No subsidy entitlement check may use this file until verification_status is verified."
+}
