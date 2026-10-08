@@ -2,6 +2,14 @@
 .claude/
 CLAUDE.md
 
+# images (quote photos); only docs/ images are tracked
+*.jpg
+*.jpeg
+*.png
+*.heic
+*.webp
+!docs/**
+
 # never commit quote documents or data
 *.pdf
 data/
