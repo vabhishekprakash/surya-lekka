@@ -18,6 +18,7 @@ from .common import (
     options_unresolved,
     quoted,
     to_decimal,
+    unresolved,
     value_of,
 )
 
@@ -50,7 +51,7 @@ def _modules(quote, out):
     groups = quote.get("module_groups") or []
     ev = {"count": [], "wattage": [], "model": []}
     missing = {"count": [], "wattage": [], "model": []}
-    unsure = {"count": [], "wattage": []}
+    unsure = {"count": [], "wattage": [], "model": []}
     ranges, choices = [], []
     for i, g in enumerate(groups):
         name = f"module_groups[{i}]"
@@ -71,7 +72,9 @@ def _modules(quote, out):
             ranges.append(name)
         elif not isinstance(watt, Decimal):
             unsure["wattage"].append(name)
-        if not value_of(model_f):
+        if unresolved(model_f):
+            unsure["model"].append(name)
+        elif not value_of(model_f):
             missing["model"].append(name)
         elif alts:
             choices.append(_choices(model_f, alts))
@@ -96,6 +99,9 @@ def _modules(quote, out):
     if not groups or missing["model"]:
         out.append(_item("module_make_model", MISSING,
                          "Exact panel make and model: not found on the quote.", ev["model"], "module_model"))
+    elif unsure["model"]:
+        out.append(_item("module_make_model", NEEDS_CONFIRMATION, "Please confirm the panel make and model.",
+                         ev["model"], "module_model"))
     elif choices:
         out.append(_item("module_make_model", NEEDS_CONFIRMATION,
                          "The quote lists alternative panel makes or models; it does not say which one "
@@ -106,6 +112,11 @@ def _dcr(quote, out):
     f = quote.get("dcr_declaration")
     v = value_of(f)
     if v is True:
+        return
+    if unresolved(f):
+        out.append(_item("dcr_declaration", NEEDS_CONFIRMATION,
+                         "Please confirm what the quote says about DCR (domestic content) panels.",
+                         [quoted("dcr_declaration", f)], "dcr"))
         return
     if v is False:
         out.append(_item("dcr_declaration", NEEDS_CONFIRMATION,
@@ -121,6 +132,7 @@ def _inverters(quote, out):
     invs = quote.get("inverters") or []
     model_ev, rating_ev = [], []
     model_missing, rating_missing, rating_unsure, choices = not invs, not invs, False, []
+    model_unsure = False
     for i, inv in enumerate(invs):
         name = f"inverters[{i}]"
         model_f, rating_f = inv.get("make_model"), inv.get("rating_kw")
@@ -129,7 +141,9 @@ def _inverters(quote, out):
             model_ev.append(quoted(f"{name}.make_model", model_f))
         if rating_f is not None:
             rating_ev.append(quoted(f"{name}.rating_kw", rating_f))
-        if not value_of(model_f):
+        if unresolved(model_f):
+            model_unsure = True
+        elif not value_of(model_f):
             model_missing = True
         elif alts:
             choices.append(_choices(model_f, alts))
@@ -141,6 +155,9 @@ def _inverters(quote, out):
             rating_unsure = True
     if model_missing:
         out.append(_item("inverter_make_model", MISSING, "Inverter make and model: not found on the quote.",
+                         model_ev, "inverter_model"))
+    elif model_unsure:
+        out.append(_item("inverter_make_model", NEEDS_CONFIRMATION, "Please confirm the inverter make and model.",
                          model_ev, "inverter_model"))
     elif choices:
         out.append(_item("inverter_make_model", NEEDS_CONFIRMATION,
@@ -156,7 +173,11 @@ def _inverters(quote, out):
 
 def _vendor_registration(quote, out):
     f = quote.get("vendor_registration")
-    if not value_of(f):
+    if unresolved(f):
+        out.append(_item("vendor_registration", NEEDS_CONFIRMATION,
+                         "Please confirm the vendor registration number on the quote.",
+                         [quoted("vendor_registration", f)], "vendor_registration"))
+    elif not value_of(f):
         out.append(_item("vendor_registration", MISSING,
                          "Vendor registration number: not found on the quote. This does not mean the vendor "
                          "is unregistered.", [quoted("vendor_registration", f)] if f is not None else [],

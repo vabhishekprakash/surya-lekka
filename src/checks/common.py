@@ -87,6 +87,12 @@ def value_of(field):
     return field.get("value")
 
 
+def unresolved(field):
+    """True when a field is present but its value could not be read, for example
+    because extraction batches disagreed."""
+    return hasattr(value_of(field), "parse_status")
+
+
 USER_KINDS = ("user_corrected", "user_confirmed")
 
 

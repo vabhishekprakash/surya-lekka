@@ -1,6 +1,8 @@
 """Quote contract v1 and the internal view the checks read.
 
 The extraction step writes contract v1 (see tests/fixtures/quote_contract_v1.json).
+A field the merge step marks "conflict": true (batches disagreed) is never
+read as a value.
 normalise() turns it into the flat view the checks use: amounts and
 capacities become Decimals in fixed units, flags resolve to the user's answer
 when there is one and to the model's reading otherwise, and items that belong
@@ -39,6 +41,9 @@ class Unparsed:
     def __eq__(self, other):
         return isinstance(other, Unparsed) and (self.raw, self.parse_status) == (other.raw, other.parse_status)
 
+    def __hash__(self):
+        return hash((self.raw, self.parse_status))
+
     def __repr__(self):
         return f"Unparsed({self.raw!r}, {self.parse_status!r})"
 
@@ -55,7 +60,13 @@ def _field(f, value, raw=None):
 
 
 def plain(f):
-    return None if f is None else _field(f, f.get("value"))
+    """A field as is; a field the merge marked as a conflict between batches
+    becomes Unparsed, which the checks treat as needing confirmation."""
+    if f is None:
+        return None
+    if f.get("conflict"):
+        return _field(f, Unparsed(None, "conflict"))
+    return _field(f, f.get("value"))
 
 
 def _decimal(text):
