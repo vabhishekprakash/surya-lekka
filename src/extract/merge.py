@@ -101,9 +101,15 @@ def _item_tuple(list_name, item):
                  for key, kind in ITEM_TUPLES[list_name])
 
 
-def _item_key(list_name, item):
+def _label_key(item):
     f = item.get("label")
     return _key("text", f["value"]) if f else None
+
+
+def _charge_key(item):
+    """Label and parsed amount: what makes two charges from different batches the same charge."""
+    f = item.get("amount")
+    return repr((_label_key(item), _key("amount", f["value"]) if f else None))
 
 
 def _merge_items(m, list_name, path, items):
@@ -114,8 +120,17 @@ def _merge_items(m, list_name, path, items):
         merged[key] = m.field(f"{path}.{key}", kind, [i.get(key) for i in items])
     if list_name != "extra_charges":
         merged["make_model_alternatives"] = m.alternatives([i.get("make_model_alternatives") or [] for i in items])
-    elif merged.get("total_label") is None:
-        merged["total_label"] = next((i["total_label"] for i in items if i.get("total_label")), None)
+        return merged
+    labels = [{"value": i["total_label"], "evidence_text": i["label"].get("evidence_text"),
+               "page": i["label"].get("page"), "batch": i["label"].get("batch")}
+              for i in items if i.get("total_label")]
+    total = m.field(f"{path}.total_label", "plain", labels)
+    merged["total_label"] = None if total is None or total.get("conflict") else total["value"]
+    if total is not None and total.get("conflict"):
+        # included_in_total means nothing until the user says which total it is.
+        inc = merged.get("included_in_total") or {}
+        merged["included_in_total"] = {"value": None, "evidence_text": None, "page": None, "batch": None,
+                                       "conflict": True, "candidates": inc.get("candidates", [])}
     return merged
 
 
@@ -159,6 +174,38 @@ def _match_tuples(m, list_name, path, batches):
     return out
 
 
+def _match_charges(m, path, batches):
+    """Charges of one option reported by several batches. The same label and parsed
+    amount, the same number of times in every batch that lists that label, is one
+    charge with all its evidence. The same label with another amount, or a different
+    number of times, is flagged. A label only one batch lists is kept as listed."""
+    occurrences = {}
+    labels = {}
+    for b, items in batches.items():
+        for item in items:
+            occurrences.setdefault(_charge_key(item), {}).setdefault(b, []).append(item)
+            labels.setdefault(repr(_label_key(item)), set()).add(_charge_key(item))
+    out, flagged = [], []
+    for key, per_batch in occurrences.items():
+        sample = next(iter(per_batch.values()))[0]
+        same_label = labels[repr(_label_key(sample))]
+        listing = [b for b in batches if any(k in occurrences and b in occurrences[k] for k in same_label)]
+        sizes = {len(per_batch.get(b, [])) for b in listing}
+        if len(sizes) == 1:
+            out += [_merge_items(m, "extra_charges", path, list(same)) for same in zip(*per_batch.values())]
+        else:
+            flagged += [(b, item) for b, items in per_batch.items() for item in items]
+    if flagged:
+        m.conflicts.append({"field": path, "reason": "batches give different amounts for one charge",
+                            "candidates": [{"batch": b, "page": _item_page(item)} for b, item in flagged]})
+        for _, item in flagged:
+            f = item.get("amount")
+            out.append(dict(item, conflict=True, amount={
+                "value": _conflict_value("amount"), "evidence_text": None, "page": None, "batch": None,
+                "conflict": True, "candidates": [] if f is None else [_candidate(f)]}))
+    return out
+
+
 def _item_page(item):
     return next((f["page"] for f in item.values() if isinstance(f, dict) and "page" in f), None)
 
@@ -178,11 +225,7 @@ def _merge_list(m, list_name, per_batch):
             out += groups[0]
             continue
         if list_name == "extra_charges":
-            by_label = {}
-            for items in groups:
-                for item in items:
-                    by_label.setdefault(_item_key(list_name, item), []).append(item)
-            out += [_merge_items(m, list_name, path, same) for same in by_label.values()]
+            out += _match_charges(m, path, batches)
             continue
         out += _match_tuples(m, list_name, path, batches)
     return out

@@ -126,9 +126,10 @@ def test_extra_charges_matched_by_label():
 
     def change(first, second):
         second["extra_charges"][0]["amount"] = "Rs. 3,000"
-    quote = merge_batches(two_batches(change))
-    (charge,) = quote["extra_charges"]
-    assert charge["amount"]["conflict"] is True
+    quote = merge_batches(two_batches(change))  # each version kept as a flagged candidate
+    assert [c["amount"]["candidates"][0]["value"]["raw"] for c in quote["extra_charges"]] == [
+        "Rs. 2,500", "Rs. 3,000"]
+    assert all(c["amount"]["conflict"] for c in quote["extra_charges"])
     assert by_check(quote)[("C3_gross_total", None)]["status"] == "needs_confirmation"
 
 
