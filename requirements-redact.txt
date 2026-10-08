@@ -1,0 +1,6 @@
+# Local redaction review tool (tools/redact). Runs offline once installed.
+PyMuPDF==1.28.2
+rapidocr-onnxruntime==1.4.4
+opencv-python==5.0.0.93
+onnxruntime==1.30.0
+numpy==2.5.3

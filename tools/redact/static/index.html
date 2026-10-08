@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Redaction review</title>
+<link rel="stylesheet" href="/app.css">
+</head>
+<body>
+<aside>
+  <h1>Redaction review</h1>
+  <ol id="docs"></ol>
+</aside>
+<main>
+  <header>
+    <div class="row">
+      <strong id="doc-title">Pick a document</strong>
+      <span id="page-label"></span>
+      <span id="page-status"></span>
+      <span id="doc-count"></span>
+    </div>
+    <div class="bar"><div id="doc-bar"></div></div>
+    <div class="row buttons">
+      <button id="btn-prev" title="Previous page (Left arrow)">&larr; Prev</button>
+      <button id="btn-next" title="Next page (Right arrow)">Next &rarr;</button>
+      <button id="btn-approve" title="Approve page (A)">Approve page (A)</button>
+      <button id="btn-draw" title="Draw box (D)">Draw box (D)</button>
+      <button id="btn-delete" title="Delete selected box (Delete)">Delete box</button>
+      <button id="btn-keep" title="Keep selected mask over a protected field (K)">Keep mask (K)</button>
+      <button id="btn-zout" title="Zoom out (-)">&minus;</button>
+      <button id="btn-zfit" title="Fit width (0)">Fit</button>
+      <button id="btn-zin" title="Zoom in (+)">+</button>
+      <button id="btn-final" title="Show exported file on the right (F)">Exported file (F)</button>
+      <button id="btn-export" title="Export document (E)">Export (E)</button>
+    </div>
+    <p id="msg" role="status"></p>
+    <ul id="warnings"></ul>
+    <p class="keys"><b>Check by eye on every page:</b> customer names anywhere, contact and address blocks,
+      consumer and service numbers, signatures, handwritten notes, stamps, QR codes and barcodes,
+      watermarks, photos of people or houses. Vendor name, logo, GSTIN and office address may stay.
+      Keep capacities, quantities, wattages, model numbers, quote dates, GST %, prices and subsidy figures readable.</p>
+    <p class="keys legend"><span class="sw mask"></span>mask <span class="sw conflict"></span>mask over protected field
+      <span class="sw kept"></span>kept on purpose <span class="sw prot"></span>protected field
+      <span class="sw hint"></span>check here (image, drawing, low-confidence OCR)
+      &middot; A approve &middot; &larr;/&rarr; page &middot; D draw &middot; Delete remove &middot; K keep
+      &middot; +/&minus;/0 zoom &middot; F exported file &middot; E export &middot; [ ] document</p>
+  </header>
+  <div id="stage">
+    <section class="pane">
+      <h2>Original with proposed masks (edit here)</h2>
+      <div class="scroll" id="scroll-left">
+        <div class="sheet" id="sheet">
+          <img id="img-left" alt="Original page">
+          <div id="overlay"></div>
+        </div>
+      </div>
+    </section>
+    <section class="pane">
+      <h2 id="right-title">Masked preview (what will be exported)</h2>
+      <div class="scroll" id="scroll-right">
+        <div class="sheet" id="sheet-right">
+          <img id="img-right" alt="Masked page">
+        </div>
+      </div>
+    </section>
+  </div>
+</main>
+<script src="/app.js"></script>
+</body>
+</html>
