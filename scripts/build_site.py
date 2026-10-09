@@ -1,7 +1,7 @@
 """Copy web/ into a folder ready to upload, with config.js written for one deployment.
 
     python scripts/build_site.py --api <ApiUrl> --region ap-south-1 [--cross-region]
-        [--engine textract [--opt-out-reply policy.json]] [--out .build/web]
+        [--engine textract [--opt-out-reply policy.json | --ai-opt-out true]] [--out .build/web]
 
 --opt-out-reply is the saved reply of aws organizations describe-effective-policy
 --policy-type AISERVICES_OPT_OUT_POLICY. Only a policy that opts Textract out
@@ -66,10 +66,12 @@ def main(argv=None):
     ap.add_argument("--cross-region", action="store_true", help="the stack reads with a cross-Region profile")
     ap.add_argument("--engine", default="none", help="the stack's ReadingEngine")
     ap.add_argument("--opt-out-reply", help="saved describe-effective-policy reply (JSON)")
+    ap.add_argument("--ai-opt-out", default="",
+                    help="true when the Textract opt-out was confirmed; anything else means it wasn't")
     ap.add_argument("--out", default=str(ROOT / ".build" / "web"))
     args = ap.parse_args(argv)
     try:
-        opted_out = opt_out_from_file(args.opt_out_reply)
+        opted_out = opt_out_from_file(args.opt_out_reply) or args.ai_opt_out == "true"
         names = build_site(args.api, args.region, args.cross_region, args.out, args.engine, opted_out)
     except ValueError as e:
         print(f"build_site: {e}", file=sys.stderr)

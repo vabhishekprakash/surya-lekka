@@ -1,0 +1,47 @@
+# Publishes web/ to GitHub Pages with a config.js for the deployed API.
+# Runs only by hand (scripts/deploy.ps1 -Pages starts it after setting the repo
+# variables), never on push, so a stale API URL or privacy setting is never
+# published. It needs no AWS credentials: everything comes from repo variables.
+name: Publish the web app to GitHub Pages
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Write the web app with config.js from the repo variables
+        env:
+          API_URL: ${{ vars.SURYA_API_URL }}
+          REGION: ${{ vars.SURYA_REGION }}
+          ENGINE: ${{ vars.SURYA_READING_ENGINE }}
+          AI_OPT_OUT: ${{ vars.SURYA_AI_OPT_OUT }}
+          CROSS_REGION: ${{ vars.SURYA_CROSS_REGION }}
+        run: |
+          extra=()
+          if [ "$CROSS_REGION" = "true" ]; then extra+=(--cross-region); fi
+          python scripts/build_site.py --api "$API_URL" --region "$REGION" --engine "${ENGINE:-none}" \
+            --ai-opt-out "$AI_OPT_OUT" "${extra[@]}" --out _site
+      - uses: actions/configure-pages@v6
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: _site
+      - id: deploy
+        uses: actions/deploy-pages@v5

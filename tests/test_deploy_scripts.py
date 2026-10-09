@@ -5,6 +5,7 @@ import runpy
 import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -55,10 +56,17 @@ function global:aws {
     }
 }
 function global:sam { $global:calls += ,("sam " + ($args -join " ")); $global:LASTEXITCODE = 0 }
+function global:gh { $global:calls += ,("gh " + ($args -join " ")); $global:LASTEXITCODE = 0 }
 """
 
 
+# deploy.ps1 writes its build output here in tests, never into the repo's .build.
+BUILD = Path(tempfile.mkdtemp(prefix="surya-deploy-test-"))
+
+
 def run_ps(script, params, env, timeout=180):
+    if script == "deploy.ps1":
+        params += f" -BuildDir '{BUILD}'"
     command = (FAKES + f"try {{ & '{ROOT / 'scripts' / script}' {params}; $code = $LASTEXITCODE }}\n"
                "catch { 'THROWN: ' + $_.Exception.Message; $code = 1 }\n"
                "finally { $global:calls | ForEach-Object { 'CALL: ' + $_ } }\nexit $code")
@@ -129,7 +137,7 @@ def test_deploy_with_hosting_and_a_cross_region_profile():
     assert "--content-type text/javascript; charset=utf-8" in uploads["app.js"]
     assert "--content-type text/html; charset=utf-8" in uploads["index.html"]
     assert calls[-1].startswith("aws cloudfront create-invalidation --distribution-id E123 --paths /*")
-    config = (ROOT / ".build" / "web" / "config.js").read_text(encoding="utf-8")
+    config = (BUILD / "web" / "config.js").read_text(encoding="utf-8")
     assert f'"API_BASE": "{api}", "REGION": "ap-south-1", "CROSS_REGION": true' in config
     assert f"API URL: {api}" in run.stdout and "Site:    https://d111.cloudfront.net/" in run.stdout
 
@@ -152,8 +160,8 @@ def test_deploy_script_steps():
     script = (ROOT / "scripts" / "deploy.ps1").read_text(encoding="utf-8")
     order = ["Confirm-AwsTarget -AwsProfile", "Get-ModelAccess\n", r"scripts\render_samples.py --out",
              "sam build --template-file", "sam deploy @deployArgs", "describe-stacks --stack-name",
-             r"aws s3 cp .build\samples", r"scripts\build_site.py @siteArgs", "create-invalidation",
-             'Write-Host "API URL']
+             'aws s3 cp (Join-Path $BuildDir "samples")', r"scripts\build_site.py @siteArgs", "create-invalidation",
+             "{ gh variable set", "{ gh workflow run", 'Write-Host "API URL']
     positions = [script.index(step) for step in order]
     assert positions == sorted(positions)
     assert "--guided" not in script and "samconfig.toml" in script  # unattended, and the first run saves samconfig.toml
@@ -225,7 +233,7 @@ def test_deploy_with_textract_checks_the_ai_opt_out_policy(policy, opted_out):
     (check,) = [c for c in calls if c.startswith("aws organizations")]
     assert check.startswith(f"aws organizations describe-effective-policy --policy-type AISERVICES_OPT_OUT_POLICY "
                             f"--target-id {ACCOUNT}")
-    config = (ROOT / ".build" / "web" / "config.js").read_text(encoding="utf-8")
+    config = (BUILD / "web" / "config.js").read_text(encoding="utf-8")
     assert f'"ENGINE": "textract", "AI_OPT_OUT": {str(opted_out).lower()}' in config
     assert f"Textract opt-out confirmed: {opted_out}" in run.stdout
 
@@ -237,3 +245,68 @@ def test_deploy_without_textract_does_not_ask_for_the_policy():
                         "-HostingEnabled false", {"FAKE_STACK": outputs(("ApiUrl", api), ("BucketName", "b"))})
     assert run.returncode == 0 and not any(c.startswith("aws organizations") for c in calls)
     assert "--engine none" in run.stdout
+
+
+@windows_powershell
+def test_deploy_with_pages_sets_the_repo_variables_then_runs_the_workflow():
+    api = "https://abc123.execute-api.ap-south-1.amazonaws.com"
+    run, calls = run_ps("deploy.ps1", f"-Profile default -Region ap-south-1 -ExpectedAccount {ACCOUNT} "
+                        "-HostingEnabled false -ReadingEngine textract -SiteOrigin https://example-user.github.io "
+                        "-Pages", {"FAKE_STACK": outputs(("ApiUrl", api), ("BucketName", "b")),
+                                   "FAKE_POLICY": opt_out_policy({"default": {"opt_out_policy": "optOut"}})})
+    assert run.returncode == 0, run.stdout + run.stderr
+    order = [next(i for i, c in enumerate(calls) if c.startswith(prefix))
+             for prefix in ("sam deploy", "aws organizations", "gh variable set", "gh workflow run")]
+    assert order == sorted(order)
+    variables = {c.split()[3]: c.split("--body ")[1] for c in calls if c.startswith("gh variable set")}
+    assert variables == {"SURYA_API_URL": api, "SURYA_REGION": "ap-south-1", "SURYA_READING_ENGINE": "textract",
+                         "SURYA_AI_OPT_OUT": "true", "SURYA_CROSS_REGION": "false"}
+    assert calls[-1] == "gh workflow run pages.yml --ref main"
+    (deploy,) = [c for c in calls if c.startswith("sam deploy")]
+    assert "SiteOrigin=https://example-user.github.io" in deploy
+    assert "Site:    https://example-user.github.io/surya-lekka/" in run.stdout
+
+
+@windows_powershell
+def test_pages_says_not_opted_out_when_the_policy_is_unreadable():
+    run, calls = run_ps("deploy.ps1", f"-Profile default -Region ap-south-1 -ExpectedAccount {ACCOUNT} "
+                        "-HostingEnabled false -ReadingEngine textract -SiteOrigin https://example-user.github.io "
+                        "-Pages", {"FAKE_STACK": outputs(("ApiUrl", "https://abc.example.com"), ("BucketName", "b"))})
+    assert run.returncode == 0, run.stdout + run.stderr
+    assert "gh variable set SURYA_AI_OPT_OUT --body false" in calls
+
+
+@windows_powershell
+@pytest.mark.parametrize("origin", ["http://127.0.0.1:8000", "https://example-user.github.io/surya-lekka",
+                                    "https://example.com"])
+def test_pages_needs_a_github_pages_origin_and_changes_nothing_otherwise(origin):
+    run, calls = run_ps("deploy.ps1", f"-Profile default -Region ap-south-1 -ExpectedAccount {ACCOUNT} "
+                        f"-HostingEnabled false -SiteOrigin {origin} -Pages", {})
+    assert run.returncode != 0 and "github.io" in run.stdout + run.stderr
+    assert not any(c.startswith(("sam", "gh", "aws s3")) for c in calls)
+
+
+def test_pages_workflow_runs_only_by_hand_and_holds_no_aws_credentials():
+    import yaml
+
+    text = (ROOT / ".github" / "workflows" / "pages.yml").read_text(encoding="utf-8")
+    workflow = yaml.safe_load(text)
+    triggers = workflow.get("on", workflow.get(True))
+    assert triggers == {"workflow_dispatch": None}
+    assert workflow["permissions"] == {"contents": "read", "pages": "write", "id-token": "write"}
+    assert "secrets." not in text and "aws-actions" not in text and "AWS_" not in text
+    for name in ("SURYA_API_URL", "SURYA_REGION", "SURYA_READING_ENGINE", "SURYA_AI_OPT_OUT", "SURYA_CROSS_REGION"):
+        assert f"vars.{name}" in text
+    steps = [st.get("uses", st.get("run", "")) for st in workflow["jobs"]["publish"]["steps"]]
+    assert any("scripts/build_site.py" in st for st in steps)
+    assert steps[-1].startswith("actions/deploy-pages@")
+
+
+@pytest.mark.parametrize("value,opted_out", [("true", True), ("false", False), ("", False), ("yes", False),
+                                             ("TRUE", False), ("unknown", False)])
+def test_build_site_takes_the_opt_out_only_from_an_exact_true(tmp_path, value, opted_out):
+    build = runpy.run_path(str(ROOT / "scripts" / "build_site.py"))
+    assert build["main"](["--api", "https://abc123.execute-api.ap-south-1.amazonaws.com", "--region", "ap-south-1",
+                          "--engine", "textract", "--ai-opt-out", value, "--out", str(tmp_path)]) == 0
+    config = (tmp_path / "config.js").read_text(encoding="utf-8")
+    assert f'"AI_OPT_OUT": {str(opted_out).lower()}' in config

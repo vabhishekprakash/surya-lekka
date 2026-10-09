@@ -12,7 +12,10 @@ samconfig.toml) and uploads the sample pages and saved readings.
 With hosting on (the default) it uploads web/, with config.js pointing at the
 new API, to the site bucket and clears the CloudFront cache. With
 -HostingEnabled false it prints the API URL and the command that serves web/
-on this machine against it.
+on this machine against it. With -Pages (and -SiteOrigin set to the GitHub Pages
+origin, such as https://<user>.github.io) it then checks the AI services opt-out
+policy, sets the repo variables the Pages workflow reads (gh variable set) and
+starts that workflow (gh workflow run), which publishes web/ to GitHub Pages.
 
 Reading is off unless -ReadingEngine is nova or textract. With textract the
 worker calls Amazon Textract in -Region, one call per page. With nova,
@@ -34,12 +37,17 @@ param(
     [ValidateSet("true", "false")][string]$HostingEnabled = "true",
     [string]$SiteOrigin = "http://127.0.0.1:8000",
     [ValidateSet("none", "nova", "textract")][string]$ReadingEngine = "none",
-    [string]$ModelId = "global.amazon.nova-2-lite-v1:0"
+    [string]$ModelId = "global.amazon.nova-2-lite-v1:0",
+    [switch]$Pages,
+    [string]$BuildDir = ".build"
 )
 
 $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "aws_target.ps1")
 Confirm-AwsTarget -AwsProfile $AwsProfile -Region $Region -ExpectedAccount $ExpectedAccount
+if ($Pages -and $SiteOrigin -cnotmatch '^https://[a-z0-9-]+\.github\.io$') {
+    throw "With -Pages, -SiteOrigin must be the GitHub Pages origin, such as https://<user>.github.io (no path)."
+}
 
 if ($StackName -cnotmatch '^[a-z0-9][a-z0-9-]{1,30}$') {
     throw "The stack name also starts the bucket name: use 2 to 31 lower-case letters, digits or hyphens."
@@ -79,7 +87,7 @@ if ($ReadingEngine -eq "nova") {
 }
 
 Invoke-Step "Generate the sample quotes and render their pages" {
-    & $python scripts\render_samples.py --out .build\samples
+    & $python scripts\render_samples.py --out (Join-Path $BuildDir "samples")
 }
 Invoke-Step "Lint the template" { & $python scripts\lint_template.py template.yaml }
 Invoke-Step "Build" { sam build --template-file template.yaml }
@@ -104,7 +112,7 @@ $apiUrl = Get-Output "ApiUrl"
 if (-not $bucket -or -not $apiUrl) { throw "The stack outputs have no BucketName or ApiUrl." }
 
 Invoke-Step "Upload the sample pages and saved readings" {
-    aws s3 cp .build\samples "s3://$bucket/samples/" --recursive @aws
+    aws s3 cp (Join-Path $BuildDir "samples") "s3://$bucket/samples/" --recursive @aws
 }
 
 function Save-OptOutPolicy {
@@ -114,18 +122,18 @@ function Save-OptOutPolicy {
     $reply = aws organizations describe-effective-policy --policy-type AISERVICES_OPT_OUT_POLICY `
         --target-id $ExpectedAccount @aws --output json 2>$null
     if ($LASTEXITCODE -ne 0 -or -not $reply) { return $null }
-    New-Item -ItemType Directory -Force .build | Out-Null
-    $path = Join-Path ".build" "ai_opt_out_policy.json"
+    New-Item -ItemType Directory -Force $BuildDir | Out-Null
+    $path = Join-Path $BuildDir "ai_opt_out_policy.json"
     Set-Content -Path $path -Value ($reply -join "`n") -Encoding UTF8
     return $path
 }
 
 $siteArgs = @("--api", $apiUrl, "--region", $Region, "--engine", $ReadingEngine)
 if ($access.CrossRegion) { $siteArgs += "--cross-region" }
+$optedOut = $false
 if ($ReadingEngine -eq "textract") {
     Write-Host "== Check the AI services opt-out policy for Textract"
     $policy = Save-OptOutPolicy
-    $optedOut = $false
     if ($policy) {
         $siteArgs += @("--opt-out-reply", $policy)
         $optedOut = (& $python -c "import json,sys; sys.path.insert(0, 'src'); from api.site_config import textract_opted_out; print(textract_opted_out(json.load(open(sys.argv[1], encoding='utf-8-sig'))))" $policy) -eq "True"
@@ -138,7 +146,7 @@ if ($HostingEnabled -eq "true") {
     $siteUrl = Get-Output "SiteUrl"
     if (-not $siteBucket -or -not $distribution) { throw "The stack outputs have no SiteBucketName or DistributionId." }
     Write-Host "== Write the web app with config.js for this API"
-    $files = & $python scripts\build_site.py @siteArgs --out .build\web
+    $files = & $python scripts\build_site.py @siteArgs --out (Join-Path $BuildDir "web")
     if ($LASTEXITCODE -ne 0) { throw "Writing the web app failed (exit code $LASTEXITCODE)" }
     $types = @{ ".html" = "text/html; charset=utf-8"; ".js" = "text/javascript; charset=utf-8";
                 ".css" = "text/css; charset=utf-8" }
@@ -146,7 +154,7 @@ if ($HostingEnabled -eq "true") {
         $type = $types[[IO.Path]::GetExtension($name)]
         if (-not $type) { throw "No content type is set for $name." }
         Invoke-Step "Upload $name" {
-            aws s3 cp (Join-Path .build\web $name) "s3://$siteBucket/$name" --content-type $type `
+            aws s3 cp (Join-Path (Join-Path $BuildDir "web") $name) "s3://$siteBucket/$name" --content-type $type `
                 --cache-control no-cache @aws
         }
     }
@@ -156,10 +164,27 @@ if ($HostingEnabled -eq "true") {
     }
 }
 
+if ($Pages) {
+    # Every setting the workflow reads is set again, so it never publishes stale ones.
+    $variables = [ordered]@{
+        SURYA_API_URL = $apiUrl; SURYA_REGION = $Region; SURYA_READING_ENGINE = $ReadingEngine
+        SURYA_AI_OPT_OUT = $(if ($optedOut) { "true" } else { "false" })
+        SURYA_CROSS_REGION = $(if ($access.CrossRegion) { "true" } else { "false" })
+    }
+    foreach ($name in $variables.Keys) {
+        $value = $variables[$name]
+        Invoke-Step "Set the repo variable $name" { gh variable set $name --body $value }
+    }
+    Invoke-Step "Publish the web app to GitHub Pages" { gh workflow run pages.yml --ref main }
+    $repo = (Split-Path -Leaf (git remote get-url origin)) -replace '\.git$', ''
+}
+
 Write-Host ""
 Write-Host "API URL: $apiUrl"
 if ($HostingEnabled -eq "true") {
     Write-Host "Site:    $siteUrl"
+} elseif ($Pages) {
+    Write-Host "Site:    $SiteOrigin/$repo/ (published by the Pages workflow in a minute or two)"
 } else {
     $local = "  .venv\Scripts\python -m src.api.local_server --port $(([uri]$SiteOrigin).Port) $($siteArgs -join ' ')"
     Write-Host "Hosting is off. Serve the web app on this machine against the API with:"
