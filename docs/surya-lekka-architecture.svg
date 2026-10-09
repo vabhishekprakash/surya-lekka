@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 720" width="1200" height="720" font-family="Arial, Helvetica, sans-serif">
   <title>Surya Lekka architecture on AWS</title>
-  <desc>A household's browser loads the website from CloudFront and S3, renders quote pages with pdf.js, uploads page images directly to a private S3 bucket and talks to an HTTP API on API Gateway. Lambda functions create jobs, return results, run the deterministic checks and handle manual entry and samples. An S3 event triggers the Worker Lambda, which asks Amazon Bedrock (Nova) to read the pages and stores results in DynamoDB. Failed jobs go to SQS. Everything logs to CloudWatch without document text, and the stack is deployed with AWS SAM.</desc>
+  <desc>A household's browser loads the website from CloudFront and S3, renders quote pages with pdf.js, uploads page images directly to a private S3 bucket and talks to an HTTP API on API Gateway. Lambda functions create jobs, return results, run the deterministic checks and handle manual entry and samples. An S3 event triggers the Worker Lambda, which sends each page to Amazon Textract in ap-south-1 to read it and stores results in DynamoDB. Amazon Bedrock (Nova) is an optional reader if quota is granted. Failed jobs go to SQS. Everything logs to CloudWatch without document text, and the stack is deployed with AWS SAM.</desc>
   <defs>
     <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
       <path d="M1 1 L9 5 L1 9" fill="none" stroke="#444" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
@@ -16,7 +16,7 @@
 
   <rect x="0" y="0" width="1200" height="720" fill="#ffffff"/>
   <text x="30" y="38" font-size="20" font-weight="700" fill="#1d2733">Surya Lekka: architecture on AWS (ap-south-1)</text>
-  <text x="30" y="60" class="s">The model only reads the quote. Every finding comes from plain, tested Python checks and a dated rules file.</text>
+  <text x="30" y="60" class="s">The reader only reads the quote. Every finding comes from plain, tested Python checks and a dated rules file.</text>
 
   <!-- SAM boundary -->
   <rect x="235" y="85" width="950" height="530" rx="16" fill="none" stroke="#8a93a0" stroke-width="1.2" stroke-dasharray="7 5"/>
@@ -65,13 +65,19 @@
   <!-- Worker -->
   <rect x="780" y="255" width="200" height="70" rx="10" fill="#fff3e8" stroke="#f58536" stroke-width="1.4"/>
   <text x="880" y="283" text-anchor="middle" class="t">Lambda: Worker</text>
-  <text x="880" y="304" text-anchor="middle" class="s">5 pages per call, merge</text>
+  <text x="880" y="304" text-anchor="middle" class="s">page by page, merge</text>
 
-  <!-- Bedrock -->
+  <!-- Textract -->
   <rect x="1010" y="245" width="160" height="90" rx="10" fill="#e6f6f3" stroke="#01a88d" stroke-width="1.6"/>
-  <text x="1090" y="273" text-anchor="middle" class="t">Amazon Bedrock</text>
-  <text x="1090" y="294" text-anchor="middle" class="s">Nova 2 Lite / Nova Pro</text>
-  <text x="1090" y="312" text-anchor="middle" class="s">reads the quote</text>
+  <text x="1090" y="273" text-anchor="middle" class="t">Amazon Textract</text>
+  <text x="1090" y="294" text-anchor="middle" class="s">tables + queries</text>
+  <text x="1090" y="312" text-anchor="middle" class="s">reads each page</text>
+
+  <!-- Bedrock, optional -->
+  <rect x="1010" y="125" width="160" height="90" rx="10" fill="#ffffff" stroke="#01a88d" stroke-width="1.4" stroke-dasharray="6 4"/>
+  <text x="1090" y="152" text-anchor="middle" class="t">Amazon Bedrock</text>
+  <text x="1090" y="173" text-anchor="middle" class="s">Nova, optional,</text>
+  <text x="1090" y="191" text-anchor="middle" class="s">if quota is granted</text>
 
   <!-- DynamoDB -->
   <rect x="780" y="390" width="200" height="70" rx="10" fill="#eef6ea" stroke="#3f8624" stroke-width="1.4"/>
@@ -91,11 +97,11 @@
   <!-- Safety -->
   <rect x="780" y="525" width="390" height="60" rx="10" fill="#fdeef0" stroke="#dd344c" stroke-width="1.4"/>
   <text x="975" y="549" text-anchor="middle" class="t">Account safety</text>
-  <text x="975" y="569" text-anchor="middle" class="s">Budgets and anomaly alerts, kill switch, daily caps</text>
+  <text x="975" y="569" text-anchor="middle" class="s">Budgets alerts set on the account, daily job and page caps</text>
 
   <!-- Arrows -->
   <path class="ln" d="M205 310 L255 175" marker-end="url(#a)"/>
-  <text x="212" y="235" class="lbl">loads site</text>
+  <text x="140" y="235" class="lbl">loads site</text>
 
   <path class="ln" d="M205 360 L255 360" marker-end="url(#a)"/>
 
@@ -113,6 +119,7 @@
   <text x="888" y="230" class="lbl">manifest event</text>
 
   <path class="ln" d="M980 290 L1010 290" marker-end="url(#a)"/>
+  <path class="dash" d="M980 265 L1040 215" marker-end="url(#a)"/>
 
   <path class="ln" d="M880 325 L880 390" marker-end="url(#a)"/>
   <text x="888" y="362" class="lbl">results</text>
@@ -127,7 +134,6 @@
   <path class="dash" d="M800 325 L715 545" marker-end="url(#a)"/>
 
   <!-- Footer notes -->
-  <text x="30" y="650" class="s">Mode labels on every result: "Read by Amazon Nova", "Entered by you", "Sample (saved reading)".</text>
-  <text x="30" y="672" class="s">If Bedrock is unavailable, the manual-entry path still runs on Lambda; the AI reading is labelled as unavailable.</text>
-  <text x="30" y="694" class="s">Documents may be processed outside India through AWS cross-Region inference.</text>
+  <text x="30" y="650" class="s">Mode labels on every result: "Read by Amazon Textract", "Read by Amazon Nova", "Entered by you", "Sample (saved reading)".</text>
+  <text x="30" y="672" class="s">With reading switched off, the samples and the manual-entry path still run on Lambda, and uploads are refused with a message.</text>
 </svg>
