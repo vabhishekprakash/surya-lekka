@@ -47,6 +47,11 @@ _NEGATION = re.compile(r"\bnot\s+(?:included|applicable|available|considered)\b|
                        r"|\bnil\b", re.I)
 
 
+_TOTAL_REFERENCE = re.compile(r"\(?\b(?:included|includes|including|inside|outside|part|not\s+part|added)\s+"
+                              r"(?:in|of|to|from)?\s*(?:the\s+)?(?:grand\s+)?total(?:\s+(?:amount|price|cost))?\)?",
+                              re.I)
+
+
 def role(text):
     """The one price role a label or line names: base_price, gst_amount, gross_total,
     net_cost or subsidy. None when it names none, more than one, or a negation."""
@@ -57,6 +62,7 @@ def role(text):
         return "net_cost"
     if _SUBSIDY.search(t):
         return "subsidy"
+    t = _TOTAL_REFERENCE.sub(" ", t)  # "(included in Grand Total)" names another line's role
     base = bool(_BASE.search(t))
     rest = _GST_QUALIFIER.sub(" ", t)
     rest = re.sub(r"sub[\s-]?total", " ", rest, flags=re.I)

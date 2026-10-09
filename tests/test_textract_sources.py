@@ -315,3 +315,21 @@ def test_only_query_answers_propose_what_the_system_size_measures():
     c = contract(page)
     assert facts(c, "stated_capacity") == [(None, "3 kWp")]
     assert c["flags"]["model_proposed"]["capacity_basis"] is None
+
+
+def test_a_forms_pair_counts_only_when_key_and_value_share_a_line():
+    page = Page()
+    page.line("Grand Total:", 0.3)
+    page.line("Rs 1,65,850", 0.32)
+    page.form("Grand Total:", "Rs 1,65,850", 0.32)
+    assert amounts(contract(page, sources=frozenset({"forms"})), "gross_total") == []
+
+
+@pytest.mark.parametrize("line", ["Net meter charges Rs. 2,500 (included in Grand Total)",
+                                  "Structure charges Rs 12,000 (part of the total)",
+                                  "Installation Rs 5,000 included in the total amount",
+                                  "Civil work Rs 8,000 outside the total"])
+def test_a_charge_that_mentions_the_total_is_not_the_total(line):
+    page = Page()
+    page.line(line, 0.3)
+    assert contract(page)["facts"] == []

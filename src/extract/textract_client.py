@@ -306,7 +306,11 @@ def _price_kind(header):
 # the development quotes by the acceptance rule (more matches, nothing new wrong).
 ALL_SOURCES = frozenset({"queries", "options_table", "answer_values", "lines", "bom_table", "amount_table",
                          "forms", "expense", "gstin_state"})
-SOURCES = frozenset({"queries", "options_table"})
+# Kept on the 8 development quotes (more matches, nothing new wrong, falsely filled or falsely
+# "doesn't match"): line patterns and bill-of-materials rows. The GSTIN's state is information
+# only. Dropped: FORMS and AnalyzeExpense (nothing beyond these, at 3.5 times the price per page
+# for FORMS), label | amount rows and typed values inside answers (no gain).
+SOURCES = frozenset({"queries", "options_table", "lines", "bom_table", "gstin_state"})
 QUERY_FIELDS = {"SYSTEM_CAPACITY": "stated_capacity", "PANEL_COUNT": "panel_count", "PANEL_WATTAGE": "panel_wattage",
                 "PANEL_MAKE_MODEL": "panel_make", "INVERTER_MAKE_MODEL": "inverter_make",
                 "INVERTER_CAPACITY": "inverter_rating", "PRICE_BEFORE_GST": "base_price", "GST_AMOUNT": "gst_amount",
@@ -480,7 +484,8 @@ def map_page(reply, page_number, threshold=CONFIDENCE_THRESHOLD, sources=None, e
                 continue
             lines = page.evidence_lines({"Text": value_text, "Geometry": value.get("Geometry")})
             evidence = page.evidence({"Text": value_text, "Geometry": value.get("Geometry")})
-            if evidence:
+            # Like a line pattern, a pair counts only when its key is on the value's own line.
+            if evidence and _loose(key_text) and _loose(key_text) in _loose(evidence):
                 cands += src.line_candidates(f"{key_text} {value_text}", evidence, tuple(l["Id"] for l in lines),
                                              "forms")
     table_groups, table_inverters = [], []

@@ -11,11 +11,19 @@ from extract.textract_queries import MAX_QUERIES, QUERIES, TARGETS, queries_conf
 from extract.wire_schema import validate
 from textract_pages import Page
 
+# These tests cover the query answers and option tables; the further sources have their own tests.
+QUERY_SOURCES = frozenset({"queries", "options_table"})
+
+
+def map_queries(reply, number, **kwargs):
+    kwargs.setdefault("sources", QUERY_SOURCES)
+    return tc.map_page(reply, number, **kwargs)
+
 JPEG = b"\xff\xd8\xff\xe0" + bytes(100)
 
 
 def contract(page, number=1, batch=1, **kwargs):
-    wire, _ = tc.map_page(page.reply(), number, **kwargs)
+    wire, _ = map_queries(page.reply(), number, **kwargs)
     cleaned, errors, _ = validate(wire, [number])
     assert errors == []
     return tc.to_contract(wire, batch)
@@ -90,7 +98,7 @@ def test_an_answer_found_on_no_line_of_the_page_is_dropped():
     page.line("Price breakup", 0.1)
     page.answer("DCR_STATUS", "non-dcr", top=0.8)  # its box overlaps no line
     page.answer("VENDOR_NAME", "Example Solar")  # no box, and no line contains it
-    wire, report = tc.map_page(page.reply(), 2)
+    wire, report = map_queries(page.reply(), 2)
     assert "dcr_declaration" not in wire and "vendor_name" not in wire
     assert [(r["alias"], r["kept"], r["why"]) for r in report] == [("DCR_STATUS", False, "not_on_page"),
                                                                    ("VENDOR_NAME", False, "not_on_page")]
@@ -105,7 +113,7 @@ def test_answers_that_do_not_parse_as_their_type_are_dropped(alias, text):
     page = Page()
     page.line(f"Something {text}", 0.3)
     page.answer(alias, text, top=0.3)
-    wire, report = tc.map_page(page.reply(), 1)
+    wire, report = map_queries(page.reply(), 1)
     assert report == [{"alias": alias, "confidence": 95.0, "kept": False, "why": "unparsed"}]
     assert wire["capacities"] == wire["prices"] == wire["subsidies"] == wire["module_groups"] == wire["inverters"] == []
 
@@ -117,11 +125,11 @@ def test_answers_below_the_threshold_are_dropped():
     page.answer("TOTAL_PAYABLE", "Rs 2,00,000", confidence=tc.CONFIDENCE_THRESHOLD - 0.1, top=0.3)
     page.answer("GST_AMOUNT", "Rs 10,000", confidence=tc.CONFIDENCE_THRESHOLD, top=0.5)
     page.unanswered("NET_COST")
-    wire, report = tc.map_page(page.reply(), 1)
+    wire, report = map_queries(page.reply(), 1)
     assert [(p["kind"], p["raw"]) for p in wire["prices"]] == [("gst_amount", "Rs 10,000")]
     assert [(r["alias"], r["kept"], r["why"]) for r in report] == [
         ("TOTAL_PAYABLE", False, "low_confidence"), ("GST_AMOUNT", True, None)]
-    assert tc.map_page(page.reply(), 1, threshold=0)[0]["prices"][0]["kind"] == "gross_total"
+    assert map_queries(page.reply(), 1, threshold=0)[0]["prices"][0]["kind"] == "gross_total"
 
 
 def test_counts_wattage_makes_and_inverters_form_one_group_per_page():
@@ -415,7 +423,7 @@ def all_fields(c):
 def test_sample_replies_map_only_to_text_on_their_own_page(sid, n):
     reply = sample(sid, n)
     lines = {" ".join(b["Text"].split()) for b in reply["Blocks"] if b["BlockType"] == "LINE"}
-    c = tc.to_contract(tc.map_page(reply, n + 10)[0], n)
+    c = tc.to_contract(map_queries(reply, n + 10)[0], n)
     fields = list(all_fields(c))
     for f in fields:
         assert f["page"] == n + 10 and f["batch"] == n
@@ -425,7 +433,7 @@ def test_sample_replies_map_only_to_text_on_their_own_page(sid, n):
 def test_sample_reports_carry_no_answer_text():
     for sid in ("S1", "S2", "S3"):
         for n in (1, 2):
-            for entry in tc.map_page(sample(sid, n), n)[1]:
+            for entry in map_queries(sample(sid, n), n)[1]:
                 assert set(entry) == {"alias", "confidence", "kept", "why"}
 
 
@@ -435,7 +443,7 @@ def test_what_textract_gets_from_sample_s2():
     answer is low and in kWp, the capacity answer has no unit, and the subsidy answer
     carries its label, so it doesn't parse as an amount. Recorded, not tuned to."""
     quote = merge_batches([{"batch": n, "pages": [n], "model_id": "textract",
-                            "contract": tc.to_contract(tc.map_page(sample("S2", n), n)[0], n)} for n in (1, 2)])
+                            "contract": tc.to_contract(map_queries(sample("S2", n), n)[0], n)} for n in (1, 2)])
     assert [g["count"]["value"] for g in quote["module_groups"]] == [5]
     assert quote["module_groups"][0]["wattage"] is None and quote["stated_capacity"] is None
     assert all(quote[k] is None for k in ("subsidy_central", "subsidy_state", "subsidy_combined", "subsidy_unspecified"))
@@ -466,7 +474,7 @@ def test_an_answer_whose_box_overlaps_a_line_with_other_text_is_not_on_the_page(
     page = Page()
     page.line("Total amount payable Rs 1,00,000", 0.3)
     page.answer("TOTAL_PAYABLE", "9,00,000", top=0.3)
-    wire, report = tc.map_page(page.reply(), 1)
+    wire, report = map_queries(page.reply(), 1)
     assert wire["prices"] == [] and report[0]["why"] == "not_on_page"
 
 
@@ -477,7 +485,7 @@ def test_answer_text_is_matched_ignoring_case_spaces_commas_and_rupee_marks(line
     page = Page()
     page.line(line, 0.3)
     page.answer("TOTAL_PAYABLE", answer, top=0.3)
-    assert [p["raw"] for p in tc.map_page(page.reply(), 1)[0]["prices"]] == [answer]
+    assert [p["raw"] for p in map_queries(page.reply(), 1)[0]["prices"]] == [answer]
 
 
 def test_each_option_row_takes_its_price_kind_from_its_own_column():
