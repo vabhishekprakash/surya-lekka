@@ -5,6 +5,12 @@ sent to AWS.
 
     python -m src.api.local_server [--port 8000] [--stub ok|slow|fail-once] [--reading-off]
 
+With --api it serves only web/, with config.js pointing at a deployed API, for
+a stack deployed with HostingEnabled=false (that API accepts requests from
+http://127.0.0.1:8000 by default):
+
+    python -m src.api.local_server --api <ApiUrl> --region ap-south-1 [--cross-region]
+
 The browser's presigned POSTs are pointed at this server, which checks the
 upload policy, stores the object and starts the worker when the manifest
 arrives, as the S3 event does in AWS. Needs the dev requirements (moto).
@@ -187,9 +193,16 @@ def parse_form(content_type, body):
     return fields, data
 
 
+def config_js(api_base, region, cross_region):
+    """config.js for a deployed API, as scripts/build_site.py writes it."""
+    settings = {"API_BASE": api_base, "REGION": region, "CROSS_REGION": cross_region}
+    return f"// Written by scripts/build_site.py for one deployment.\nwindow.SURYA_CONFIG = {json.dumps(settings)};\n"
+
+
 class Handler(BaseHTTPRequestHandler):
     server_version = "SuryaLekkaLocal"
-    backend = None  # set by make_server
+    backend = None  # set by make_server; None serves web/ only
+    config = None  # config.js to serve in place of web/config.js
 
     def log_message(self, fmt, *args):  # the path only, never the query (it holds job tokens)
         LOG.info("%s %s", self.command, urlsplit(self.path).path)
@@ -212,16 +225,18 @@ class Handler(BaseHTTPRequestHandler):
         return self.rfile.read(length)
 
     def do_GET(self):
-        self._dispatch("GET") or self._static()
+        (self.backend and self._dispatch("GET")) or self._static()
 
     def do_POST(self):
-        if urlsplit(self.path).path == UPLOAD_PATH:
+        if self.backend and urlsplit(self.path).path == UPLOAD_PATH:
             return self._upload()
-        if not self._dispatch("POST"):
+        if not (self.backend and self._dispatch("POST")):
             self._send(404, b'{"error": "not_found"}')
 
     def _static(self):
         path = urlsplit(self.path).path
+        if path == "/config.js" and self.config is not None:
+            return self._send(200, self.config, TYPES[".js"])
         target = (WEB / (path.lstrip("/") + ("index.html" if path.endswith("/") else ""))).resolve()
         if WEB.resolve() not in target.parents or not target.is_file():
             return self._send(404, b"Not found", "text/plain; charset=utf-8")
@@ -284,6 +299,28 @@ def make_server(port=8000, stub="ok", env=None):
     return ThreadingHTTPServer(("127.0.0.1", port), handler), backend
 
 
+def make_site_server(port, api_base, region, cross_region=False):
+    """Serves web/ only, with config.js pointing at a deployed API. No local backend."""
+    if not re.fullmatch(r"https://[a-z0-9.-]+(/[A-Za-z0-9._-]+)*", api_base.rstrip("/")):
+        raise ValueError("--api must be the stack's https ApiUrl")
+    config = config_js(api_base.rstrip("/"), region, cross_region).encode("utf-8")
+    handler = type("SiteHandler", (Handler,), {"backend": None, "config": config})
+    return ThreadingHTTPServer(("127.0.0.1", port), handler)
+
+
+def serve_site(args):
+    server = make_site_server(args.port, args.api, args.region, args.cross_region)
+    print(f"Surya Lekka web app on http://127.0.0.1:{server.server_address[1]}/ using {args.api.rstrip('/')}")
+    print("Pages you upload go to that deployed stack. Ctrl+C stops this server.")
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        server.server_close()
+    return 0
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--port", type=int, default=8000)
@@ -293,9 +330,15 @@ def main(argv=None):
     ap.add_argument("--daily-cap", type=int, help="DAILY_JOB_CAP for this run (0 shows the limit message)")
     ap.add_argument("--reading-off", action="store_true",
                     help="run as a stack deployed with ReadingEngine=none: uploads are refused")
+    ap.add_argument("--api", help="serve web/ only, against this deployed API (the stack's ApiUrl)")
+    ap.add_argument("--region", default="ap-south-1", help="with --api: the stack's Region")
+    ap.add_argument("--cross-region", action="store_true",
+                    help="with --api: the stack reads with a cross-Region inference profile")
     args = ap.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     logging.getLogger("botocore").setLevel(logging.WARNING)
+    if args.api:
+        return serve_site(args)
     env = {} if args.daily_cap is None else {"DAILY_JOB_CAP": str(args.daily_cap)}
     if args.reading_off:
         env["READING_ENGINE"] = "none"
