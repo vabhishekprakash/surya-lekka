@@ -55,7 +55,7 @@ def test_http_api_throttling_and_cors():
     routes = {(e["Properties"]["Method"], e["Properties"]["Path"]) for r in RES.values()
               for e in (r.get("Properties", {}).get("Events") or {}).values() if e["Type"] == "HttpApi"}
     assert routes == {("POST", "/jobs"), ("GET", "/jobs/{id}"), ("POST", "/jobs/{id}/checks"),
-                      ("POST", "/samples/{sample_id}")}
+                      ("POST", "/jobs/{id}/retry"), ("POST", "/samples/{sample_id}")}
 
 
 def test_logs_kept_seven_days_for_every_function():
@@ -118,6 +118,8 @@ def test_worker_permissions():
                for s in worker if any(a.startswith("dynamodb:") for a in actions(s)))
     props = RES["WorkerFunction"]["Properties"]
     assert props["EventInvokeConfig"]["MaximumRetryAttempts"] == 1
+    assert actions(next(s for s in worker if s["Resource"] == {"Fn::GetAtt": ["JobsTable", "Arn"]})) == {
+        "dynamodb:GetItem", "dynamodb:UpdateItem"}
     rules = props["Events"]["ManifestUploaded"]["Properties"]["Filter"]["S3Key"]["Rules"]
     assert {(r["Name"], r["Value"]) for r in rules} == {("prefix", "uploads/"), ("suffix", "manifest.json")}
 
@@ -127,6 +129,7 @@ def test_worker_permissions():
     ("GetJobFunction", {"dynamodb:GetItem"}),
     ("RecheckFunction", {"dynamodb:GetItem", "dynamodb:UpdateItem"}),
     ("SampleJobFunction", {"dynamodb:PutItem", "dynamodb:UpdateItem", "s3:GetObject", "s3:PutObject"}),
+    ("RetryFunction", {"dynamodb:GetItem", "dynamodb:UpdateItem", "s3:PutObject"}),
 ])
 def test_api_functions_least_privilege(name, allowed):
     granted = set().union(*(actions(s) for s in statements(name)))
@@ -139,6 +142,24 @@ def test_caps_reach_the_functions():
     assert env["DAILY_JOB_CAP"] == {"Ref": "DailyJobCap"} and env["IP_DAILY_JOB_CAP"] == {"Ref": "IpDailyJobCap"}
     assert TEMPLATE["Parameters"]["IpDailyJobCap"]["Default"] == 10
     assert env["IP_HASH_KEY"] == {"Ref": "AWS::StackId"}
+
+
+def test_worker_timeout_matches_the_stale_claim_limit():
+    from api.common import STALE_SECONDS
+
+    assert RES["WorkerFunction"]["Properties"]["Timeout"] == 900 == STALE_SECONDS
+
+
+def test_worker_failures_go_to_an_encrypted_queue():
+    on_failure = RES["WorkerFunction"]["Properties"]["EventInvokeConfig"]["DestinationConfig"]["OnFailure"]
+    assert on_failure == {"Type": "SQS", "Destination": {"Fn::GetAtt": ["WorkerFailures", "Arn"]}}
+    queue = RES["WorkerFailures"]
+    assert queue["Type"] == "AWS::SQS::Queue" and queue["Properties"]["SqsManagedSseEnabled"] is True
+    lint = runpy.run_path(str(ROOT / "scripts" / "lint_template.py"))
+    translated = lint["translate"](ROOT / "template.yaml")["Resources"]
+    role = translated["WorkerFunctionRole"]["Properties"]["Policies"]
+    sends = [s for p in role for s in p["PolicyDocument"]["Statement"] if "sqs:SendMessage" in actions(s)]
+    assert sends and all(text(s["Resource"]) == text({"Fn::GetAtt": ["WorkerFailures", "Arn"]}) for s in sends)
 
 
 def test_outputs():

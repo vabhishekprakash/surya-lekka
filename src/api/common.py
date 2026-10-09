@@ -20,13 +20,21 @@ from functools import lru_cache
 
 LOGGER = logging.getLogger("surya_lekka")
 LOGGER.setLevel(logging.INFO)
-LOG_FIELDS = {"job_id", "status", "reason", "seconds", "pages", "batches", "failed_batches", "input_tokens",
-              "output_tokens", "http_status", "sample_id"}
+LOG_FIELDS = {"job_id", "status", "reason", "seconds", "pages", "batches", "failed_batches", "resumed_batches",
+              "input_tokens", "output_tokens", "http_status", "sample_id", "deleted", "delete_errors"}
 
 JOB_ID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}")
 MANIFEST_MAX_BYTES = 4096
 UPLOAD_URL_SECONDS = 900
 BODY_MAX_BYTES = 65536
+# The worker's Lambda timeout. Lambda stops a worker by then, so a claim older
+# than this belongs to a worker that is no longer running.
+STALE_SECONDS = 900
+# Failures worth running again. Batches already read are kept, so a retry only
+# pays for the rest.
+RETRYABLE_REASONS = {"timed_out", "model_busy", "model_unavailable", "storage_error", "internal_error",
+                     "extraction_failed"}
+MAX_RETRIES = 2
 
 
 def log(event, **fields):
@@ -236,22 +244,38 @@ def new_job(page_count, source, mode="nova", status="awaiting_upload", **fields)
     return job_id, token
 
 
-def transition(job_id, from_status, to_status, **extra):
-    """Conditional status change. False if the job is not in from_status."""
+def conditional_update(job_id, update, condition, names, values):
+    """update_item that returns False when the condition fails."""
     from botocore.exceptions import ClientError
 
-    sets = ["#status = :to"] + [f"#{k} = :{k}" for k in extra]
-    names = {"#status": "status", **{f"#{k}": k for k in extra}}
-    values = {":from": from_status, ":to": to_status, **{f":{k}": v for k, v in extra.items()}}
     try:
-        table().update_item(Key={"job_id": job_id}, UpdateExpression="SET " + ", ".join(sets),
-                            ConditionExpression="#status = :from", ExpressionAttributeNames=names,
-                            ExpressionAttributeValues=values)
+        table().update_item(Key={"job_id": job_id}, UpdateExpression=update, ConditionExpression=condition,
+                            ExpressionAttributeNames=names, ExpressionAttributeValues=values)
     except ClientError as e:
         if error_code(e) == "ConditionalCheckFailedException":
             return False
         raise
     return True
+
+
+def transition(job_id, from_status, to_status, remove=(), **extra):
+    """Conditional status change. False if the job is not in from_status."""
+    sets = ["#status = :to"] + [f"#{k} = :{k}" for k in extra]
+    names = {"#status": "status", **{f"#{k}": k for k in (*extra, *remove)}}
+    values = {":from": from_status, ":to": to_status, **{f":{k}": v for k, v in extra.items()}}
+    update = "SET " + ", ".join(sets) + (" REMOVE " + ", ".join(f"#{k}" for k in remove) if remove else "")
+    return conditional_update(job_id, update, "#status = :from", names, values)
+
+
+def claim(job_id):
+    """uploaded -> processing, or take over a processing claim older than
+    STALE_SECONDS. False if neither applies, for example a duplicate event."""
+    t = now()
+    return conditional_update(
+        job_id, "SET #status = :processing, #claimed = :t, #batches = if_not_exists(#batches, :empty)",
+        "#status = :uploaded OR (#status = :processing AND #claimed < :stale)",
+        {"#status": "status", "#claimed": "claimed_at", "#batches": "batches"},
+        {":processing": "processing", ":uploaded": "uploaded", ":t": t, ":stale": t - STALE_SECONDS, ":empty": {}})
 
 
 def authorised_job(event):

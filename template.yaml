@@ -196,6 +196,26 @@ Resources:
             Path: /jobs/{id}/checks
             Method: POST
 
+  RetryFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: api.jobs.retry_job
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action: [dynamodb:GetItem, dynamodb:UpdateItem]
+              Resource: !GetAtt JobsTable.Arn
+            - Effect: Allow
+              Action: s3:PutObject
+              Resource: !Sub "arn:${AWS::Partition}:s3:::${BucketNamePrefix}-${AWS::AccountId}-${AWS::Region}/uploads/*"
+      Events:
+        Api:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /jobs/{id}/retry
+            Method: POST
+
   SampleJobFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -224,7 +244,7 @@ Resources:
     Properties:
       Handler: api.worker.handler
       MemorySize: 512
-      Timeout: 600
+      Timeout: 900
       ReservedConcurrentExecutions: !If [UseReservedConcurrency, !Ref ReservedConcurrency, !Ref AWS::NoValue]
       Environment:
         Variables:
@@ -232,6 +252,10 @@ Resources:
       EventInvokeConfig:
         MaximumRetryAttempts: 1
         MaximumEventAgeInSeconds: 3600
+        DestinationConfig:
+          OnFailure:
+            Type: SQS
+            Destination: !GetAtt WorkerFailures.Arn
       Policies:
         - Statement:
             # Global profile for Nova 2 Lite, called from ap-south-1.
@@ -294,6 +318,14 @@ Resources:
                   - Name: suffix
                     Value: manifest.json
 
+  # Events the worker could not handle after Lambda's retry. Each record names the
+  # job's upload key and the error type, never document content.
+  WorkerFailures:
+    Type: AWS::SQS::Queue
+    Properties:
+      MessageRetentionPeriod: 345600
+      SqsManagedSseEnabled: true
+
   CreateJobLogs:
     Type: AWS::Logs::LogGroup
     Properties:
@@ -310,6 +342,12 @@ Resources:
     Type: AWS::Logs::LogGroup
     Properties:
       LogGroupName: !Sub "/aws/lambda/${RecheckFunction}"
+      RetentionInDays: 7
+
+  RetryLogs:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${RetryFunction}"
       RetentionInDays: 7
 
   SampleJobLogs:

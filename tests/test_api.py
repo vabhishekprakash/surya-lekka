@@ -87,9 +87,23 @@ def upload(s3, job, pages=2, manifest=None, page_bytes=JPEG):
     s3.put_object(Bucket=BUCKET, Key=f"uploads/{job['job_id']}/manifest.json", Body=body)
 
 
-def run_worker(job_id):
+def run_worker(job_id, context=None):
     event = {"Records": [{"s3": {"bucket": {"name": BUCKET}, "object": {"key": f"uploads/{job_id}/manifest.json"}}}]}
-    return worker.handler(event, None)["outcomes"]
+    return worker.handler(event, context)["outcomes"]
+
+
+class LambdaClock:
+    """A Lambda context whose remaining time is read from a list, one value per call."""
+
+    def __init__(self, *remaining_ms):
+        self.remaining = list(remaining_ms)
+
+    def get_remaining_time_in_millis(self):
+        return self.remaining.pop(0) if len(self.remaining) > 1 else self.remaining[0]
+
+
+def retry(job, token=None):
+    return call(jobs.retry_job, path={"id": job["job_id"]}, query={"t": job["token"] if token is None else token})
 
 
 def get(job, token=None):
@@ -227,11 +241,22 @@ def test_token_check(aws, monkeypatch):
     assert len(compared) >= 4  # every check goes through the constant-time comparison
 
 
-def test_stale_processing_reported_as_timed_out(aws):
+def test_stuck_processing_reported_as_failed_with_a_retry(aws):
     job = create()
-    common.transition(job["job_id"], "awaiting_upload", "processing", claimed_at=common.now() - 3600)
+    upload(aws, job)
+    common.transition(job["job_id"], "awaiting_upload", "processing", claimed_at=common.now() - 901)
     assert get(job)[1] | {"job_id": None, "page_count": None} == {
-        "job_id": None, "page_count": None, "status": "failed", "reason": "timed_out", "mode": "nova"}
+        "job_id": None, "page_count": None, "status": "failed", "reason": "timed_out", "mode": "nova",
+        "retryable": True}
+    assert retry(job)[0] == 202 and get(job)[1]["status"] == "uploaded"
+    assert run_worker(job["job_id"]) == ["done"] and get(job)[1]["status"] == "done"
+
+
+def test_processing_under_fifteen_minutes_is_still_processing(aws):
+    job = create()
+    common.transition(job["job_id"], "awaiting_upload", "processing", claimed_at=common.now() - 880)
+    assert get(job)[1]["status"] == "processing" and "retryable" not in get(job)[1]
+    assert retry(job)[0] == 409
 
 
 # --- worker ------------------------------------------------------------------------------------
@@ -308,14 +333,25 @@ def test_missing_page_fails_the_job(aws):
 
 def test_unexpected_error_is_stored_without_its_text(aws, monkeypatch, caplog):
     def boom(*args, **kwargs):
-        raise ValueError("Example Solar quote text")
+        raise ValueError("Sentinel quote text 7f3a")
     monkeypatch.setattr(worker, "run_checks", boom)
     job = create()
     upload(aws, job)
     with caplog.at_level("INFO", logger="surya_lekka"):
         assert run_worker(job["job_id"]) == ["failed"]
     assert get(job)[1]["reason"] == "internal_error"
-    assert "Example Solar" not in caplog.text and "Example Solar" not in json.dumps(item(job["job_id"]), default=str)
+    assert "Sentinel" not in caplog.text and "Sentinel" not in json.dumps(item(job["job_id"]), default=str)
+    assert set(item(job["job_id"])["batches"]) == {"1"}  # kept for a retry
+
+
+def test_saved_batches_go_when_a_job_cannot_be_retried(aws, monkeypatch):
+    monkeypatch.setattr(worker, "run_checks", lambda quote: {})  # fails as internal_error after reading
+    job = create()
+    upload(aws, job)
+    common.table().update_item(Key={"job_id": job["job_id"]}, UpdateExpression="SET retries = :n",
+                               ExpressionAttributeValues={":n": common.MAX_RETRIES})
+    assert run_worker(job["job_id"]) == ["failed"]
+    assert "batches" not in item(job["job_id"]) and uploads(aws, job["job_id"]) == []
 
 
 def test_failed_batch_leaves_processing_incomplete(aws, monkeypatch):
@@ -330,6 +366,114 @@ def test_failed_batch_leaves_processing_incomplete(aws, monkeypatch):
     assert body["extraction"]["pages_skipped"] == [6]
     c2 = next(f for f in body["findings"] if f["check_id"] == "C2_central_subsidy")
     assert c2["status"] == "needs_confirmation" and "processed" in c2["message"]
+
+
+def test_worker_stops_before_the_time_limit_and_a_retry_resumes(aws):
+    job = create(6)
+    upload(aws, job, 6)
+    client = worker.bedrock_client()
+    # Time for one model call: the second batch would not finish before Lambda's limit.
+    assert run_worker(job["job_id"], LambdaClock(900_000, worker.CALL_BUDGET_MS - 1)) == ["interrupted"]
+    assert client.calls == 1
+    body = get(job)[1]
+    assert (body["status"], body["reason"], body["retryable"]) == ("failed", "timed_out", True)
+    assert len(uploads(aws, job["job_id"])) == 7  # the pages stay for the retry
+    aws.delete_object(Bucket=BUCKET, Key=f"uploads/{job['job_id']}/manifest.json")
+    status, body = retry(job)
+    assert status == 202 and body["status"] == "uploaded"
+    assert f"uploads/{job['job_id']}/manifest.json" in uploads(aws, job["job_id"])  # its event starts the worker
+    assert run_worker(job["job_id"], LambdaClock(900_000)) == ["done"]
+    assert client.calls == 2  # the saved first batch is not paid for again
+    body = get(job)[1]
+    assert body["status"] == "done" and body["processing_complete"] is True
+    assert body["extraction"]["pages_processed"] == [1, 2, 3, 4, 5, 6]
+    assert "batches" not in item(job["job_id"]) and uploads(aws, job["job_id"]) == []
+    assert json.loads(item(job["job_id"])["stats"])["resumed_batches"] == 1
+
+
+class HardStop(BaseException):
+    """Stands in for Lambda stopping the function mid-call."""
+
+
+def test_lambda_retry_after_a_hard_stop_resumes_from_saved_batches(aws, monkeypatch):
+    class StopsOnSecondCall(CountingClient):
+        def converse(self, **request):
+            if self.calls == 1:
+                self.calls += 1
+                raise HardStop()
+            return super().converse(**request)
+
+    monkeypatch.setattr(worker, "bedrock_client", lambda client=StopsOnSecondCall(): client)
+    job = create(6)
+    upload(aws, job, 6)
+    with pytest.raises(HardStop):
+        run_worker(job["job_id"])
+    assert item(job["job_id"])["status"] == "processing" and set(item(job["job_id"])["batches"]) == {"1"}
+    fresh = CountingClient()
+    monkeypatch.setattr(worker, "bedrock_client", lambda: fresh)
+    assert run_worker(job["job_id"]) == ["duplicate"]  # a live claim is never taken over
+    common.table().update_item(Key={"job_id": job["job_id"]}, UpdateExpression="SET claimed_at = :t",
+                               ExpressionAttributeValues={":t": common.now() - common.STALE_SECONDS - 1})
+    assert run_worker(job["job_id"]) == ["done"]  # Lambda's own retry, after the timeout
+    assert fresh.calls == 1 and get(job)[1]["extraction"]["pages_processed"] == [1, 2, 3, 4, 5, 6]
+
+
+def test_saved_batch_from_another_model_is_not_reused(aws, monkeypatch):
+    job = create(6)
+    upload(aws, job, 6)
+    assert run_worker(job["job_id"], LambdaClock(900_000, 0)) == ["interrupted"]
+    monkeypatch.setenv("MODEL_ID", "apac.amazon.nova-pro-v1:0")
+    assert retry(job)[0] == 202 and run_worker(job["job_id"]) == ["done"]
+    assert worker.bedrock_client().calls == 3
+
+
+def test_worker_model_calls_time_out_at_120_seconds(monkeypatch):
+    made = {}
+    monkeypatch.setattr(worker, "make_client", lambda region, **kw: made.update(kw) or object())
+    worker.bedrock_client.cache_clear()
+    try:
+        worker.bedrock_client()
+    finally:
+        worker.bedrock_client.cache_clear()
+    assert made == {"retries": 0, "read_timeout": 120}
+    assert worker.CALL_BUDGET_MS >= (120 + 10) * 1000  # read timeout plus connect timeout, then saving
+
+
+def test_retry_refusals(aws, monkeypatch):
+    pending = create()
+    assert retry(pending)[0] == 409
+    job = done_job(aws)
+    assert retry(job)[0] == 409 and retry(job, token="wrong")[0] == 404
+    bad = create()
+    upload(aws, bad, manifest="not json")
+    assert run_worker(bad["job_id"]) == ["failed"] and get(bad)[1]["retryable"] is False
+    status, body = retry(bad)
+    assert status == 409 and body["error"] == "not_retryable"
+    stuck = create()
+    upload(aws, stuck)
+    common.transition(stuck["job_id"], "awaiting_upload", "processing", claimed_at=common.now() - 3600)
+    monkeypatch.setenv("UPLOADS_ENABLED", "false")
+    assert retry(stuck)[0] == 503
+    monkeypatch.setenv("UPLOADS_ENABLED", "true")
+    assert retry(stuck)[0] == 202
+    assert retry(stuck)[0] == 409  # already queued
+
+
+def test_retries_are_limited(aws):
+    job = create(6)
+    upload(aws, job, 6)
+    for attempt in range(common.MAX_RETRIES):
+        assert run_worker(job["job_id"], LambdaClock(0)) == ["interrupted"]
+        assert get(job)[1]["retryable"] is True and retry(job)[0] == 202
+    assert run_worker(job["job_id"], LambdaClock(0)) == ["interrupted"]
+    assert get(job)[1]["retryable"] is False and retry(job)[0] == 409
+    assert uploads(aws, job["job_id"]) == []  # nothing left to retry, so the pages go
+
+
+def test_unretryable_failure_deletes_the_uploads(aws):
+    job = create()
+    upload(aws, job, page_bytes=b"%PDF-1.7")
+    assert run_worker(job["job_id"]) == ["failed"] and uploads(aws, job["job_id"]) == []
 
 
 def test_other_objects_are_ignored(aws):

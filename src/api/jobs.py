@@ -1,4 +1,5 @@
-"""HTTP API handlers: create a job, read it, re-run the checks, and start a sample.
+"""HTTP API handlers: create a job, read it, re-run the checks, retry it, and
+start a sample.
 
 The browser renders the quote's pages to JPEG and uploads them with the
 presigned POSTs from POST /jobs, then uploads manifest.json, which starts the
@@ -13,12 +14,16 @@ from extract.render import MAX_IMAGE_BYTES, MAX_PAGES
 
 from .common import (
     MANIFEST_MAX_BYTES,
+    MAX_RETRIES,
+    RETRYABLE_REASONS,
+    STALE_SECONDS,
     UPLOAD_URL_SECONDS,
     ApiError,
     authorised_job,
     body_json,
     bucket_name,
     check_kill_switch,
+    conditional_update,
     error_response,
     log,
     manifest_key,
@@ -34,7 +39,8 @@ from .common import (
 )
 
 RESULT_MAX_BYTES = 350_000
-WORKER_TIMEOUT_SECONDS = 900
+# The attribute that changes whenever a job enters each state, used to make a retry conditional.
+STATE_MARK = {"processing": "claimed_at", "uploaded": "retry_at", "failed": "finished_at"}
 
 
 def _presigned_post(key, content_type, max_bytes):
@@ -70,12 +76,20 @@ def create_job(event, context):
     return response(201, body)
 
 
+def _stuck(item):
+    """A worker claim, or a queued retry, older than the worker's time limit."""
+    mark = {"processing": "claimed_at", "uploaded": "retry_at"}.get(item["status"])
+    return mark is not None and mark in item and now() - int(item[mark]) > STALE_SECONDS
+
+
 def _view(item):
     status, reason = item["status"], item.get("reason")
-    if status == "processing" and now() - int(item.get("claimed_at", now())) > WORKER_TIMEOUT_SECONDS:
+    if _stuck(item):
         status, reason = "failed", "timed_out"
     view = {"job_id": item["job_id"], "status": status, "reason": reason, "page_count": int(item["page_count"]),
             "mode": item.get("mode", "nova")}
+    if status == "failed":
+        view["retryable"] = reason in RETRYABLE_REASONS and int(item.get("retries", 0)) < MAX_RETRIES
     if item.get("page_text"):
         view["page_text"] = json.loads(item["page_text"])
     if status == "done":
@@ -142,6 +156,40 @@ def recheck(event, context):
         return error_response(e)
     log("rechecked", job_id=item["job_id"], http_status=200)
     return response(200, {**checked, "corrected_fields": stored["corrected_fields"]})
+
+
+def retry_job(event, context):
+    """POST /jobs/{id}/retry?t=token: run a failed or stuck job again. The manifest
+    is uploaded again, which starts the worker; batches the earlier run saved are
+    reused, so only the rest are sent to the model."""
+    try:
+        item = authorised_job(event)
+        check_kill_switch()
+        view = _view(item)
+        if view["status"] != "failed" or not view.get("retryable"):
+            raise ApiError(409, "not_retryable", "This check can't be run again. Please start a new one.")
+        mark = STATE_MARK[item["status"]]
+        seen = "attribute_not_exists(#mark)" if mark not in item else "#mark = :mark"
+        values = {":uploaded": "uploaded", ":t": now(), ":zero": 0, ":one": 1, ":status": item["status"]}
+        if mark in item:
+            values[":mark"] = item[mark]
+        if not conditional_update(
+                item["job_id"],
+                "SET #status = :uploaded, #retry_at = :t, #retries = if_not_exists(#retries, :zero) + :one "
+                "REMOVE #reason",
+                f"#status = :status AND {seen}",
+                {"#status": "status", "#mark": mark, "#retry_at": "retry_at", "#retries": "retries",
+                 "#reason": "reason"},
+                values):
+            raise ApiError(409, "changed", "This check changed while you were looking. Please refresh.")
+        pages = int(item["page_count"])
+        s3().put_object(Bucket=bucket_name(), Key=manifest_key(item["job_id"]),
+                        Body=json.dumps({"pages": pages}).encode(), ContentType="application/json")
+    except ApiError as e:
+        log("retry_refused", reason=e.code, http_status=e.status)
+        return error_response(e)
+    log("job_retried", job_id=item["job_id"], http_status=202)
+    return response(202, {"job_id": item["job_id"], "status": "uploaded"})
 
 
 def sample_ids():
