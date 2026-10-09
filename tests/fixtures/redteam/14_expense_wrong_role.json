@@ -1,7 +1,7 @@
 {
- "name": "21_expense_correct_label",
- "issue": "control",
- "fix": "",
+ "name": "14_expense_wrong_role",
+ "issue": "AnalyzeExpense label Grand Total overrides the actual Subsidy line.",
+ "fix": "Require the label and its role to agree with supporting OCR evidence.",
  "mode": "disabled-source-only",
  "sources": [
   "expense"
@@ -54,7 +54,7 @@
       },
       "PageNumber": 1,
       "LabelDetection": {
-       "Text": "Subsidy",
+       "Text": "Grand Total",
        "Confidence": 95.0
       },
       "ValueDetection": {
