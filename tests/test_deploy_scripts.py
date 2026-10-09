@@ -182,3 +182,15 @@ def test_build_site_regions_match_the_template_and_the_web_app():
     assert list(regions) == template["Rules"]["SupportedRegion"]["Assertions"][0]["Assert"]["Fn::Contains"][0]
     app = (ROOT / "web" / "app.js").read_text(encoding="utf-8")
     assert all(f'"{r}": "AWS\'s ' in app for r in regions)
+
+
+@windows_powershell
+def test_deploy_with_textract_needs_no_model_lookup():
+    api = "https://abc123.execute-api.ap-south-1.amazonaws.com"
+    run, calls = run_ps("deploy.ps1", f"-Profile default -Region ap-south-1 -ExpectedAccount {ACCOUNT} "
+                        "-HostingEnabled false -ReadingEngine textract", {
+                            "FAKE_STACK": outputs(("ApiUrl", api), ("BucketName", "uploads-bucket"))})
+    assert run.returncode == 0, run.stdout + run.stderr
+    assert not any(c.startswith("aws bedrock") for c in calls)
+    (deploy,) = [c for c in calls if c.startswith("sam deploy")]
+    assert "ReadingEngine=textract" in deploy and "ProfileModelArns=none" in deploy and "GlobalModelArns=none" in deploy

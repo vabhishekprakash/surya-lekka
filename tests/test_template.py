@@ -394,3 +394,37 @@ def test_without_hosting_the_api_accepts_only_the_local_origin():
     allowed = re.compile(TEMPLATE["Parameters"]["SiteOrigin"]["AllowedPattern"])
     assert allowed.fullmatch("http://127.0.0.1:8000")
     assert not any(allowed.fullmatch(bad) for bad in ("*", "https://*.example.com", "http://127.0.0.1:8000/"))
+
+
+def textract_grants(**overrides):
+    resources = resolve(**overrides)["Resources"]
+    return [s for s in statements("WorkerFunction", resources) if any(a.startswith("textract:") for a in actions(s))]
+
+
+@pytest.mark.parametrize("engine", ["none", "nova", "textract"])
+def test_each_engine_gets_only_its_own_permission(engine):
+    params = {"ReadingEngine": engine, "ModelId": "amazon.nova-pro-v1:0" if engine == "nova" else ""}
+    textract, bedrock = textract_grants(**params), bedrock_grants(**params)
+    assert bool(textract) == (engine == "textract") and bool(bedrock) == (engine == "nova")
+    if engine == "textract":
+        (grant,) = textract
+        # AnalyzeDocument has no resource types in the Service Authorization Reference.
+        assert actions(grant) == {"textract:AnalyzeDocument"} and grant["Resource"] == "*"
+        assert grant["Effect"] == "Allow" and "Condition" not in grant
+    # Pages go to Textract as bytes, so nothing but the worker's own S3 statement touches the bucket.
+    s3 = [s for s in statements("WorkerFunction", resolve(**params)["Resources"])
+          if any(a.startswith("s3:") for a in actions(s))]
+    assert [actions(s) for s in s3] == [{"s3:GetObject", "s3:DeleteObject"}]
+
+
+def test_textract_condition_and_template_wording():
+    assert TEMPLATE["Conditions"]["TextractReading"] == {"Fn::Equals": [{"Ref": "ReadingEngine"}, "textract"]}
+    source = (ROOT / "template.yaml").read_text(encoding="utf-8")
+    assert "no resource-level permissions" in source
+
+
+def test_daily_page_cap_reaches_the_functions():
+    param = TEMPLATE["Parameters"]["DailyPageCap"]
+    assert param["Default"] == 300 and param["MinValue"] == 0 and param["Type"] == "Number"
+    env = TEMPLATE["Globals"]["Function"]["Environment"]["Variables"]
+    assert env["DAILY_PAGE_CAP"] == {"Ref": "DailyPageCap"}

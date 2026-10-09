@@ -14,11 +14,14 @@ new API, to the site bucket and clears the CloudFront cache. With
 -HostingEnabled false it prints the API URL and the command that serves web/
 on this machine against it.
 
-Reading is off unless -ReadingEngine nova. Then -ModelId is looked up: for an
-inference profile, aws bedrock get-inference-profile lists the Regions the
-worker may call; any other ID must be a model in -Region.
+Reading is off unless -ReadingEngine is nova or textract. With textract the
+worker calls Amazon Textract in -Region, one call per page. With nova,
+-ModelId is looked up: for an inference profile, aws bedrock
+get-inference-profile lists the Regions the worker may call; any other ID
+must be a model in -Region.
 
-This creates real AWS resources. With reading on, each quote read is a paid Bedrock call.
+This creates real AWS resources. With reading on, each page or quote read is a
+paid Textract or Bedrock call.
 
 .EXAMPLE
 .\scripts\deploy.ps1 -Profile default -Region ap-south-1 -ExpectedAccount <your-account-id>
@@ -30,7 +33,7 @@ param(
     [string]$StackName = "surya-lekka",
     [ValidateSet("true", "false")][string]$HostingEnabled = "true",
     [string]$SiteOrigin = "http://127.0.0.1:8000",
-    [ValidateSet("none", "nova")][string]$ReadingEngine = "none",
+    [ValidateSet("none", "nova", "textract")][string]$ReadingEngine = "none",
     [string]$ModelId = "global.amazon.nova-2-lite-v1:0"
 )
 
@@ -69,7 +72,7 @@ function Get-ModelAccess {
 }
 
 $access = [pscustomobject]@{ ProfileModelArns = "none"; GlobalModelArns = "none"; CrossRegion = $false }
-if ($ReadingEngine -ne "none") {
+if ($ReadingEngine -eq "nova") {
     Write-Host "== Look up $ModelId"
     $access = Get-ModelAccess
     Write-Host "Pages may be read outside ${Region}: $($access.CrossRegion)"

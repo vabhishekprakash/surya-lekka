@@ -33,6 +33,13 @@ Parameters:
     Default: 200
     MinValue: 0
     Description: New checks allowed per UTC day, live samples included. 0 refuses every new check.
+  DailyPageCap:
+    Type: Number
+    Default: 300
+    MinValue: 0
+    Description: >-
+      Pages allowed per UTC day across all new checks, live samples included, counted from each
+      check's declared page count when it is created. 0 refuses every new check.
   IpDailyJobCap:
     Type: Number
     Default: 10
@@ -41,10 +48,11 @@ Parameters:
   ReadingEngine:
     Type: String
     Default: none
-    AllowedValues: [none, nova]
+    AllowedValues: [none, nova, textract]
     Description: >-
-      What reads uploaded quotes. none switches reading off: uploads and live samples are refused,
-      while saved sample readings and typed-in numbers keep working. More engines can be added here.
+      What reads uploaded quotes: nova (Amazon Nova through Bedrock) or textract (Amazon Textract
+      AnalyzeDocument with tables and queries, in this Region). none switches reading off: uploads
+      and live samples are refused, while saved sample readings and typed-in numbers keep working.
   ModelId:
     Type: String
     Default: ""
@@ -90,6 +98,7 @@ Conditions:
   Hosting: !Equals [!Ref HostingEnabled, "true"]
   UseReservedConcurrency: !Not [!Equals [!Ref ReservedConcurrency, 0]]
   NovaReading: !Equals [!Ref ReadingEngine, nova]
+  TextractReading: !Equals [!Ref ReadingEngine, textract]
   HasRegionalModels: !Not [!Equals [!Join [",", !Ref ProfileModelArns], none]]
   HasGlobalModels: !Not [!Equals [!Join [",", !Ref GlobalModelArns], none]]
   NovaThroughProfile: !And [!Condition NovaReading, !Or [!Condition HasRegionalModels, !Condition HasGlobalModels]]
@@ -113,6 +122,7 @@ Globals:
         UPLOADS_ENABLED: !Ref UploadsEnabled
         READING_ENGINE: !Ref ReadingEngine
         DAILY_JOB_CAP: !Ref DailyJobCap
+        DAILY_PAGE_CAP: !Ref DailyPageCap
         IP_DAILY_JOB_CAP: !Ref IpDailyJobCap
         IP_HASH_KEY: !Ref AWS::StackId
         JOB_TTL_HOURS: "24"
@@ -452,6 +462,17 @@ Resources:
                 Effect: Allow
                 Action: bedrock:InvokeModel
                 Resource: !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}::foundation-model/${ModelId}"
+          - !Ref AWS::NoValue
+        # Textract only while it reads the quotes. The worker sends page bytes, so Textract needs no
+        # S3 access. textract:AnalyzeDocument has no resource-level permissions (the Service
+        # Authorization Reference lists no resource types for it), so the resource is "*".
+        - !If
+          - TextractReading
+          - Statement:
+              - Sid: TextractAnalyzeDocument
+                Effect: Allow
+                Action: textract:AnalyzeDocument
+                Resource: "*"
           - !Ref AWS::NoValue
       Events:
         ManifestUploaded:
