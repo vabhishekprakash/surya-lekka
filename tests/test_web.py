@@ -160,3 +160,8 @@ def test_every_charge_question_sits_beside_the_charges_and_is_never_prefilled():
     assert "FLAGS.filter((flag) => !flag.beside)" in APP
     manual = INDEX[INDEX.index('<select name="extra_charges_complete"'):]
     assert "Is every charge on your quote listed here?" in INDEX and '<option value="false">No</option>' in manual
+
+
+def test_amounts_on_the_page_use_the_rupee_sign_without_a_space():
+    assert 'return "₹" + n.toLocaleString("en-IN", { maximumFractionDigits: 2 });' in APP
+    assert "Rs " not in APP.replace("Rs ${", "") and 'placeholder="Rs"' not in INDEX

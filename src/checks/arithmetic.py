@@ -14,11 +14,14 @@ from .common import (
     NEEDS_CONFIRMATION,
     UnusableNumber,
     computed,
+    field_words,
     finding,
     format_inr,
+    join_words,
     options_finding,
     options_unresolved,
     quoted,
+    rupees,
     to_decimal,
     value_of,
 )
@@ -42,7 +45,8 @@ SUBSIDY_FIELDS = {
 class _Operands:
     """Collects amounts and their evidence; records missing and unusable fields."""
 
-    def __init__(self):
+    def __init__(self, quote):
+        self.quote = quote
         self.evidence, self.missing, self.unusable = [], [], []
 
     def take(self, name, field):
@@ -60,31 +64,53 @@ class _Operands:
             return None
         return amount
 
+    def words(self, names):
+        return join_words(field_words(n, self.quote) for n in names)
+
     def blocked(self, check_id):
         if self.missing:
-            return finding(check_id, MISSING, f"Not found: {', '.join(self.missing)}.", self.evidence)
+            return finding(check_id, MISSING, f"Not found on the quote: {self.words(self.missing)}.", self.evidence)
         if self.unusable:
             return finding(
                 check_id,
                 NEEDS_CONFIRMATION,
-                f"Please confirm these values: {', '.join(self.unusable)}.",
+                f"Please check {self.words(self.unusable)}: it can't be used as an amount.",
                 self.evidence,
             )
         return None
 
 
-def _compare(check_id, ops, name, expected, formula, stated, stated_name, question):
-    ops.evidence.append(computed(name, expected, formula))
+def _sum_text(quote, terms):
+    """ "Base price ₹1,50,000 + GST ₹13,350" from [(field name, amount, sign)]."""
+    parts = []
+    for i, (name, amount, sign) in enumerate(terms):
+        words = field_words(name, quote, quoted_label=False)
+        words = words[:1].upper() + words[1:] if i == 0 else words
+        parts.append(("" if i == 0 else " + " if sign > 0 else " minus ") + f"{words} {rupees(amount)}")
+    return "".join(parts)
+
+
+def _compare(check_id, ops, name, expected, terms, stated, stated_words, question, more_hint, less_hint):
+    """Compares a worked-out amount with the quote's own. Differences of up to ₹1 count as
+    rounding."""
+    ops.evidence.append(computed(name, expected, " ".join(
+        ("" if i == 0 else "+ " if sign > 0 else "minus ") + field_words(n, ops.quote, quoted_label=False)
+        for i, (n, _, sign) in enumerate(terms))))
     difference = stated - expected
+    sums = f"{_sum_text(ops.quote, terms)} = {rupees(expected)}"
     if abs(difference) <= TOLERANCE_INR:
-        status, verb, question = CONSISTENT, "matches", None
+        status, question = CONSISTENT, None
+        same = "the same as" if difference == 0 else f"within ₹1 of the {rupees(stated)} on"
+        message = f"{sums}, {same} the quote's {stated_words}."
     else:
-        status, verb = INCONSISTENT, "differs from"
+        status = INCONSISTENT
+        direction, hint = ("more", more_hint) if difference > 0 else ("less", less_hint)
+        message = (f"{sums}. The quote's {stated_words} is {rupees(stated)}, which is {rupees(abs(difference))} "
+                   f"{direction}. {hint}")
     return finding(
         check_id,
         status,
-        f"Computed {name} INR {expected} ({formula}) {verb} the stated {stated_name} "
-        f"INR {stated} (tolerance INR {TOLERANCE_INR}).",
+        message,
         ops.evidence,
         question=question,
         question_params={"computed": format_inr(expected), "stated": format_inr(stated)} if question else None,
@@ -95,7 +121,7 @@ def check_gross_total(quote):
     if options_unresolved(quote):
         return options_finding(GROSS_CHECK_ID, quote)
 
-    ops = _Operands()
+    ops = _Operands(quote)
     gross = ops.take("gross_total", quote.get("gross_total"))
     base = ops.take("base_price", quote.get("base_price"))
     discount = None
@@ -149,32 +175,30 @@ def check_gross_total(quote):
         return finding(
             GROSS_CHECK_ID,
             NEEDS_CONFIRMATION,
-            f"Please confirm whether these charges are inside the total: {', '.join(unclear)}.",
+            f"Is {ops.words(unclear)} inside the total? Please answer on the review screen.",
             ops.evidence,
         )
     if value_of(complete_field) is not True:
         return finding(
             GROSS_CHECK_ID,
             NEEDS_CONFIRMATION,
-            "Please confirm that the listed extra charges are all the extra charges.",
+            "Is every charge on your quote listed? Answer yes on the review screen once it is, and the total "
+            "will be checked.",
             ops.evidence,
         )
 
     # Only amounts the quote states appear in the relation.
-    expected, terms = base, ["base_price"]
+    terms = [("base_price", base, 1)]
     if gst_treatment == "excluded":
-        expected += gst
-        terms.append("gst_amount")
-    expected += sum(extras, Decimal(0))
-    terms += extra_names
-    formula = " + ".join(terms)
+        terms.append(("gst_amount", gst, 1))
+    terms += [(name.removesuffix(".amount") + ".amount", amount, 1) for name, amount in zip(extra_names, extras)]
     if discount is not None:
-        expected -= discount
-        formula += " - discount"
-    result = _compare(GROSS_CHECK_ID, ops, "gross total", expected, formula, gross, "total",
-                      "total_mismatch")
+        terms.append(("discount", discount, -1))
+    expected = sum((amount * sign for _, amount, sign in terms), Decimal(0))
+    result = _compare(GROSS_CHECK_ID, ops, "gross total", expected, terms, gross, "total", "total_mismatch",
+                      "Is a charge missing from the list?", "Please check the amounts with the vendor.")
     if outside:
-        result["notes"].append(f"Charges listed outside the total were not added: {', '.join(outside)}.")
+        result["notes"].append(f"Charges listed outside the total were not added: {ops.words(outside)}.")
     return result
 
 
@@ -182,7 +206,7 @@ def check_net_cost(quote):
     if options_unresolved(quote):
         return options_finding(NET_CHECK_ID, quote)
 
-    ops = _Operands()
+    ops = _Operands(quote)
     gross = ops.take("gross_total", quote.get("gross_total"))
     net = ops.take("net_cost", quote.get("net_cost"))
 
@@ -204,14 +228,14 @@ def check_net_cost(quote):
         return finding(
             NET_CHECK_ID,
             NEEDS_CONFIRMATION,
-            "The quote does not say which subsidy the net cost deducts.",
+            "The quote doesn't say which subsidy the net cost takes off.",
             ops.evidence,
         )
 
     expected = gross - sum(subsidies, Decimal(0))
-    formula = " - ".join(("gross_total",) + subsidy_fields)
-    result = _compare(NET_CHECK_ID, ops, "net cost", expected, formula, net, "net cost",
-                      "net_cost_mismatch")
+    terms = [("gross_total", gross, 1)] + [(name, amount, -1) for name, amount in zip(subsidy_fields, subsidies)]
+    result = _compare(NET_CHECK_ID, ops, "net cost", expected, terms, net, "net cost", "net_cost_mismatch",
+                      "Please check the amounts with the vendor.", "Please check the amounts with the vendor.")
     if subsidy_fields:
         result["message"] += " Subsidy amounts are taken as stated and are not checked here."
     return result

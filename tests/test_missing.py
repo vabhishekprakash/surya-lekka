@@ -103,7 +103,7 @@ def test_extras_outside_total_and_net_meter(quote_v1):
     r = c4(quote_v1)
     extras = r["extras_outside_total"]
     assert extras["status"] == "needs_confirmation"
-    assert "Elevated structure: Rs 12,000, outside the total (Total)" in extras["message"]
+    assert "Elevated structure: ₹12,000, outside the total (Total)" in extras["message"]
     assert "Civil work: at actuals, not clearly inside the total" in extras["message"]
     assert r["net_meter"]["status"] == "needs_confirmation"
     json.dumps(list(r.values()))

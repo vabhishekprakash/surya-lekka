@@ -17,17 +17,17 @@ TEMPLATES = {
     "subsidy_not_stated": ("The quote doesn't mention the central subsidy. If we apply for it, what amount do "
                            "you expect?"),
     "subsidy_breakdown": "Could you show the central subsidy and any state subsidy as separate amounts?",
-    "subsidy_higher": ("The quote shows a central subsidy of Rs {stated}. For {dc_kwp} kWp of panels, the "
-                       "central rule we checked gives Rs {rule}. How did you work out the subsidy amount?"),
-    "subsidy_lower": ("The quote shows a central subsidy of Rs {stated}. For {dc_kwp} kWp of panels, the "
-                      "central rule we checked allows up to Rs {rule}. Could you explain the difference?"),
+    "subsidy_higher": ("The quote shows a central subsidy of ₹{stated}. For {dc_kwp} kWp of panels, the "
+                       "central rule we checked gives ₹{rule}. How did you work out the subsidy amount?"),
+    "subsidy_lower": ("The quote shows a central subsidy of ₹{stated}. For {dc_kwp} kWp of panels, the "
+                      "central rule we checked allows up to ₹{rule}. Could you explain the difference?"),
     "dc_capacity": "What is the total DC capacity of the solar panels, in kWp?",
     "exact_capacity": ("The quote gives a range for the panels. What is the exact panel wattage, and the "
                        "total capacity in kWp?"),
-    "total_mismatch": ("Adding up the price lines on the quote gives Rs {computed}, but the total shown is "
-                       "Rs {stated}. Could you explain how the total is made up?"),
-    "net_cost_mismatch": ("Taking the subsidy shown away from the total gives Rs {computed}, but the quote shows "
-                          "a net cost of Rs {stated}. Could you explain the difference?"),
+    "total_mismatch": ("Adding up the price lines on the quote gives ₹{computed}, but the total shown is "
+                       "₹{stated}. Could you explain how the total is made up?"),
+    "net_cost_mismatch": ("Taking the subsidy shown away from the total gives ₹{computed}, but the quote shows "
+                          "a net cost of ₹{stated}. Could you explain the difference?"),
     "panel_wattage": "What is the wattage of each solar panel?",
     "panel_count": "How many solar panels are included?",
     "module_model": "Which make and model of solar panel will you install?",

@@ -25,7 +25,7 @@ def test_questions_from_c2_and_c4(quote_v1):
     quote_v1["dcr_declaration"] = None
     r = run_checks(quote_v1)
     assert [q["id"] for q in r["questions"]] == ["subsidy_higher", "dcr", "vendor_registration"]
-    assert "Rs 85,800" in r["questions"][0]["text"] and "Rs 78,000" in r["questions"][0]["text"]
+    assert "₹85,800" in r["questions"][0]["text"] and "₹78,000" in r["questions"][0]["text"]
     msg = r["vendor_message"]
     assert msg.startswith(INTRO) and msg.endswith(OUTRO)
     assert "1. The quote shows a central subsidy" in msg and "3. Could you share" in msg
@@ -83,8 +83,8 @@ def test_price_mismatch_questions(quote_v1):
     quote_v1["gross_total"] = amount_field("Rs. 2,00,000")
     quote_v1["net_cost"] = amount_field("Rs. 1,25,000")
     qs = {q["id"]: q["text"] for q in run_checks(quote_v1)["questions"]}
-    assert "Rs 1,97,000" in qs["total_mismatch"] and "Rs 2,00,000" in qs["total_mismatch"]
-    assert "Rs 1,22,000" in qs["net_cost_mismatch"] and "Rs 1,25,000" in qs["net_cost_mismatch"]
+    assert "₹1,97,000" in qs["total_mismatch"] and "₹2,00,000" in qs["total_mismatch"]
+    assert "₹1,22,000" in qs["net_cost_mismatch"] and "₹1,25,000" in qs["net_cost_mismatch"]
 
 
 def test_no_subsidy_question(quote_v1):

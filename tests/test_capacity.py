@@ -53,7 +53,7 @@ def test_missing_wattage(quote):
     quote["module_groups"][0]["wattage_w"] = field(None)
     result = check_capacity(quote)
     assert result["status"] == "missing"
-    assert "module_groups[0].wattage_w" in result["message"]
+    assert result["message"] == "Not found on the quote: panel wattage."
 
 
 def test_null_wattage_field(quote):

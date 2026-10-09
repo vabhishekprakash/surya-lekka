@@ -51,7 +51,7 @@ def test_absent_discount_left_out(quote):
         result = check_gross_total(quote)
         assert result["status"] == "consistent"
         formula = result["evidence"][-1]["formula"]
-        assert formula == "base_price + gst_amount + extra_charges[0].amount"
+        assert formula == "base price + GST + Net meter charges"
         assert "discount" not in result["message"]
         assert not any(e.get("field") == "discount" or e.get("name") == "discount" for e in result["evidence"])
 
@@ -60,7 +60,7 @@ def test_formula_lists_only_stated_terms(quote):
     quote["extra_charges"] = []
     quote["gross_total"] = field(194500)
     result = check_gross_total(quote)
-    assert result["evidence"][-1]["formula"] == "base_price + gst_amount - discount"
+    assert result["evidence"][-1]["formula"] == "base price + GST minus discount"
 
 
 def test_computed_values_are_labelled_computed(quote):
@@ -146,7 +146,7 @@ def test_central_not_assumed_whole_subsidy(quote):
     quote["net_cost_subsidy_basis"] = field("central_and_state")
     result = check_net_cost(quote)
     assert result["status"] == "missing"
-    assert "subsidy_state" in result["message"]
+    assert result["message"] == "Not found on the quote: state subsidy."
 
 
 def test_central_and_state_summed(quote):
@@ -163,7 +163,7 @@ def test_combined_not_added_to_components(quote):
     quote["net_cost"] = field(109000)
     result = check_net_cost(quote)
     assert result["status"] == "consistent"
-    assert result["evidence"][-1]["formula"] == "gross_total - subsidy_combined"
+    assert result["evidence"][-1]["formula"] == "total minus subsidy"
 
 
 def test_no_subsidy_deducted(quote):

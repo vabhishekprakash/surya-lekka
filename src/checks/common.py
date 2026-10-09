@@ -6,6 +6,7 @@ wrappers: {"value": ..., "evidence_text": ..., "page": ...}, optionally with
 null; both mean "not found".
 """
 
+import re
 from decimal import Decimal, InvalidOperation
 
 CONSISTENT = "consistent"
@@ -71,6 +72,46 @@ def format_inr(amount):
             head = head[:-2]
         whole = ",".join([head] + groups + [tail])
     return sign + whole + frac
+
+
+def rupees(amount):
+    """₹ and Indian digit grouping with no space, so the sign never wraps away from
+    the number: Decimal("163350") -> "₹1,63,350"."""
+    return "₹" + format_inr(amount)
+
+
+# Field names in the internal view -> words a household reads.
+FIELD_WORDS = {
+    "base_price": "base price", "gst_amount": "GST", "discount": "discount", "gross_total": "total",
+    "net_cost": "net cost", "subsidy_central": "central subsidy", "subsidy_state": "state subsidy",
+    "subsidy_combined": "subsidy", "subsidy_unspecified": "subsidy", "stated_capacity_kw": "system size",
+    "count": "number of panels", "wattage_w": "panel wattage", "make_model": "make and model",
+    "rating_kw": "inverter rating", "rating_kva": "inverter rating", "amount": "amount",
+}
+_ITEM = re.compile(r"^(\w+)\[(\d+)\](?:\.(\w+))?$")
+
+
+def field_words(name, quote=None, quoted_label=True):
+    """Plain words for a field path, e.g. "module_groups[0].count" -> "number of panels",
+    "extra_charges[1].amount" -> the charge's own label in quotes."""
+    m = _ITEM.match(name)
+    if not m:
+        return FIELD_WORDS.get(name, name.replace("_", " "))
+    list_name, index, key = m.group(1), int(m.group(2)), m.group(3)
+    items = (quote or {}).get(list_name) or []
+    if list_name == "extra_charges":
+        label = items[index].get("label") if index < len(items) else None
+        if not label:
+            return "an extra charge"
+        return f'"{label}"' if quoted_label else label
+    key = key or "item"
+    words = FIELD_WORDS.get(key, key.replace("_", " "))
+    return f"{words} (line {index + 1})" if len(items) > 1 else words
+
+
+def join_words(words):
+    words = list(words)
+    return words[0] if len(words) == 1 else ", ".join(words[:-1]) + " and " + words[-1]
 
 
 def format_number(value):

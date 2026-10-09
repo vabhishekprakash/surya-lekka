@@ -14,6 +14,7 @@ from .common import (
     UnusableNumber,
     finding,
     format_inr,
+    rupees,
     options_finding,
     options_unresolved,
     quoted,
@@ -41,7 +42,7 @@ def _choices(main, alternatives):
 def _amount_text(field):
     v = value_of(field)
     if isinstance(v, Decimal):
-        return f"Rs {format_inr(v)}"
+        return f"{rupees(v)}"
     if field is not None and field.get("raw"):
         return field["raw"]
     return "amount not given"

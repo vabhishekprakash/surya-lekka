@@ -85,7 +85,7 @@ def test_extra_outside_total_not_added(quote_v1):
     })
     result = check_gross_total(normalise(quote_v1))
     assert result["status"] == "consistent"
-    assert "extra_charges[1]" in result["notes"][0]
+    assert result["notes"][0] == 'Charges listed outside the total were not added: "Elevated structure".'
 
 
 def test_extra_unclear_needs_confirmation(quote_v1):

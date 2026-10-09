@@ -245,7 +245,7 @@ function jobPath(suffix = "") {
 function formatInr(text) {
   const n = Number(text);
   if (text === null || text === "" || !Number.isFinite(n)) return String(text);
-  return "Rs " + n.toLocaleString("en-IN", { maximumFractionDigits: 2 });
+  return "₹" + n.toLocaleString("en-IN", { maximumFractionDigits: 2 });
 }
 
 function formatNumber(text) {
@@ -997,7 +997,7 @@ function addCharge(values = {}) {
       el("label", { class: "field" }, `Extra charge ${n} (for example net meter)`,
         el("input", { "data-charge": "label", value: values.label || "", autocomplete: "off" })),
       el("label", { class: "field" }, "Amount",
-        el("input", { "data-charge": "amount", inputmode: "decimal", placeholder: "Rs", value: values.amount || "",
+        el("input", { "data-charge": "amount", inputmode: "decimal", placeholder: "₹", value: values.amount || "",
           autocomplete: "off" })),
       el("label", { class: "field" }, "Inside the total?",
         el("select", { "data-charge": "included_in_total" },
@@ -1067,7 +1067,7 @@ async function submitManual(event) {
 function evidenceItem(e) {
   if (e.kind === "computed") {
     const [label, unit] = COMPUTED[e.name] || [e.name, ""];
-    const value = unit === "inr" ? (String(e.value).includes("-") ? `Rs ${e.value}` : formatInr(e.value))
+    const value = unit === "inr" ? (String(e.value).includes("-") ? `₹${e.value}` : formatInr(e.value))
       : unit === "kwp" ? `${String(e.value).includes("-") ? e.value : formatNumber(e.value)} kWp` : e.value;
     return el("li", {}, `${label}: ${value} `, el("span", { class: "note", text: `(${e.formula})` }));
   }

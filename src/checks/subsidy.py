@@ -21,6 +21,7 @@ from .common import (
     computed,
     finding,
     format_inr,
+    rupees,
     format_number,
     options_finding,
     options_unresolved,
@@ -106,14 +107,16 @@ def cfa_amount(dc_kwp, rule):
 
 
 def rule_formula(rule):
+    """The rule in words, e.g. "₹30,000 per kWp up to 2 kWp, then ₹18,000 per kWp from 2 to
+    3 kWp, at most ₹78,000"."""
     parts = []
     for slab in rule["slabs"]:
-        lo, hi, rate = slab["from_kwp"], slab["to_kwp"], slab["inr_per_kwp"]
-        if lo == "0":
-            parts.append(f"{rate} x min(dc, {hi})")
+        lo, hi, rate = slab["from_kwp"], slab["to_kwp"], rupees(Decimal(slab["inr_per_kwp"]))
+        if Decimal(lo) == 0:
+            parts.append(f"{rate} per kWp up to {format_number(Decimal(hi))} kWp")
         else:
-            parts.append(f"{rate} x min(max(dc - {lo}, 0), {Decimal(hi) - Decimal(lo)})")
-    return " + ".join(parts) + f", cap {rule['cap_inr']}"
+            parts.append(f"{rate} per kWp from {format_number(Decimal(lo))} to {format_number(Decimal(hi))} kWp")
+    return ", then ".join(parts) + f", at most {rupees(Decimal(rule['cap_inr']))}"
 
 
 def _bounds(value):
@@ -274,8 +277,8 @@ def check_central_subsidy(quote, rules=None):
         if amount_lo != amount_hi:
             return result(NEEDS_CONFIRMATION,
                           f"The panel capacity is a range ({format_number(lo)} to {format_number(hi)} kWp), "
-                          f"which gives a central subsidy between Rs {format_inr(amount_lo)} and "
-                          f"Rs {format_inr(amount_hi)}. The exact panel wattage is needed.",
+                          f"which gives a central subsidy between {rupees(amount_lo)} and "
+                          f"{rupees(amount_hi)}. The exact panel wattage is needed.",
                           evidence, rule, question="exact_capacity")
     else:
         evidence.append(computed("dc_kwp", lo, how))
@@ -292,8 +295,8 @@ def check_central_subsidy(quote, rules=None):
     if abs(stated - expected) <= tolerance:
         return result(CONSISTENT, CONSISTENT_MESSAGE, evidence, rule)
     if stated > expected:
-        higher = (f"The stated central subsidy Rs {format_inr(stated)} is higher than the central rule "
-                  f"for this panel capacity ({dc_text} kWp gives Rs {format_inr(expected)}).")
+        higher = (f"The stated central subsidy {rupees(stated)} is higher than the central rule "
+                  f"for this panel capacity ({dc_text} kWp gives {rupees(expected)}).")
         gaps = []
         if not from_modules:
             gaps.append("the panel capacity comes from the stated DC capacity, not from a panel count and "
@@ -310,6 +313,6 @@ def check_central_subsidy(quote, rules=None):
                           "the panel details.", evidence, rule, question="subsidy_higher", params=params)
         return result(INCONSISTENT, higher, evidence, rule, question="subsidy_higher", params=params)
     return result(NEEDS_CONFIRMATION,
-                  f"The stated central subsidy Rs {format_inr(stated)} is lower than the rule maximum for "
-                  f"{dc_text} kWp of panels (Rs {format_inr(expected)}); ask the vendor why.",
+                  f"The stated central subsidy {rupees(stated)} is lower than the rule maximum for "
+                  f"{dc_text} kWp of panels ({rupees(expected)}); ask the vendor why.",
                   evidence, rule, question="subsidy_lower", params=params)
