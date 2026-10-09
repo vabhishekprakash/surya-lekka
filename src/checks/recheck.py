@@ -35,6 +35,7 @@ CONFIRMABLE = {"selected_option", "state", "consumer_type", "portal_application_
                "multiple_options", "capacity_basis", "gst_treatment", "extra_charges_complete",
                "net_cost_subsidy_basis"}
 _ITEM_PATH = re.compile(r"^(\w+)\[([^\]]+)\]\.(\w+)$")
+_ADDED_CHARGE = re.compile(r"U(?:[1-9]|10)")
 
 
 def _parsed_value(kind, value):
@@ -67,7 +68,18 @@ def _locate(quote, path):
             for item in quote.get(list_name) or []:
                 if item.get(id_key) == item_id:
                     return item, key, kinds[key]
+            if list_name == "extra_charges" and _ADDED_CHARGE.fullmatch(item_id):
+                return _add_charge(quote, item_id), key, kinds[key]
     raise KeyError(f"unknown correction path: {path}")
+
+
+def _add_charge(quote, charge_id):
+    """A charge the household adds on the review screen (ids U1 to U10). Its fields
+    are then filled by corrections, so they show as entered by the household."""
+    charge = {"charge_id": charge_id, "option_id": effective_option(quote), "label": None, "amount": None,
+              "included_in_total": None, "total_label": None, "added_by_household": True}
+    quote.setdefault("extra_charges", []).append(charge)
+    return charge
 
 
 def _corrected(old, value):

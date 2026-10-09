@@ -151,10 +151,11 @@
           </label>
           <div id="manual-charges"></div>
           <button type="button" id="add-charge" class="button link">Add another charge</button>
-          <label class="field">Does the quote say there are no other charges?
+          <label class="field">Is every charge on your quote listed here?
             <select name="extra_charges_complete" data-answer>
-              <option value="">It doesn't say</option>
-              <option value="true">Yes, it says there are no other charges</option>
+              <option value="">Not sure</option>
+              <option value="true">Yes</option>
+              <option value="false">No</option>
             </select>
           </label>
           <label class="field">Discount <input name="discount" inputmode="decimal" placeholder="Rs" autocomplete="off"></label>

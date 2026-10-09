@@ -141,3 +141,22 @@ def test_document_text_is_never_inserted_as_html():
 def test_finding_thumbnails_float_beside_their_line():
     css = (ROOT / "web" / "style.css").read_text(encoding="utf-8")
     assert ".finding li .thumb { float: right;" in css and ".finding li::after" in css
+
+
+def test_review_lets_the_household_add_a_missed_charge():
+    review = APP[APP.index("function renderReviewFields()"):APP.index("function renderOptionChoice()")]
+    assert 'text: "Add a charge"' in review and "addReviewCharge()" in review
+    assert 'const ADDED_INCLUDED_CHOICES = [["unclear", "Not sure"], ["yes", "Yes"], ["no", "No"]];' in APP
+    collect = APP[APP.index("function collectReview()"):APP.index("async function submitReview(")]
+    assert "extra_charges[U${++added}]" in collect  # the ids the backend accepts for added charges
+    assert "answers.extra_charges_complete = answerValue(complete.value)" in collect
+    assert "(entered by you${was})" in APP
+
+
+def test_every_charge_question_sits_beside_the_charges_and_is_never_prefilled():
+    assert 'text: "Is every charge on your quote listed here?", beside: "charges"' in APP
+    row = APP[APP.index("function chargesCompleteRow()"):APP.index("function renderReviewFlags()")]
+    assert '[["unclear", "Not sure"], ["true", "Yes"], ["false", "No"]]' in row and "proposed" not in row
+    assert "FLAGS.filter((flag) => !flag.beside)" in APP
+    manual = INDEX[INDEX.index('<select name="extra_charges_complete"'):]
+    assert "Is every charge on your quote listed here?" in INDEX and '<option value="false">No</option>' in manual

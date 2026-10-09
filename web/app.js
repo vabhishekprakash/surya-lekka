@@ -86,8 +86,9 @@ const FLAGS = [
   { name: "gst_treatment", text: "Is GST part of the base price?",
     options: [["included", "Yes, the base price includes GST"], ["excluded", "No, GST is added on top"],
       ["unclear", "The quote doesn't say"]] },
-  { name: "extra_charges_complete", text: "Does the quote say there are no other charges?",
-    options: [["true", "Yes, it says there are no other charges"], ["false", "No, it doesn't say that"]] },
+  // Asked beside the charge list on the review screen, not with the other flags.
+  { name: "extra_charges_complete", text: "Is every charge on your quote listed here?", beside: "charges",
+    options: [["true", "Yes"], ["false", "No"], ["unclear", "Not sure"]] },
   { name: "net_cost_subsidy_basis", text: "Which subsidy does the net cost take off?",
     options: [["central", "The central subsidy"], ["central_and_state", "The central and state subsidies"],
       ["state", "The state subsidy"], ["combined", "The single subsidy figure"], ["none", "No subsidy is taken off"],
@@ -739,6 +740,7 @@ function selectRow(path, label, field, options) {
 
 const DCR_CHOICES = [["", "The quote doesn't say"], ["true", "Yes, DCR panels and cells"], ["false", "It says they are not DCR"]];
 const INCLUDED_CHOICES = [["", "Not stated"], ["yes", "Inside the total"], ["no", "Outside the total"], ["unclear", "Not clear"]];
+const ADDED_INCLUDED_CHOICES = [["unclear", "Not sure"], ["yes", "Yes"], ["no", "No"]];
 
 function renderReviewFields() {
   const q = state.extraction;
@@ -773,6 +775,10 @@ function renderReviewFields() {
       selectRow(`extra_charges[${c.charge_id}].included_in_total`, "Is it inside the total?", c.included_in_total,
         INCLUDED_CHOICES),
     ]),
+    el("div", { id: "review-added-charges" }),
+    el("button", { type: "button", id: "review-add-charge", class: "button link", text: "Add a charge",
+      onclick: () => addReviewCharge() }),
+    chargesCompleteRow(),
     textRow("discount", "Discount", pick(q, "discount"), { inputmode: "decimal" }),
     textRow("gross_total", "Total", pick(q, "gross_total"), { inputmode: "decimal" }),
   ];
@@ -791,9 +797,37 @@ function renderReviewFields() {
     el("fieldset", { class: "group" }, el("legend", { text: title }), rows)));
 }
 
+// A charge the reading missed, typed in by the household. The backend adds it as
+// extra_charges[U<n>] and marks its values as entered by the household.
+function addReviewCharge() {
+  const box = $("#review-added-charges");
+  if (box.children.length >= MAX_CHARGES) return;
+  const n = box.children.length + 1;
+  box.append(el("div", { class: "charge", "data-added-charge": "" },
+    el("div", { class: "charge-row" },
+      el("label", { class: "field" }, `Added charge ${n} (for example net meter)`,
+        el("input", { "data-added": "label", autocomplete: "off" })),
+      el("label", { class: "field" }, "Amount",
+        el("input", { "data-added": "amount", inputmode: "decimal", placeholder: "₹", autocomplete: "off" })),
+      el("label", { class: "field" }, "Is it inside the total?",
+        el("select", { "data-added": "included_in_total" },
+          ADDED_INCLUDED_CHOICES.map(([value, text]) => el("option", { value, text })))))));
+  $("#review-add-charge").hidden = box.children.length >= MAX_CHARGES;
+}
+
+// The household's own answer, never pre-filled from the quote: anything but Yes keeps
+// the total check waiting.
+function chargesCompleteRow() {
+  const flag = FLAGS.find((f) => f.name === "extra_charges_complete");
+  const id = "flag-extra_charges_complete";
+  const select = el("select", { id, "data-household": flag.name },
+    [["unclear", "Not sure"], ["true", "Yes"], ["false", "No"]].map(([value, text]) => el("option", { value, text })));
+  return el("div", { class: "row" }, el("label", { for: id, text: flag.text }), select);
+}
+
 function renderReviewFlags() {
   const proposed = ((state.extraction.flags || {}).model_proposed) || {};
-  $("#review-flags").replaceChildren(...FLAGS.map((flag) => {
+  $("#review-flags").replaceChildren(...FLAGS.filter((flag) => !flag.beside).map((flag) => {
     const field = proposed[flag.name];
     const v = field && !field.conflict ? field.value : null;
     const original = v === null || v === undefined ? "" : String(v);
@@ -890,6 +924,18 @@ function collectReview() {
       answers[select.dataset.flag] = answerValue(select.value);
     }
   }
+  let added = 0;
+  for (const row of $$("#review-added-charges [data-added-charge]")) {
+    const label = $("[data-added=label]", row).value.trim();
+    const amount = $("[data-added=amount]", row).value.trim();
+    if (!label && !amount) continue;
+    const path = `extra_charges[U${++added}]`;
+    if (label) corrections[`${path}.label`] = label;
+    if (amount) corrections[`${path}.amount`] = amount;
+    corrections[`${path}.included_in_total`] = $("[data-added=included_in_total]", row).value;
+  }
+  const complete = $("[data-household=extra_charges_complete]");
+  if (complete) answers.extra_charges_complete = answerValue(complete.value);
   if (state.option) answers.selected_option = state.option;
   return { corrections, answers };
 }
@@ -1029,7 +1075,7 @@ function evidenceItem(e) {
   if (e.kind === "user_corrected") {
     const was = e.original_value !== undefined && e.original_value !== null && state.mode !== "manual"
       ? `; the reading was ${valueText(e.original_value)}` : "";
-    return el("li", { text: `${label}: ${valueText(e.value, e.raw)} (you entered this${was})` });
+    return el("li", { text: `${label}: ${valueText(e.value, e.raw)} (entered by you${was})` });
   }
   if (e.kind === "user_confirmed") {
     return el("li", { text: `${label}: ${valueText(e.value)} (your answer)` });

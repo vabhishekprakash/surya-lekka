@@ -833,3 +833,15 @@ def test_an_expired_job_is_not_found_even_before_ttl_deletes_it(aws):
                                ExpressionAttributeValues={":t": common.now()})
     assert get(job) == unknown == (404, {"error": "not_found", "message": "No check matches this link."})
     assert retry(job)[0] == 404
+
+
+def test_recheck_takes_charges_the_household_adds(aws):
+    job = done_job(aws)
+    body = {"corrections": {"extra_charges[U1].label": "Net meter charges", "extra_charges[U1].amount": "2,500",
+                            "extra_charges[U1].included_in_total": "yes"},
+            "answers": {"extra_charges_complete": "unclear"}}
+    status, result = call(jobs.recheck, body, path={"id": job["job_id"]}, query={"t": job["token"]})
+    assert status == 200, result
+    gross = next(f for f in result["findings"] if f["check_id"] == "C3_gross_total")
+    assert gross["status"] == "needs_confirmation"
+    assert "U1" in json.dumps(json.loads(item(job["job_id"])["corrections"]))

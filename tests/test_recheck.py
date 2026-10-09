@@ -115,3 +115,72 @@ def test_evidence_status_annotation(quote_v1):
     quote_v1["module_groups"][0]["count"] = field_v1(6, "No. of panels: 7", 1)
     c1 = run_checks(quote_v1, page_texts=pages)["findings"][0]["evidence"]
     assert c1[0]["evidence_status"] == "mismatch"
+
+
+# --- charges the household adds on the review screen ------------------------------------------
+
+def s2_without_charges():
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parent.parent
+    quote = json.loads((root / "samples" / "cached" / "S2.json").read_text(encoding="utf-8"))["quote"]
+    quote["extra_charges"] = []
+    return quote
+
+
+S2_ANSWERS = {"state": "Telangana", "consumer_type": "individual_household",
+              "portal_application_on_or_after_cutoff": True, "first_system": True,
+              "prior_central_subsidy": False, "give_it_up": False}
+
+
+def gross(result):
+    return next(f for f in result["findings"] if f["check_id"] == "C3_gross_total")
+
+
+def test_an_added_charge_counts_like_a_typed_one_and_is_marked_as_entered():
+    added = {"extra_charges[U1].label": "Net meter charges", "extra_charges[U1].amount": "2,500",
+             "extra_charges[U1].included_in_total": "yes"}
+    r = run_checks(s2_without_charges(), {"corrections": added,
+                                          "confirmations": {**S2_ANSWERS, "extra_charges_complete": True}})
+    assert gross(r)["status"] == "consistent"
+    (charge,) = r["quote"]["extra_charges"]
+    assert charge["charge_id"] == "U1" and charge["added_by_household"] is True
+    assert charge["amount"]["provenance"] == "user_corrected" and charge["amount"]["page"] is None
+    assert any(e.get("kind") == "user_corrected" for e in gross(r)["evidence"])
+
+
+def test_without_the_charge_or_with_doubt_the_total_is_not_settled():
+    confirmations = {**S2_ANSWERS, "extra_charges_complete": True}
+    assert gross(run_checks(s2_without_charges(), {"confirmations": confirmations}))["status"] == "inconsistent"
+    unsure = {"extra_charges[U1].label": "Net meter charges", "extra_charges[U1].amount": "2,500",
+              "extra_charges[U1].included_in_total": "unclear"}
+    r = run_checks(s2_without_charges(), {"corrections": unsure, "confirmations": confirmations})
+    assert gross(r)["status"] == "needs_confirmation"
+
+
+@pytest.mark.parametrize("answer", ["unclear", False])
+def test_anything_but_yes_to_every_charge_listed_keeps_the_total_unsettled(answer):
+    added = {"extra_charges[U1].label": "Net meter charges", "extra_charges[U1].amount": "2,500",
+             "extra_charges[U1].included_in_total": "yes"}
+    r = run_checks(s2_without_charges(), {"corrections": added,
+                                          "confirmations": {**S2_ANSWERS, "extra_charges_complete": answer}})
+    assert gross(r)["status"] == "needs_confirmation"
+
+
+@pytest.mark.parametrize("path", ["extra_charges[U0].label", "extra_charges[U11].label", "extra_charges[X1].label",
+                                  "extra_charges[U1].page", "module_groups[U1].count"])
+def test_only_a_few_household_charges_with_known_fields_can_be_added(path):
+    with pytest.raises(KeyError):
+        run_checks(s2_without_charges(), {"corrections": {path: "x"}})
+
+
+def test_s2_with_the_missed_charge_added_gives_the_expected_findings():
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parent.parent
+    expected = json.loads((root / "samples" / "expected" / "S2.json").read_text(encoding="utf-8"))["expected"]
+    added = {"extra_charges[U1].label": "Net meter charges", "extra_charges[U1].amount": "2,500",
+             "extra_charges[U1].included_in_total": "yes"}
+    r = run_checks(s2_without_charges(), {"corrections": added,
+                                          "confirmations": {**S2_ANSWERS, "extra_charges_complete": True}})
+    assert statuses(r) == [(f["check_id"], f["item"], f["status"]) for f in expected["findings"]]
