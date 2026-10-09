@@ -20,6 +20,9 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+if ($StackName -cnotmatch '^[a-z0-9][a-z0-9-]{1,30}$') {
+    throw "The stack name also starts the bucket name: use 2 to 31 lower-case letters, digits or hyphens."
+}
 Set-Location (Split-Path -Parent $PSScriptRoot)
 $python = Join-Path (Get-Location) ".venv\Scripts\python.exe"
 
@@ -39,7 +42,7 @@ $deployArgs = @(
     "--stack-name", $StackName,
     "--region", $Region,
     "--capabilities", "CAPABILITY_IAM",
-    "--parameter-overrides", "SiteOrigin=$SiteOrigin"
+    "--parameter-overrides", "SiteOrigin=$SiteOrigin StackPrefix=$StackName"
 )
 if (Test-Path samconfig.toml) {
     Invoke-Step "Deploy" { sam deploy @deployArgs --no-fail-on-empty-changeset }

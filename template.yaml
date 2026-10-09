@@ -7,11 +7,12 @@ Parameters:
     Type: String
     Description: The web app's origin (scheme and host, no trailing slash), used for CORS.
     AllowedPattern: "^https?://[A-Za-z0-9.-]+(:[0-9]+)?$"
-  BucketNamePrefix:
+  StackPrefix:
     Type: String
-    Default: surya-lekka
     AllowedPattern: "^[a-z0-9][a-z0-9-]{1,30}$"
-    Description: The bucket is named <prefix>-<account id>-<region>.
+    Description: >-
+      Lower-case stack name (scripts/deploy.ps1 passes it). The bucket is named
+      <prefix>-<account id>-<region>, so each stack in an account and Region gets its own bucket.
   UploadsEnabled:
     Type: String
     Default: "true"
@@ -36,8 +37,9 @@ Parameters:
     Default: 0
     MinValue: 0
     Description: >-
-      Reserved concurrency for the worker. 0 leaves it off. New accounts often have a total limit of 10 and
-      AWS keeps at least 10 unreserved, so reserving any would fail the deploy there.
+      Reserved concurrency for the worker. 0 leaves it off. Lambda keeps at least 100 of an account's
+      concurrency unreserved, so reserving any fails the deploy on an account whose total limit is 100
+      or less (new accounts often have 10).
 
 Rules:
   BedrockRegion:
@@ -58,7 +60,7 @@ Globals:
     Environment:
       Variables:
         TABLE_NAME: !Ref JobsTable
-        BUCKET_NAME: !Sub "${BucketNamePrefix}-${AWS::AccountId}-${AWS::Region}"
+        BUCKET_NAME: !Sub "${StackPrefix}-${AWS::AccountId}-${AWS::Region}"
         UPLOADS_ENABLED: !Ref UploadsEnabled
         DAILY_JOB_CAP: !Ref DailyJobCap
         IP_DAILY_JOB_CAP: !Ref IpDailyJobCap
@@ -69,7 +71,7 @@ Resources:
   UploadBucket:
     Type: AWS::S3::Bucket
     Properties:
-      BucketName: !Sub "${BucketNamePrefix}-${AWS::AccountId}-${AWS::Region}"
+      BucketName: !Sub "${StackPrefix}-${AWS::AccountId}-${AWS::Region}"
       PublicAccessBlockConfiguration:
         BlockPublicAcls: true
         BlockPublicPolicy: true
@@ -153,7 +155,7 @@ Resources:
               Resource: !GetAtt JobsTable.Arn
             - Effect: Allow
               Action: s3:PutObject
-              Resource: !Sub "arn:${AWS::Partition}:s3:::${BucketNamePrefix}-${AWS::AccountId}-${AWS::Region}/uploads/*"
+              Resource: !Sub "arn:${AWS::Partition}:s3:::${StackPrefix}-${AWS::AccountId}-${AWS::Region}/uploads/*"
       Events:
         Api:
           Type: HttpApi
@@ -207,7 +209,7 @@ Resources:
               Resource: !GetAtt JobsTable.Arn
             - Effect: Allow
               Action: s3:PutObject
-              Resource: !Sub "arn:${AWS::Partition}:s3:::${BucketNamePrefix}-${AWS::AccountId}-${AWS::Region}/uploads/*"
+              Resource: !Sub "arn:${AWS::Partition}:s3:::${StackPrefix}-${AWS::AccountId}-${AWS::Region}/uploads/*"
       Events:
         Api:
           Type: HttpApi
@@ -227,10 +229,10 @@ Resources:
               Resource: !GetAtt JobsTable.Arn
             - Effect: Allow
               Action: s3:GetObject
-              Resource: !Sub "arn:${AWS::Partition}:s3:::${BucketNamePrefix}-${AWS::AccountId}-${AWS::Region}/samples/*"
+              Resource: !Sub "arn:${AWS::Partition}:s3:::${StackPrefix}-${AWS::AccountId}-${AWS::Region}/samples/*"
             - Effect: Allow
               Action: s3:PutObject
-              Resource: !Sub "arn:${AWS::Partition}:s3:::${BucketNamePrefix}-${AWS::AccountId}-${AWS::Region}/uploads/*"
+              Resource: !Sub "arn:${AWS::Partition}:s3:::${StackPrefix}-${AWS::AccountId}-${AWS::Region}/uploads/*"
       Events:
         Api:
           Type: HttpApi
@@ -299,7 +301,7 @@ Resources:
             - Sid: ReadAndDeleteUploads
               Effect: Allow
               Action: [s3:GetObject, s3:DeleteObject]
-              Resource: !Sub "arn:${AWS::Partition}:s3:::${BucketNamePrefix}-${AWS::AccountId}-${AWS::Region}/uploads/*"
+              Resource: !Sub "arn:${AWS::Partition}:s3:::${StackPrefix}-${AWS::AccountId}-${AWS::Region}/uploads/*"
             - Sid: JobsTableOnly
               Effect: Allow
               Action: [dynamodb:GetItem, dynamodb:UpdateItem]

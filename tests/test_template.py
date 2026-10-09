@@ -1,3 +1,4 @@
+import re
 import runpy
 from pathlib import Path
 
@@ -67,6 +68,8 @@ def test_logs_kept_seven_days_for_every_function():
 
 def test_reserved_concurrency_is_optional_and_off_by_default():
     assert TEMPLATE["Parameters"]["ReservedConcurrency"]["Default"] == 0
+    note = " ".join(TEMPLATE["Parameters"]["ReservedConcurrency"]["Description"].split())
+    assert "at least 100" in note and "at least 10 " not in note
     assert RES["WorkerFunction"]["Properties"]["ReservedConcurrentExecutions"] == {
         "Fn::If": ["UseReservedConcurrency", {"Ref": "ReservedConcurrency"}, {"Ref": "AWS::NoValue"}]}
 
@@ -160,6 +163,25 @@ def test_worker_failures_go_to_an_encrypted_queue():
     role = translated["WorkerFunctionRole"]["Properties"]["Policies"]
     sends = [s for p in role for s in p["PolicyDocument"]["Statement"] if "sqs:SendMessage" in actions(s)]
     assert sends and all(text(s["Resource"]) == text({"Fn::GetAtt": ["WorkerFailures", "Arn"]}) for s in sends)
+
+
+def test_bucket_name_starts_with_the_stack_prefix():
+    params = TEMPLATE["Parameters"]
+    assert "BucketNamePrefix" not in params and "Default" not in params["StackPrefix"]
+    name = {"Fn::Sub": "${StackPrefix}-${AWS::AccountId}-${AWS::Region}"}
+    assert RES["UploadBucket"]["Properties"]["BucketName"] == name
+    assert TEMPLATE["Globals"]["Function"]["Environment"]["Variables"]["BUCKET_NAME"] == name
+    assert "BucketNamePrefix" not in (ROOT / "template.yaml").read_text(encoding="utf-8")
+    allowed = re.compile(params["StackPrefix"]["AllowedPattern"])
+    assert allowed.fullmatch("surya-lekka") and allowed.fullmatch("surya-lekka-arya")
+    assert not any(allowed.fullmatch(bad) for bad in ("Surya-Lekka", "-x", "a" * 32, "surya_lekka"))
+    # 31 + "-" + 12-digit account + "-" + the longest Region name stays within S3's 63 characters
+    assert 31 + 1 + 12 + 1 + len("ap-southeast-1") <= 63
+
+
+def test_deploy_script_passes_the_stack_name_as_the_prefix():
+    script = (ROOT / "scripts" / "deploy.ps1").read_text(encoding="utf-8")
+    assert "StackPrefix=$StackName" in script and "-cnotmatch" in script
 
 
 def test_outputs():
