@@ -71,5 +71,31 @@ class Page:
             relationships.append({"Type": "MERGED_CELL", "Ids": merged_ids})
         return self._add({"BlockType": "TABLE", "Relationships": relationships})
 
+    def form(self, key, value, top, confidence=95.0):
+        """A FORMS key-value pair: KEY and VALUE blocks with their words. Add the page's
+        own LINE for it separately, as Textract does."""
+        def words(text):
+            return [self._add({"BlockType": "WORD", "Text": w, "Confidence": 99.0}) for w in text.split()]
+        value_id = self._add({"BlockType": "KEY_VALUE_SET", "EntityTypes": ["VALUE"], "Confidence": confidence,
+                              "Geometry": box(0.5, top, 0.2), "Relationships": [{"Type": "CHILD", "Ids": words(value)}]})
+        return self._add({"BlockType": "KEY_VALUE_SET", "EntityTypes": ["KEY"], "Confidence": confidence,
+                          "Geometry": box(0.05, top, 0.4),
+                          "Relationships": [{"Type": "VALUE", "Ids": [value_id]}, {"Type": "CHILD", "Ids": words(key)}]})
+
     def reply(self):
         return {"DocumentMetadata": {"Pages": 1}, "Blocks": self.blocks}
+
+
+def expense(summary=(), items=(), confidence=95.0):
+    """A handmade AnalyzeExpense reply for one page. summary: (type, label, value, top);
+    items: rows of (type, value, top)."""
+    def detection(text, top):
+        return {"Text": text, "Confidence": confidence, "Geometry": box(0.5, top, 0.2)}
+    fields = [{"Type": {"Text": t, "Confidence": confidence}, "PageNumber": 1,
+               **({"LabelDetection": {"Text": label, "Confidence": confidence}} if label else {}),
+               "ValueDetection": detection(value, top)} for t, label, value, top in summary]
+    groups = [{"LineItems": [{"LineItemExpenseFields": [
+        {"Type": {"Text": t, "Confidence": confidence}, "PageNumber": 1, "ValueDetection": detection(v, top)}
+        for t, v, top in row]} for row in items]}] if items else []
+    return {"DocumentMetadata": {"Pages": 1},
+            "ExpenseDocuments": [{"ExpenseIndex": 1, "SummaryFields": fields, "LineItemGroups": groups}]}
