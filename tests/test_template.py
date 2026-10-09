@@ -77,6 +77,7 @@ def resolve(**overrides):
 
 
 RES = resolve()["Resources"]
+SITE_ORIGIN = {"Fn::Sub": "https://${SiteDistribution.DomainName}"}
 
 
 def statements(name, resources=None):
@@ -104,7 +105,7 @@ def test_bucket_is_private_encrypted_and_expires_uploads():
     assert props["BucketEncryption"]["ServerSideEncryptionConfiguration"][0]["ServerSideEncryptionByDefault"] == {
         "SSEAlgorithm": "AES256"}
     (cors,) = props["CorsConfiguration"]["CorsRules"]
-    assert cors["AllowedOrigins"] == [{"Ref": "SiteOrigin"}] and cors["AllowedMethods"] == ["POST"]
+    assert cors["AllowedOrigins"] == [SITE_ORIGIN] and cors["AllowedMethods"] == ["POST"]
     (rule,) = props["LifecycleConfiguration"]["Rules"]
     assert rule["Prefix"] == "uploads/" and rule["ExpirationInDays"] == 1  # samples/ is never expired
 
@@ -118,7 +119,7 @@ def test_jobs_table_has_ttl():
 def test_http_api_throttling_and_cors():
     props = RES["HttpApi"]["Properties"]
     assert props["DefaultRouteSettings"] == {"ThrottlingRateLimit": 5, "ThrottlingBurstLimit": 10}
-    assert props["CorsConfiguration"]["AllowOrigins"] == [{"Ref": "SiteOrigin"}]
+    assert props["CorsConfiguration"]["AllowOrigins"] == [SITE_ORIGIN]
     routes = {(e["Properties"]["Method"], e["Properties"]["Path"]) for r in RES.values()
               for e in (r.get("Properties", {}).get("Events") or {}).values() if e["Type"] == "HttpApi"}
     assert routes == {("POST", "/jobs"), ("GET", "/jobs/{id}"), ("POST", "/jobs/{id}/checks"),
@@ -308,4 +309,76 @@ def test_deploy_script_passes_the_stack_name_as_the_prefix():
 
 
 def test_outputs():
-    assert set(TEMPLATE["Outputs"]) == {"ApiUrl", "BucketName"}
+    assert set(resolve()["Outputs"]) == {"ApiUrl", "BucketName", "AllowedOrigin", "SiteUrl", "SiteBucketName",
+                                         "DistributionId"}
+    assert set(resolve(HostingEnabled="false")["Outputs"]) == {"ApiUrl", "BucketName", "AllowedOrigin"}
+
+
+PSEUDO = re.compile(r"\$\{([A-Za-z0-9]+)(?:\.[A-Za-z0-9.]+)?\}")
+
+
+def references(node):
+    """Names a value refers to with Ref, Fn::GetAtt or Fn::Sub."""
+    if isinstance(node, list):
+        return set().union(*map(references, node)) if node else set()
+    if not isinstance(node, dict):
+        return set()
+    found = set()
+    for key, value in node.items():
+        if key == "Ref":
+            found.add(value)
+        elif key == "Fn::GetAtt":
+            found.add(value[0] if isinstance(value, list) else value.split(".")[0])
+        elif key == "Fn::Sub":
+            found |= set(PSEUDO.findall(value if isinstance(value, str) else value[0]))
+        found |= references(value)
+    return found
+
+
+@pytest.mark.parametrize("hosting", ["true", "false"])
+def test_every_reference_exists_with_hosting_on_or_off(hosting):
+    resolved = resolve(HostingEnabled=hosting)
+    known = set(resolved["Resources"]) | set(TEMPLATE["Parameters"])
+    for section in ("Resources", "Outputs"):
+        for name, body in resolved[section].items():
+            assert references(body) <= known, name
+            assert set(as_list(body.get("DependsOn", []))) <= known, name
+
+
+def test_hosting_serves_a_private_bucket_through_cloudfront_over_https():
+    assert TEMPLATE["Parameters"]["HostingEnabled"]["Default"] == "true"
+    res = resolve(HostingEnabled="true")["Resources"]
+    bucket = res["SiteBucket"]["Properties"]
+    assert all(bucket["PublicAccessBlockConfiguration"].values()) and len(bucket["PublicAccessBlockConfiguration"]) == 4
+    assert "WebsiteConfiguration" not in bucket
+    config = res["SiteDistribution"]["Properties"]["DistributionConfig"]
+    assert config["DefaultRootObject"] == "index.html"
+    behaviour = config["DefaultCacheBehavior"]
+    assert behaviour["ViewerProtocolPolicy"] == "https-only" and behaviour["AllowedMethods"] == ["GET", "HEAD"]
+    (origin,) = config["Origins"]
+    assert origin["OriginAccessControlId"] == {"Fn::GetAtt": ["SiteOriginAccess", "Id"]}
+    assert origin["S3OriginConfig"] == {"OriginAccessIdentity": ""}
+    oac = res["SiteOriginAccess"]["Properties"]["OriginAccessControlConfig"]
+    assert (oac["OriginAccessControlOriginType"], oac["SigningBehavior"], oac["SigningProtocol"]) == (
+        "s3", "always", "sigv4")
+    allow, deny = res["SiteBucketPolicy"]["Properties"]["PolicyDocument"]["Statement"]
+    assert allow["Principal"] == {"Service": "cloudfront.amazonaws.com"} and allow["Action"] == "s3:GetObject"
+    assert allow["Condition"] == {"StringEquals": {"AWS:SourceArn": {"Fn::Sub": (
+        "arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/${SiteDistribution}")}}}
+    assert deny["Effect"] == "Deny" and deny["Condition"] == {"Bool": {"aws:SecureTransport": "false"}}
+    for cors in (res["HttpApi"]["Properties"]["CorsConfiguration"]["AllowOrigins"],
+                 res["UploadBucket"]["Properties"]["CorsConfiguration"]["CorsRules"][0]["AllowedOrigins"]):
+        assert cors == [SITE_ORIGIN]  # the CloudFront domain only, never a wildcard
+
+
+def test_without_hosting_the_api_accepts_only_the_local_origin():
+    res = resolve(HostingEnabled="false")["Resources"]
+    assert not {n for n, r in res.items() if r["Type"].startswith("AWS::CloudFront::")}
+    assert "SiteBucket" not in res and "SiteBucketPolicy" not in res
+    for cors in (res["HttpApi"]["Properties"]["CorsConfiguration"]["AllowOrigins"],
+                 res["UploadBucket"]["Properties"]["CorsConfiguration"]["CorsRules"][0]["AllowedOrigins"]):
+        assert cors == [{"Ref": "SiteOrigin"}]
+    assert TEMPLATE["Parameters"]["SiteOrigin"]["Default"] == "http://127.0.0.1:8000"
+    allowed = re.compile(TEMPLATE["Parameters"]["SiteOrigin"]["AllowedPattern"])
+    assert allowed.fullmatch("http://127.0.0.1:8000")
+    assert not any(allowed.fullmatch(bad) for bad in ("*", "https://*.example.com", "http://127.0.0.1:8000/"))
