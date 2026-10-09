@@ -553,3 +553,19 @@ def test_textract_preflight_prints_the_rate_quota(capsys):
     quota_stub.add_client_error("list_service_quotas", service_error_code="AccessDeniedException", http_status_code=403)
     spike.textract_preflight("ap-south-1", sts, quotas)
     assert "Service Quotas: not readable (AccessDeniedException)" in capsys.readouterr().out
+
+
+def test_replay_maps_saved_replies_again_without_aws(sample_dir, capsys, live_textract, monkeypatch):
+    assert spike.main(textract_args(sample_dir)) == 0
+    (live,) = (sample_dir / "out" / "textract").iterdir()
+    monkeypatch.setattr(spike, "make_textract_client", lambda region: pytest.fail("no client in a replay"))
+    monkeypatch.setattr(spike, "textract_preflight", lambda region: pytest.fail("no AWS in a replay"))
+    capsys.readouterr()
+    assert spike.main(textract_args(sample_dir, "S1,S2", "--replay", str(live), "--threshold", "0")) == 0
+    out = capsys.readouterr().out
+    assert "Replay" in out and "(threshold 0)" in out and live_textract.calls == 4
+    (replayed,) = set((sample_dir / "out" / "textract").iterdir()) - {live}
+    first = json.loads((live / "S1" / "batch-1.json").read_text(encoding="utf-8"))
+    again = json.loads((replayed / "S1" / "batch-1.json").read_text(encoding="utf-8"))
+    assert again["response"] == first["response"]
+    assert sum(e["kept"] for e in again["confidence"]) > sum(e["kept"] for e in first["confidence"])

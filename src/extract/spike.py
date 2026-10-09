@@ -217,6 +217,8 @@ def parse_args(argv):
                    help="allow the held-out documents, once (a live run writes a marker in --out)")
     p.add_argument("--threshold", type=float, default=textract_client.CONFIDENCE_THRESHOLD,
                    help="textract: lowest answer confidence kept (0 to 100)")
+    p.add_argument("--replay", type=Path,
+                   help="textract: map the replies saved in this earlier run folder again, without AWS calls")
     p.add_argument("--max-usd", type=float, default=5.0,
                    help="textract: refuse a live run estimated above this many US dollars")
     p.add_argument("--check-key", action="store_true",
@@ -400,6 +402,31 @@ class DryRunTextract:
         return self._client.analyze_document(**request)
 
 
+def new_run_dir(root):
+    """A run folder named by the time, never one an earlier run in the same second used."""
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    run_dir, n = root / stamp, 1
+    while run_dir.exists():
+        n += 1
+        run_dir = root / f"{stamp}-{n}"
+    return run_dir
+
+
+class ReplayTextract:
+    """Answers with the replies an earlier live run saved for one document, in page order."""
+
+    def __init__(self, folder):
+        files = sorted(folder.glob("batch-*.json"), key=lambda f: int(f.stem.split("-")[1]))
+        self.replies = [json.loads(f.read_text(encoding="utf-8")).get("response") for f in files]
+        if not self.replies or any(r is None for r in self.replies):
+            raise RunStopped(f"{folder.name}: --replay needs a live run's saved replies for every page.")
+
+    def analyze_document(self, **request):
+        if not self.replies:
+            raise RunStopped("--replay has fewer saved pages than this document.")
+        return self.replies.pop(0)
+
+
 def textract_preflight(region, sts=None, quotas=None):
     """The AWS identity, then the applied AnalyzeDocument rate quota if Service Quotas
     lets us read it (the default in Mumbai is understood to be 5 requests a second)."""
@@ -507,7 +534,11 @@ def run_textract(args, docs, paths, key, out_root):
     cost = textract_client.estimated_cost(pages)
     print(f"Textract: {pages} pages to read, estimated ${cost:.2f} at ${textract_client.PRICE_PER_PAGE_USD:.3f} "
           f"per page")
-    if args.dry_run:
+    clients = {}
+    if args.replay:
+        print("Replay: the saved replies are mapped again, no AWS calls.")
+        clients = {d: ReplayTextract(args.replay / d) for d in docs}
+    elif args.dry_run:
         print("Dry run: stubbed empty replies, no AWS calls.")
         client = DryRunTextract(args.region)
     else:
@@ -516,15 +547,16 @@ def run_textract(args, docs, paths, key, out_root):
         textract_preflight(args.region)
         claim_heldout_run(docs, args, out_root)
         client = make_textract_client(args.region)
-    engine = textract_client.TextractEngine(client, args.threshold)
-    run_dir = out_root / datetime.now().strftime("%Y%m%d-%H%M%S")
+    run_dir = new_run_dir(out_root)
     _write(run_dir / "run.json", {"files": docs, "engine": "textract", "region": args.region,
-                                  "dry_run": args.dry_run, "dpi": args.dpi, "threshold": args.threshold,
+                                  "dry_run": args.dry_run, "replay": str(args.replay or ""), "dpi": args.dpi,
+                                  "threshold": args.threshold,
                                   "pages": {d: [p.page for p in rendered[d].pages] for d in docs},
                                   "skipped": {d: rendered[d].skipped for d in docs}})
     results = {}
     try:
         for d in docs:
+            engine = textract_client.TextractEngine(clients.get(d) or client, args.threshold)
             r = run_textract_document(engine, d, rendered[d].pages, rendered[d].skipped, run_dir / d)
             results[d] = r
             print(f"textract {d}: {r['pages']} pages, {len(r['failed'])} failed, {r['seconds']} s")
