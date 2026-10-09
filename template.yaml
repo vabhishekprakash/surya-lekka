@@ -93,6 +93,8 @@ Globals:
     CodeUri: src/
     MemorySize: 256
     Timeout: 15
+    # X-Ray traces the invocations only (no SDK in the code), so no request or document data is recorded.
+    Tracing: Active
     Environment:
       Variables:
         TABLE_NAME: !Ref JobsTable

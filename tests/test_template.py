@@ -276,6 +276,18 @@ def test_worker_failures_go_to_an_encrypted_queue():
     assert sends and all(text(s["Resource"]) == text({"Fn::GetAtt": ["WorkerFailures", "Arn"]}) for s in sends)
 
 
+def test_every_function_is_traced_with_permission_to_send_traces():
+    assert TEMPLATE["Globals"]["Function"]["Tracing"] == "Active"
+    functions = [n for n, r in RAW.items() if r["Type"] == "AWS::Serverless::Function"]
+    assert functions and all("Tracing" not in RAW[n]["Properties"] for n in functions)
+    lint = runpy.run_path(str(ROOT / "scripts" / "lint_template.py"))
+    translated = lint["translate"](ROOT / "template.yaml")["Resources"]
+    for name in functions:
+        assert translated[name]["Properties"]["TracingConfig"] == {"Mode": "Active"}
+        managed = translated[f"{name}Role"]["Properties"]["ManagedPolicyArns"]
+        assert any(text(m).endswith(":iam::aws:policy/AWSXrayWriteOnlyAccess") for m in managed)
+
+
 def test_bucket_name_starts_with_the_stack_prefix():
     params = TEMPLATE["Parameters"]
     assert "BucketNamePrefix" not in params and "Default" not in params["StackPrefix"]
