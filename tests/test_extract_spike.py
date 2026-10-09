@@ -429,3 +429,127 @@ def test_summary_counts_conflict_flagged_apart():
     s = scoring.summarise({"Q": {"a": {"status": "conflict_flagged", "conflict": True, "page_ok": None},
                                  "b": {"status": "correct", "conflict": False, "page_ok": None}}})
     assert s["conflict_flagged"] == 1 and s["correct"] == 1 and s["accuracy"] == 0.5
+
+
+# --- the spike with Amazon Textract -----------------------------------------------------------
+
+def textract_args(tmp, files="S1,S2", *extra):
+    return ["--engine", "textract", "--files", files, "--in", str(tmp / "in"), "--out", str(tmp / "out"),
+            "--answer-key", str(tmp / "key.txt"), *extra]
+
+
+class SampleTextract:
+    """Answers with the committed replies for S1 and S2, page by page."""
+
+    def __init__(self):
+        fixtures = ROOT / "tests" / "fixtures" / "textract"
+        self.replies = [json.loads((fixtures / f"{s}-page-{n}.json").read_text(encoding="utf-8"))
+                        for s in ("S1", "S2") for n in (1, 2)]
+        self.calls = 0
+
+    def analyze_document(self, **request):
+        assert set(request) == {"Document", "FeatureTypes", "QueriesConfig"}
+        self.calls += 1
+        return self.replies[self.calls - 1]
+
+
+@pytest.fixture
+def live_textract(monkeypatch):
+    client = SampleTextract()
+    monkeypatch.setattr(spike, "make_textract_client", lambda region: client)
+    monkeypatch.setattr(spike, "textract_preflight", lambda region: print("preflight"))
+    return client
+
+
+def test_textract_dry_run_prints_pages_and_cost_and_calls_nothing(sample_dir, capsys, monkeypatch):
+    monkeypatch.setattr(spike, "make_textract_client", lambda region: pytest.fail("no live client in a dry run"))
+    assert spike.main(textract_args(sample_dir, "S1,S2", "--dry-run")) == 0
+    out = capsys.readouterr().out
+    assert "Textract: 4 pages to read, estimated $0.08 at $0.020 per page" in out
+    assert "Dry run" in out and "Pages billed: 4" in out
+    (run_dir,) = (sample_dir / "out" / "textract").iterdir()
+    assert (run_dir / "S1" / "batch-2.json").is_file() and (run_dir / "summary.txt").is_file()
+
+
+def test_textract_live_run_reports_counts_confidence_and_cost(sample_dir, capsys, live_textract):
+    assert spike.main(textract_args(sample_dir)) == 0
+    out = capsys.readouterr().out
+    assert live_textract.calls == 4 and "preflight" in out
+    assert "Pages billed: 4, estimated $0.08" in out
+    header = next(line for line in out.splitlines() if line.startswith("doc ") and "match" in line)
+    assert header.split() == ["doc", "match", "wrong", "missing", "conflict", "conflict_flagged", "false+",
+                              "abstained"]
+    assert any(line.startswith("total ") for line in out.splitlines())
+    assert "below threshold" in out and "money" in out
+    for text in ("Example PV", "EX-VR-0001", "1,19,000", "01/10/2026", "Example Solar"):
+        assert text not in out  # never document text
+    (run_dir,) = (sample_dir / "out" / "textract").iterdir()
+    saved = json.loads((run_dir / "S1" / "batch-1.json").read_text(encoding="utf-8"))
+    assert "Blocks" in saved["response"] and saved["pages"] == [1]  # raw replies only under out/textract
+
+
+def test_textract_run_refuses_an_estimate_over_the_cap(sample_dir, capsys, live_textract):
+    assert spike.main(textract_args(sample_dir, "S1,S2", "--max-usd", "0.05")) == spike.STOPPED
+    assert live_textract.calls == 0 and "over --max-usd" in capsys.readouterr().err
+
+
+def test_models_are_for_nova_only(sample_dir, capsys):
+    argv = textract_args(sample_dir, "S1", "--models", "x", "--dry-run")
+    assert spike.main(argv) == spike.STOPPED and "nova only" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("doc", ["Q10", "Q11", "Q13", "Q14", "q13"])
+def test_heldout_documents_are_refused_before_anything_is_read(tmp_path, capsys, doc):
+    argv = ["--engine", "textract", "--files", f"S1,{doc}", "--in", str(tmp_path / "missing"),
+            "--out", str(tmp_path / "out"), "--dry-run"]
+    assert spike.main(argv) == spike.STOPPED
+    assert "held out" in capsys.readouterr().err and not (tmp_path / "out").exists()
+
+
+def test_the_heldout_run_happens_once_and_dry_runs_never_count(sample_dir, capsys, live_textract, monkeypatch):
+    (sample_dir / "in" / "S1.pdf").rename(sample_dir / "in" / "Q10.pdf")
+    (sample_dir / "in" / "S2.pdf").rename(sample_dir / "in" / "Q13.pdf")
+    argv = textract_args(sample_dir, "Q10,Q13", "--final-heldout")
+    marker = sample_dir / "out" / "textract" / spike.HELDOUT_MARKER
+    assert spike.main(argv + ["--dry-run"]) == 0 and spike.main(argv + ["--dry-run"]) == 0
+    assert not marker.exists() and live_textract.calls == 0
+    assert spike.main(argv) == 0
+    assert json.loads(marker.read_text(encoding="utf-8"))["files"] == ["Q10", "Q13"]
+    assert spike.main(argv) == spike.STOPPED
+    assert "already done" in capsys.readouterr().err and live_textract.calls == 4
+
+
+def test_answer_keys_combine_and_a_document_may_be_in_only_one(sample_dir, capsys):
+    (sample_dir / "key2.txt").write_text("[S2]\ntotal_price: Rs. 1,65,850 [p2]\n", encoding="utf-8")
+    (sample_dir / "key.txt").write_text("[S1]\ntotal_price: Rs. 1,97,000 | 2\n", encoding="utf-8")
+    argv = textract_args(sample_dir, "S1,S2", "--dry-run", "--answer-key", str(sample_dir / "key2.txt"))
+    assert spike.main(argv) == 0
+    out = capsys.readouterr().out
+    assert "Answer key: 2 document blocks" in out
+    assert "page tags such as [p1] taken out of 1 values (their pages added); values still holding a tag: 0" in out
+    (sample_dir / "key2.txt").write_text("[S1]\ngst: extra\n", encoding="utf-8")
+    assert spike.main(argv) == spike.STOPPED and "more than one answer key" in capsys.readouterr().err
+
+
+def test_textract_preflight_prints_the_rate_quota(capsys):
+    pytest.importorskip("boto3")
+    from extract.dryrun import stubbed_client
+
+    sts, sts_stub = stubbed_client("sts")
+    quotas, quota_stub = stubbed_client("service-quotas")
+    sts_stub.add_response("get_caller_identity", {"UserId": "AIDEXAMPLE", "Account": "000000000000",
+                                                  "Arn": "arn:aws:iam::000000000000:user/example"})
+    quota_stub.add_response("list_service_quotas", {"Quotas": [
+        {"QuotaName": "Transactions per second per account for synchronous AnalyzeDocument operations",
+         "Value": 5.0, "QuotaCode": "L-EXAMPLE", "ServiceCode": "textract"},
+        {"QuotaName": "Something else", "Value": 1.0}]})
+    spike.textract_preflight("ap-south-1", sts, quotas)
+    out = capsys.readouterr().out
+    assert "account 000000000000" in out and "AnalyzeDocument operations = 5.0" in out and "Something" not in out
+    sts, sts_stub = stubbed_client("sts")
+    quotas, quota_stub = stubbed_client("service-quotas")
+    sts_stub.add_response("get_caller_identity", {"UserId": "A", "Account": "000000000000",
+                                                  "Arn": "arn:aws:iam::000000000000:user/example"})
+    quota_stub.add_client_error("list_service_quotas", service_error_code="AccessDeniedException", http_status_code=403)
+    spike.textract_preflight("ap-south-1", sts, quotas)
+    assert "Service Quotas: not readable (AccessDeniedException)" in capsys.readouterr().out
