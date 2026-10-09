@@ -310,3 +310,18 @@ def test_build_site_takes_the_opt_out_only_from_an_exact_true(tmp_path, value, o
                           "--engine", "textract", "--ai-opt-out", value, "--out", str(tmp_path)]) == 0
     config = (tmp_path / "config.js").read_text(encoding="utf-8")
     assert f'"AI_OPT_OUT": {str(opted_out).lower()}' in config
+
+
+@windows_powershell
+@pytest.mark.parametrize("extra,caps", [("", ("200", "10", "300")),
+                                        ("-DailyJobCap 50 -IpDailyJobCap 3 -DailyPageCap 120", ("50", "3", "120"))])
+def test_every_deploy_sets_the_three_caps_and_prints_them(extra, caps):
+    run, calls = run_ps("deploy.ps1", f"-Profile default -Region ap-south-1 -ExpectedAccount {ACCOUNT} "
+                        f"-HostingEnabled false {extra}", {"FAKE_STACK": outputs(("ApiUrl", "https://abc.example.com"),
+                                                                                  ("BucketName", "b"))})
+    assert run.returncode == 0, run.stdout + run.stderr
+    (deploy,) = [c for c in calls if c.startswith("sam deploy")]
+    overrides = deploy.split("--parameter-overrides ")[1].split(" --")[0].split()
+    assert {f"DailyJobCap={caps[0]}", f"IpDailyJobCap={caps[1]}", f"DailyPageCap={caps[2]}"} <= set(overrides)
+    assert (f"Caps in effect: {caps[0]} checks a day, {caps[1]} per address a day, {caps[2]} pages a day"
+            in run.stdout)

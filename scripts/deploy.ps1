@@ -38,6 +38,10 @@ param(
     [string]$SiteOrigin = "http://127.0.0.1:8000",
     [ValidateSet("none", "nova", "textract")][string]$ReadingEngine = "none",
     [string]$ModelId = "global.amazon.nova-2-lite-v1:0",
+    # Passed on every deploy: CloudFormation would otherwise keep whatever was set last.
+    [ValidateRange(0, 100000)][int]$DailyJobCap = 200,
+    [ValidateRange(0, 100000)][int]$IpDailyJobCap = 10,
+    [ValidateRange(0, 100000)][int]$DailyPageCap = 300,
     [switch]$Pages,
     [string]$BuildDir = ".build"
 )
@@ -96,7 +100,8 @@ $deployArgs = @("--stack-name", $StackName, "--capabilities", "CAPABILITY_IAM") 
     "--parameter-overrides",
     "StackPrefix=$StackName", "HostingEnabled=$HostingEnabled", "SiteOrigin=$SiteOrigin",
     "ReadingEngine=$ReadingEngine", "ModelId=$ModelId",
-    "ProfileModelArns=$($access.ProfileModelArns)", "GlobalModelArns=$($access.GlobalModelArns)"
+    "ProfileModelArns=$($access.ProfileModelArns)", "GlobalModelArns=$($access.GlobalModelArns)",
+    "DailyJobCap=$DailyJobCap", "IpDailyJobCap=$IpDailyJobCap", "DailyPageCap=$DailyPageCap"
 )
 # Unattended: SAM makes or reuses its own artifacts bucket and saves these settings to samconfig.toml.
 Invoke-Step "Deploy" {
@@ -181,6 +186,7 @@ if ($Pages) {
 
 Write-Host ""
 Write-Host "API URL: $apiUrl"
+Write-Host "Caps in effect: $DailyJobCap checks a day, $IpDailyJobCap per address a day, $DailyPageCap pages a day"
 if ($HostingEnabled -eq "true") {
     Write-Host "Site:    $siteUrl"
 } elseif ($Pages) {

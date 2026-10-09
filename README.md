@@ -174,6 +174,7 @@ The stack deploys in `ap-south-1` (Mumbai) or `ap-southeast-2` (Sydney). The tem
 - `-HostingEnabled false` leaves out CloudFront and the site bucket (see below).
 - `-ReadingEngine textract` turns reading on with Amazon Textract in the stack's Region. Each page costs about $0.020 per page (tables and queries, Mumbai pricing). `DailyPageCap` (default 300 pages per UTC day, across all checks, live samples included) limits first reads to about $6.00 a day. A page that was read and saved is never read again; only if saving its reading fails can a retry read it again, at most four times in all (the first run, Lambda's one retry and two retries from the page).
 - `-ReadingEngine nova -ModelId <id>` turns reading on with Amazon Nova. The default is `none`. The model ID can be an inference profile such as `global.amazon.nova-2-lite-v1:0` or `apac.amazon.nova-pro-v1:0`, or a model in the stack's own Region such as `amazon.nova-pro-v1:0`, for accounts that can't use cross-Region inference. For a profile, the script reads the Regions it routes to with `aws bedrock get-inference-profile` and grants the worker those and no others.
+- `-DailyJobCap`, `-IpDailyJobCap` and `-DailyPageCap` (defaults 200, 10 and 300) are passed on every deploy and printed at the end, so a cap changed for one deploy never lingers.
 - `-StackName` sets the stack name, which also starts the upload bucket's name.
 
 ### Without CloudFront
