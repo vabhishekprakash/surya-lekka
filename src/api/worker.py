@@ -2,13 +2,14 @@
 
 It claims the job with conditional updates (awaiting_upload -> uploaded ->
 processing), so a duplicate or racing S3 event finds nothing to do. It then
-reads the pages in batches with the reading engine (Amazon Nova), saving each
-batch's reading on the job as soon as it arrives, merges them, runs the
-initial checks, saves the extraction and findings, and deletes the uploaded
-objects.
+reads the pages in batches with the reading engine (Amazon Nova, up to five
+pages a call, or Amazon Textract, one page a call), saving each batch's
+reading on the job as soon as it arrives, merges them, runs the initial
+checks, saves the extraction and findings, and deletes the uploaded objects.
+Only the mapped facts are kept: no raw reply is logged or stored.
 
-A model call starts only when there is time left for it to time out and for
-the job to be saved; otherwise the job stops as failed with reason timed_out.
+A call starts only when there is time left for it to time out (with its
+retries) and for the job to be saved; otherwise the job stops as failed with reason timed_out.
 A retry (POST /jobs/{id}/retry, or Lambda's own retry after a claim has gone
 stale) reuses the saved batches, so only the rest are sent to the model.
 
@@ -24,7 +25,8 @@ from functools import lru_cache
 from urllib.parse import unquote_plus
 
 from checks import run_checks
-from extract.batching import plan_batches
+from extract import textract_client as textract
+from extract.batching import DEFAULT_REQUEST_LIMIT_BYTES, MAX_IMAGES_PER_CALL, plan_batches
 from extract.merge import merge_batches
 from extract.nova_client import ExtractionFailure, build_request, extract_batch, make_client, request_size
 from extract.render import MAX_IMAGE_BYTES, PageImage
@@ -93,9 +95,16 @@ def bedrock_client():
     return make_client(region, retries=0, read_timeout=READ_TIMEOUT_SECONDS)
 
 
+@lru_cache(maxsize=None)
+def textract_client():
+    return textract.make_client(os.environ.get("AWS_REGION"))
+
+
 class NovaReader:
     """Amazon Nova through the Bedrock Converse API. MODEL_ID is an inference
     profile ID or a model ID in the stack's own Region."""
+
+    max_pages, request_limit, call_budget_ms = MAX_IMAGES_PER_CALL, DEFAULT_REQUEST_LIMIT_BYTES, CALL_BUDGET_MS
 
     def __init__(self, model):
         self.model, self.client = model, bedrock_client()
@@ -107,9 +116,20 @@ class NovaReader:
         return extract_batch(self.client, self.model, batch, number)
 
 
+class TextractReader(textract.TextractEngine):
+    """Amazon Textract AnalyzeDocument in the stack's Region, one page per call,
+    sent as bytes. Saved pages are marked with model_id "textract"."""
+
+    call_budget_ms = (textract.MAX_ATTEMPTS * (textract.READ_TIMEOUT_SECONDS
+                      + textract.CONNECT_TIMEOUT_SECONDS) + SAVE_RESERVE_SECONDS) * 1000
+
+    def __init__(self, model):
+        super().__init__(textract_client())
+
+
 # Readers by READING_ENGINE name (common.READING_ENGINES). A new engine needs a
 # reader here, its permissions in template.yaml and a mode label in web/app.js.
-READERS = {"nova": NovaReader}
+READERS = {"nova": NovaReader, "textract": TextractReader}
 
 
 def reader():
@@ -236,7 +256,7 @@ def _save_batch(job_id, record):
 def _extract(job_id, pages, saved, context):
     engine = reader()
     model = engine.model
-    batches, rejected = plan_batches(pages, engine.request_size)
+    batches, rejected = plan_batches(pages, engine.request_size, engine.request_limit, engine.max_pages)
     records, failures, resumed = [], [], 0
     for n, batch in enumerate(batches, 1):
         numbers = [p.page for p in batch]
@@ -246,7 +266,7 @@ def _extract(job_id, pages, saved, context):
             resumed += 1
             continue
         left = _time_left_ms(context)
-        if left is not None and left < CALL_BUDGET_MS:
+        if left is not None and left < engine.call_budget_ms:
             log("out_of_time", job_id=job_id, batches=n)
             raise OutOfTime()
         try:
@@ -264,9 +284,13 @@ def _extract(job_id, pages, saved, context):
     if not records:
         raise JobFailed("extraction_failed")
     usage = [r.get("usage") or {} for r in records]
-    stats = {"batches": len(batches), "failed_batches": len(failures), "resumed_batches": resumed,
-             "input_tokens": sum(u.get("inputTokens", 0) for u in usage),
-             "output_tokens": sum(u.get("outputTokens", 0) for u in usage)}
+    stats = {"batches": len(batches), "failed_batches": len(failures), "resumed_batches": resumed}
+    if model == textract.MODEL_ID:  # Textract bills by the page
+        stats["pages_read"] = sum(u.get("pages", 0) for u in usage)
+        stats["estimated_usd"] = textract.estimated_cost(stats["pages_read"])
+    else:
+        stats.update(input_tokens=sum(u.get("inputTokens", 0) for u in usage),
+                     output_tokens=sum(u.get("outputTokens", 0) for u in usage))
     return merge_batches(records, failures, rejected), stats
 
 

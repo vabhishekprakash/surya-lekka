@@ -215,6 +215,39 @@ def test_daily_cap_counts_jobs_and_live_samples(aws, monkeypatch):
     assert counter() == 2
 
 
+def page_counter():
+    from datetime import datetime, timezone
+    day = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    found = common.table().get_item(Key={"job_id": f"pagecount#{day}"}).get("Item")
+    return int(found["pages_taken"]) if found else 0
+
+
+def test_daily_page_cap_counts_declared_pages_of_jobs_and_live_samples(aws, monkeypatch):
+    monkeypatch.setenv("DAILY_PAGE_CAP", "5")
+    put_sample(aws)  # two pages
+    assert call(jobs.create_job, {"page_count": 2})[0] == 201
+    assert call(jobs.create_sample_job, path={"sample_id": "S1"}, query=LIVE)[0] == 201
+    status, body = call(jobs.create_job, {"page_count": 2})
+    assert status == 429 and body == {
+        "error": "daily_limit", "message": "Today's limit of checks has been reached. Please try again tomorrow."}
+    assert call(jobs.create_sample_job, path={"sample_id": "S1"}, query=LIVE)[0] == 429
+    assert (counter(), page_counter()) == (2, 4)  # a refused check takes neither a job slot nor pages
+    assert call(jobs.create_job, {"page_count": 1})[0] == 201
+    assert (counter(), page_counter()) == (3, 5)
+    assert call(jobs.create_job, {"page_count": 1})[0] == 429
+
+
+def test_a_check_with_more_pages_than_the_cap_is_refused_without_writing(aws, monkeypatch):
+    monkeypatch.setenv("DAILY_PAGE_CAP", "3")
+    assert call(jobs.create_job, {"page_count": 4})[1]["error"] == "daily_limit"
+    assert (counter(), page_counter()) == (0, 0)
+
+
+def test_daily_page_cap_defaults_to_300(monkeypatch):
+    monkeypatch.delenv("DAILY_PAGE_CAP", raising=False)
+    assert common.daily_page_cap() == 300
+
+
 def scan():
     return common.table().scan()["Items"]
 
@@ -235,7 +268,8 @@ def test_missing_live_sample_takes_no_slot(aws):
     assert scan() == []
 
 
-@pytest.mark.parametrize("name,code", [("DAILY_JOB_CAP", "daily_limit"), ("IP_DAILY_JOB_CAP", "ip_limit")])
+@pytest.mark.parametrize("name,code", [("DAILY_JOB_CAP", "daily_limit"), ("IP_DAILY_JOB_CAP", "ip_limit"),
+                                       ("DAILY_PAGE_CAP", "daily_limit")])
 @pytest.mark.parametrize("value", ["0", "-1", "lots", ""])
 def test_cap_of_zero_or_unreadable_refuses_without_writing(aws, monkeypatch, name, code, value):
     monkeypatch.setenv(name, value)
@@ -684,3 +718,106 @@ def test_logs_hold_no_tokens_or_document_text(aws, caplog):
 def test_log_refuses_other_fields():
     with pytest.raises(ValueError):
         common.log("job_done", evidence_text="anything")
+
+
+# --- Amazon Textract as the reader -----------------------------------------------------------
+
+SECRET_LINE = "Zebra-quartz-7731 internal note"
+
+
+class FakeTextract:
+    """Answers AnalyzeDocument with a handmade page: one total, one line nothing points at."""
+
+    def __init__(self, errors=()):
+        self.calls, self.errors = [], list(errors)
+
+    def analyze_document(self, **request):
+        from botocore.exceptions import ClientError
+        from textract_pages import Page
+
+        self.calls.append(request)
+        if self.errors:
+            code = self.errors.pop(0)
+            if code:
+                raise ClientError({"Error": {"Code": code, "Message": "synthetic"}}, "AnalyzeDocument")
+        page = Page()
+        page.line(SECRET_LINE, 0.1)
+        page.line("Total amount payable Rs 1,90,000", 0.5)
+        page.answer("TOTAL_PAYABLE", "Rs 1,90,000", top=0.5)
+        return page.reply()
+
+
+@pytest.fixture
+def textract(aws, monkeypatch):
+    monkeypatch.setenv("READING_ENGINE", "textract")
+    monkeypatch.setenv("MODEL_ID", "global.amazon.nova-2-lite-v1:0")  # ignored by Textract
+    client = FakeTextract()
+    monkeypatch.setattr(worker, "textract_client", lambda: client)
+    return client
+
+
+def test_textract_reads_each_page_with_its_own_call(aws, textract, caplog):
+    caplog.set_level("INFO")
+    job = create(3)
+    assert job.get("job_id")
+    upload(aws, job, 3)
+    assert run_worker(job["job_id"]) == ["done"]
+    assert [c["Document"]["Bytes"] for c in textract.calls] == [JPEG] * 3
+    assert all(set(c) == {"Document", "FeatureTypes", "QueriesConfig"} for c in textract.calls)
+    view = get(job)[1]
+    assert view["mode"] == "textract" and view["processing_complete"] is True
+    total = view["extraction"]["gross_total"]
+    assert total["value"]["parsed"] == "190000" and [c["page"] for c in total["candidates"]] == [1, 2, 3]
+    stats = json.loads(item(job["job_id"])["stats"])
+    assert stats == {**stats, "batches": 3, "pages_read": 3, "estimated_usd": 0.06, "pages": 3}
+    assert '"pages_read": 3' in caplog.text and '"estimated_usd": 0.06' in caplog.text
+    assert "input_tokens" not in stats
+    assert worker.bedrock_client().calls == 0
+    # Only mapped facts are kept: no raw reply, and nothing the mapping didn't use.
+    stored = json.dumps(item(job["job_id"]), default=str)
+    assert SECRET_LINE not in stored and "QUERY_RESULT" not in stored and "Blocks" not in stored
+    assert SECRET_LINE not in caplog.text and "Rs 1,90,000" not in caplog.text
+    assert uploads(aws, job["job_id"]) == []
+
+
+def test_textract_saves_each_page_and_a_retry_reads_only_the_rest(aws, textract):
+    job = create(3)
+    upload(aws, job, 3)
+    clock = LambdaClock(10 ** 6, 10 ** 6, 1000)  # time runs out before page 3
+    assert run_worker(job["job_id"], clock) == ["interrupted"]
+    saved = item(job["job_id"])["batches"]
+    assert sorted(saved) == ["1", "2"]
+    assert all(json.loads(v)["model_id"] == "textract" and "response" not in json.loads(v) for v in saved.values())
+    assert retry(job)[0] == 202
+    assert run_worker(job["job_id"]) == ["done"]
+    assert len(textract.calls) == 3
+    assert json.loads(item(job["job_id"])["stats"])["resumed_batches"] == 2
+
+
+def test_textract_bad_page_leaves_processing_incomplete(aws, textract):
+    textract.errors = [None, "BadDocumentException"]
+    job = create(3)
+    upload(aws, job, 3)
+    assert run_worker(job["job_id"]) == ["done"]
+    view = get(job)[1]
+    assert view["processing_complete"] is False and view["extraction"]["pages_skipped"] == [2]
+
+
+@pytest.mark.parametrize("code,reason", [("ProvisionedThroughputExceededException", "model_busy"),
+                                         ("ThrottlingException", "model_busy"),
+                                         ("AccessDeniedException", "model_access_denied"),
+                                         ("ExpiredTokenException", "model_unavailable")])
+def test_textract_throttling_and_access_errors_stop_the_job(aws, textract, code, reason):
+    textract.errors = [code]
+    job = create(2)
+    upload(aws, job, 2)
+    assert run_worker(job["job_id"]) == ["failed"]
+    assert get(job)[1]["reason"] == reason and len(textract.calls) == 1
+
+
+def test_textract_client_is_made_for_the_stack_region(monkeypatch):
+    monkeypatch.setenv("AWS_REGION", "ap-south-1")
+    worker.textract_client.cache_clear()
+    client = worker.textract_client()
+    assert client.meta.region_name == "ap-south-1" and client.meta.service_model.service_name == "textract"
+    worker.textract_client.cache_clear()

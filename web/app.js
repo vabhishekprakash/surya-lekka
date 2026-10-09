@@ -40,6 +40,7 @@ const READING_UNAVAILABLE = "AI reading isn't available yet. Please type the num
 const MODE_LABELS = {
   saved: "Sample (saved reading)",
   nova: "Read by Amazon Nova",
+  textract: "Read by Amazon Textract",
   manual: "Entered by you",
   stub: "Read by the local test stub, not a model",
 };

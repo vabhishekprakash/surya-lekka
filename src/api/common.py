@@ -22,7 +22,8 @@ from functools import lru_cache
 LOGGER = logging.getLogger("surya_lekka")
 LOGGER.setLevel(logging.INFO)
 LOG_FIELDS = {"job_id", "status", "reason", "seconds", "pages", "batches", "failed_batches", "resumed_batches",
-              "input_tokens", "output_tokens", "http_status", "sample_id", "deleted", "delete_errors"}
+              "input_tokens", "output_tokens", "pages_read", "estimated_usd", "http_status", "sample_id",
+              "deleted", "delete_errors"}
 
 JOB_ID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}")
 MANIFEST_MAX_BYTES = 4096
@@ -39,7 +40,7 @@ MAX_RETRIES = 2
 # Engines the worker can read quotes with (READING_ENGINE). Any other value,
 # "none" included, switches reading off: uploads and live samples are refused,
 # while saved sample readings and typed-in numbers keep working.
-READING_ENGINES = ("nova",)
+READING_ENGINES = ("nova", "textract")
 READING_UNAVAILABLE = "AI reading isn't available yet. Please type the numbers instead."
 
 
@@ -80,6 +81,10 @@ def _cap(name, default):
 
 def daily_cap():
     return _cap("DAILY_JOB_CAP", "200")
+
+
+def daily_page_cap():
+    return _cap("DAILY_PAGE_CAP", "300")
 
 
 def ip_daily_cap():
@@ -226,20 +231,21 @@ def _ip_counter_key(day, ip):
     return f"ipcount#{day}#{digest}"
 
 
-def take_slots(event):
-    """One of the source address's daily slots, then one of the day's. Call only
-    once the request is valid. A cap of 0 refuses before anything is written."""
+def take_slots(event, pages):
+    """One of the source address's daily slots, then one of the day's jobs together
+    with the job's declared pages from the day's page allowance. Call only once the
+    request is valid. A cap of 0 refuses before anything is written."""
     ip_limit = ApiError(429, "ip_limit", "You have reached today's limit of checks. Please try again tomorrow.")
     day_limit = ApiError(429, "daily_limit", "Today's limit of checks has been reached. Please try again tomorrow.")
-    ip_cap, cap = ip_daily_cap(), daily_cap()
+    ip_cap, cap, page_cap = ip_daily_cap(), daily_cap(), daily_page_cap()
     if ip_cap <= 0:
         raise ip_limit
-    if cap <= 0:
+    if cap <= 0 or page_cap < pages:
         raise day_limit
     day = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     if not _take_slot(_ip_counter_key(day, source_ip(event)), ip_cap):
         raise ip_limit
-    if not _take_slot(f"counter#{day}", cap):
+    if not _take_day_slots(day, cap, pages, page_cap):
         raise day_limit
 
 
@@ -256,6 +262,32 @@ def _take_slot(key, cap):
         )
     except ClientError as e:
         if error_code(e) == "ConditionalCheckFailedException":
+            return False
+        raise
+    return True
+
+
+def _take_day_slots(day, cap, pages, page_cap):
+    """The day's job slot and the job's pages in one transaction: both or neither.
+    False once either counter would pass its cap. (The table resource's client
+    converts plain values to DynamoDB types.)"""
+    from botocore.exceptions import ClientError
+
+    expires = now() + 2 * 86400
+
+    def update(key, attribute, amount, limit):
+        return {"Update": {
+            "TableName": table_name(), "Key": {"job_id": key},
+            "UpdateExpression": "ADD #count :amount SET expires_at = :expires",
+            "ConditionExpression": "attribute_not_exists(#count) OR #count <= :limit",
+            "ExpressionAttributeNames": {"#count": attribute},
+            "ExpressionAttributeValues": {":amount": amount, ":limit": limit, ":expires": expires}}}
+    try:
+        table().meta.client.transact_write_items(TransactItems=[
+            update(f"counter#{day}", "job_count", 1, cap - 1),
+            update(f"pagecount#{day}", "pages_taken", pages, page_cap - pages)])
+    except ClientError as e:
+        if error_code(e) == "TransactionCanceledException":
             return False
         raise
     return True

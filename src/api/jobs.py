@@ -63,7 +63,7 @@ def create_job(event, context):
         pages = body_json(event).get("page_count")
         if isinstance(pages, bool) or not isinstance(pages, int) or not 1 <= pages <= MAX_PAGES:
             raise ApiError(400, "bad_page_count", f"page_count must be a whole number from 1 to {MAX_PAGES}.")
-        take_slots(event)
+        take_slots(event, pages)
         job_id, token = new_job(pages, "upload", mode=reading_engine())
         body = {
             "job_id": job_id,
@@ -265,7 +265,7 @@ def _live_sample(event, sample_id):
     pages = _sample_object(sample_id, "manifest.json", MANIFEST_MAX_BYTES).get("pages")
     if isinstance(pages, bool) or not isinstance(pages, int) or not 1 <= pages <= MAX_PAGES:
         raise ApiError(404, *SAMPLE_MISSING)
-    take_slots(event)
+    take_slots(event, pages)
     job_id, token = new_job(pages, f"sample:{sample_id}", mode=reading_engine())
     bucket = bucket_name()
     for n in range(1, pages + 1):
