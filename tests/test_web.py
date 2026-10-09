@@ -136,3 +136,8 @@ def test_copy_has_no_dashes_or_model_hype():
 
 def test_document_text_is_never_inserted_as_html():
     assert "innerHTML" not in APP and "insertAdjacentHTML" not in APP and "document.write" not in APP
+
+
+def test_finding_thumbnails_float_beside_their_line():
+    css = (ROOT / "web" / "style.css").read_text(encoding="utf-8")
+    assert ".finding li .thumb { float: right;" in css and ".finding li::after" in css
