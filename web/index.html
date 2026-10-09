@@ -2,8 +2,218 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Surya Lekka</title>
+  <meta name="description" content="Check a rooftop solar quote before you sign.">
+  <link rel="stylesheet" href="style.css">
+  <script src="config.js"></script>
+  <script type="module" src="app.js"></script>
 </head>
 <body>
+  <header class="top">
+    <a class="brand" href="#home" data-go="home">Surya Lekka</a>
+  </header>
+
+  <main id="main" tabindex="-1">
+    <section id="view-home" data-view="home">
+      <h1>Check your rooftop solar quote before you sign</h1>
+      <p class="lead">Surya Lekka checks that the numbers on a rooftop solar quote add up, compares the central
+        subsidy it shows with the government rule, and lists what to ask the vendor.</p>
+
+      <div class="choices">
+        <article class="choice">
+          <h2>Try a sample quote</h2>
+          <p>See how it works on a made-up quote.</p>
+          <div class="sample-list">
+            <button type="button" class="button secondary" data-sample="S1">Sample 1<span>Numbers that add up</span></button>
+            <button type="button" class="button secondary" data-sample="S2">Sample 2<span>Panel size and subsidy that don't match</span></button>
+            <button type="button" class="button secondary" data-sample="S3">Sample 3<span>Missing and unclear details</span></button>
+          </div>
+        </article>
+        <article class="choice">
+          <h2>Check my quote</h2>
+          <p>Upload the quote as a PDF, or a photo of each page.</p>
+          <button type="button" class="button" data-go="upload">Check my quote</button>
+        </article>
+        <article class="choice">
+          <h2>Type the numbers instead</h2>
+          <p>Enter the figures from your quote yourself. No file is uploaded.</p>
+          <button type="button" class="button secondary" data-go="manual">Type the numbers instead</button>
+        </article>
+      </div>
+    </section>
+
+    <section id="view-upload" data-view="upload" hidden>
+      <h2 tabindex="-1">Check my quote</h2>
+      <p>Choose a PDF of the quote, or photos of its pages in order. Up to 20 pages are read.</p>
+      <label class="file-pick">
+        <span class="button">Choose a file</span>
+        <input id="file-input" type="file" accept="application/pdf,image/jpeg,image/png,image/webp,image/heic,image/heif" multiple>
+      </label>
+      <p class="hint">Your pages are turned into images on this device first. Only those images are sent for reading.</p>
+      <p id="upload-status" class="status" role="status" aria-live="polite"></p>
+      <ul id="upload-notes" class="notes"></ul>
+      <div id="page-previews" class="previews"></div>
+      <div class="actions">
+        <button type="button" id="send-pages" class="button" hidden>Read this quote</button>
+        <button type="button" class="button link" data-go="home">Back</button>
+      </div>
+    </section>
+
+    <section id="view-wait" data-view="wait" hidden>
+      <h2 tabindex="-1">Reading your quote</h2>
+      <div class="spinner" aria-hidden="true"></div>
+      <p role="status" aria-live="polite">Please keep this page open.</p>
+      <p id="wait-slow" hidden>Still reading. A long quote can take a while. You can keep waiting, or
+        <a href="#manual" data-go="manual">type the numbers in yourself</a>.</p>
+    </section>
+
+    <section id="view-problem" data-view="problem" hidden>
+      <h2 id="problem-title" tabindex="-1"></h2>
+      <p id="problem-message"></p>
+      <div class="actions">
+        <button type="button" id="problem-retry" class="button" hidden>Try again</button>
+        <button type="button" id="problem-sample" class="button secondary" data-go="home" hidden>Try a sample quote</button>
+        <button type="button" class="button secondary" data-go="manual">Type the numbers instead</button>
+        <button type="button" class="button link" data-go="home">Start again</button>
+      </div>
+    </section>
+
+    <section id="view-review" data-view="review" hidden>
+      <p class="mode" data-mode-label></p>
+      <h2 tabindex="-1">Check what was read</h2>
+      <p>Each value shows the text it came from on the quote. Fix anything that doesn't match your quote, then
+        answer the questions below.</p>
+      <div id="review-notes"></div>
+      <form id="review-form" novalidate>
+        <div id="review-option"></div>
+        <div id="review-fields"></div>
+        <fieldset class="group">
+          <legend>What the quote says</legend>
+          <div id="review-flags"></div>
+        </fieldset>
+        <fieldset class="group">
+          <legend>A few questions</legend>
+          <div data-questions="review"></div>
+        </fieldset>
+        <p id="review-status" class="status" role="status" aria-live="polite"></p>
+        <div class="actions">
+          <button type="submit" class="button">Run the checks</button>
+          <button type="button" class="button link" data-go="home">Start again</button>
+        </div>
+      </form>
+    </section>
+
+    <section id="view-manual" data-view="manual" hidden>
+      <h2 tabindex="-1">Type the numbers from your quote</h2>
+      <p>Copy each figure as it appears on the quote. Leave a box empty if the quote doesn't show it.</p>
+      <form id="manual-form" novalidate>
+        <fieldset class="group">
+          <legend>System size</legend>
+          <label class="field">System size on the quote <input name="stated_capacity" placeholder="for example 3.3 kWp" autocomplete="off"></label>
+          <label class="field">What does that size measure?
+            <select name="capacity_basis" data-answer>
+              <option value="">The quote doesn't say</option>
+              <option value="dc_kwp">The solar panels (DC, kWp)</option>
+              <option value="ac_kw">The inverter or AC output (kW)</option>
+            </select>
+          </label>
+        </fieldset>
+        <fieldset class="group">
+          <legend>Panels and inverter</legend>
+          <label class="field">Number of panels <input name="panel_count" inputmode="numeric" autocomplete="off"></label>
+          <label class="field">Wattage of each panel <input name="panel_wattage" placeholder="for example 550 Wp" autocomplete="off"></label>
+          <label class="field">Panel make and model <input name="panel_make_model" autocomplete="off"></label>
+          <label class="field">Does the quote say the panels are DCR (made in India, with Indian cells)?
+            <select name="dcr_declaration">
+              <option value="">The quote doesn't say</option>
+              <option value="true">Yes, DCR panels and cells</option>
+              <option value="false">It says they are not DCR</option>
+            </select>
+          </label>
+          <label class="field">Inverter make and model <input name="inverter_make_model" autocomplete="off"></label>
+          <label class="field">Inverter rating <input name="inverter_rating" placeholder="for example 3 kW" autocomplete="off"></label>
+          <label class="field">Vendor registration number <input name="vendor_registration" autocomplete="off"></label>
+        </fieldset>
+        <fieldset class="group">
+          <legend>Price</legend>
+          <label class="field">Base price <input name="base_price" inputmode="decimal" placeholder="Rs" autocomplete="off"></label>
+          <label class="field">GST amount <input name="gst_amount" inputmode="decimal" placeholder="Rs" autocomplete="off"></label>
+          <label class="field">Is GST part of the base price?
+            <select name="gst_treatment" data-answer>
+              <option value="">The quote doesn't say</option>
+              <option value="included">Yes, the base price includes GST</option>
+              <option value="excluded">No, GST is added on top</option>
+            </select>
+          </label>
+          <div id="manual-charges"></div>
+          <button type="button" id="add-charge" class="button link">Add another charge</button>
+          <label class="field">Does the quote say there are no other charges?
+            <select name="extra_charges_complete" data-answer>
+              <option value="">It doesn't say</option>
+              <option value="true">Yes, it says there are no other charges</option>
+            </select>
+          </label>
+          <label class="field">Discount <input name="discount" inputmode="decimal" placeholder="Rs" autocomplete="off"></label>
+          <label class="field">Total <input name="gross_total" inputmode="decimal" placeholder="Rs" autocomplete="off"></label>
+        </fieldset>
+        <fieldset class="group">
+          <legend>Subsidy and net cost</legend>
+          <label class="field">Central subsidy <input name="subsidy_central" inputmode="decimal" placeholder="Rs" autocomplete="off"></label>
+          <label class="field">State subsidy <input name="subsidy_state" inputmode="decimal" placeholder="Rs" autocomplete="off"></label>
+          <label class="field">Subsidy shown as one figure, without a central and state split
+            <input name="subsidy_combined" inputmode="decimal" placeholder="Rs" autocomplete="off"></label>
+          <label class="field">Net cost after subsidy <input name="net_cost" inputmode="decimal" placeholder="Rs" autocomplete="off"></label>
+          <label class="field">Which subsidy does the net cost take off?
+            <select name="net_cost_subsidy_basis" data-answer>
+              <option value="">The quote doesn't say</option>
+              <option value="central">The central subsidy</option>
+              <option value="central_and_state">The central and state subsidies</option>
+              <option value="state">The state subsidy</option>
+              <option value="combined">The single subsidy figure</option>
+              <option value="none">No subsidy is taken off</option>
+            </select>
+          </label>
+        </fieldset>
+        <fieldset class="group">
+          <legend>A few questions</legend>
+          <div data-questions="manual"></div>
+        </fieldset>
+        <p id="manual-status" class="status" role="status" aria-live="polite"></p>
+        <div class="actions">
+          <button type="submit" class="button">Run the checks</button>
+          <button type="button" class="button link" data-go="home">Back</button>
+        </div>
+      </form>
+    </section>
+
+    <section id="view-results" data-view="results" hidden>
+      <p class="mode" data-mode-label></p>
+      <h2 tabindex="-1">What the checks found</h2>
+      <p id="results-summary"></p>
+      <div id="results-groups"></div>
+      <section class="vendor" aria-labelledby="vendor-title">
+        <h3 id="vendor-title">Questions for your vendor</h3>
+        <div id="vendor-questions"></div>
+      </section>
+      <div class="actions">
+        <button type="button" id="results-edit" class="button secondary">Change answers or values</button>
+        <button type="button" class="button link" data-go="home">Check another quote</button>
+      </div>
+    </section>
+  </main>
+
+  <footer class="foot">
+    <p>This is not financial or legal advice. Eligibility (DCR panels, registration, inspection) is not verified.</p>
+    <p>Documents may be processed outside India through AWS cross-Region inference. Files are deleted after reading.</p>
+  </footer>
+
+  <dialog id="page-viewer" aria-labelledby="page-viewer-title">
+    <div class="viewer-head">
+      <h3 id="page-viewer-title">Page</h3>
+      <button type="button" class="button link" id="page-viewer-close">Close</button>
+    </div>
+    <div id="page-viewer-body"></div>
+  </dialog>
 </body>
 </html>
