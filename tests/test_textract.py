@@ -426,3 +426,16 @@ def test_sample_reports_carry_no_answer_text():
         for n in (1, 2):
             for entry in tc.map_page(sample(sid, n), n)[1]:
                 assert set(entry) == {"alias", "confidence", "kept", "why"}
+
+
+def test_what_textract_gets_from_sample_s2():
+    """S2 states 5 panels of 500 W, 3 kW and a subsidy of Rs 85,800. At the chosen
+    threshold the mapping keeps the panel count (and the net cost) only: the wattage
+    answer is low and in kWp, the capacity answer has no unit, and the subsidy answer
+    carries its label, so it doesn't parse as an amount. Recorded, not tuned to."""
+    quote = merge_batches([{"batch": n, "pages": [n], "model_id": "textract",
+                            "contract": tc.to_contract(tc.map_page(sample("S2", n), n)[0], n)} for n in (1, 2)])
+    assert [g["count"]["value"] for g in quote["module_groups"]] == [5]
+    assert quote["module_groups"][0]["wattage"] is None and quote["stated_capacity"] is None
+    assert all(quote[k] is None for k in ("subsidy_central", "subsidy_state", "subsidy_combined", "subsidy_unspecified"))
+    assert quote["net_cost"]["value"]["parsed"] == "80050"

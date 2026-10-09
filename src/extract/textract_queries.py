@@ -18,13 +18,13 @@ MAX_QUERIES = 15
 #   text      copied as written
 QUERIES = (
     ("SYSTEM_CAPACITY", "What is the total system capacity in kW or kWp?", "capacity"),
-    ("PANEL_COUNT", "What is the number of solar panels or modules?", "count"),
-    ("PANEL_WATTAGE", "What is the wattage of one solar panel?", "wattage"),
+    ("PANEL_COUNT", "What is the quantity of solar panels or modules?", "count"),
+    ("PANEL_WATTAGE", "What is the wattage of each solar panel in Wp?", "wattage"),
     ("PANEL_MAKE_MODEL", "What is the solar panel make and model?", "text"),
     ("INVERTER_MAKE_MODEL", "What is the inverter make and model?", "text"),
     ("INVERTER_CAPACITY", "What is the inverter capacity?", "rating"),
     ("PRICE_BEFORE_GST", "What is the price before GST?", "amount"),
-    ("GST_AMOUNT", "What is the GST amount?", "amount"),
+    ("GST_AMOUNT", "What is the GST amount in rupees?", "amount"),
     ("TOTAL_PAYABLE", "What is the total amount payable?", "amount"),
     ("SUBSIDY_AMOUNT", "What is the subsidy amount?", "amount"),
     ("NET_COST", "What is the net cost after subsidy?", "amount"),

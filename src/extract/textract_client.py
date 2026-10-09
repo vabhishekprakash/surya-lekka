@@ -41,8 +41,10 @@ MAX_IMAGE_BYTES = 10_000_000  # synchronous AnalyzeDocument limit for JPEG and P
 MAX_ATTEMPTS = 4
 READ_TIMEOUT_SECONDS = 60
 CONNECT_TIMEOUT_SECONDS = 10
-# One threshold for every answer (0 to 100), chosen on the development quotes only.
-CONFIDENCE_THRESHOLD = 80.0
+# One threshold for every answer (0 to 100), chosen on the eight development quotes
+# only: of 0, 30, 40, 50, 60 and 70, 50 gave the most matches for the fewest wrong
+# and falsely filled fields.
+CONFIDENCE_THRESHOLD = 50.0
 # A page Textract can't read fails that page only.
 PAGE_ERRORS = {"BadDocumentException", "UnsupportedDocumentException", "DocumentTooLargeException",
                "InvalidParameterException"}
