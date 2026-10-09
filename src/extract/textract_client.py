@@ -574,9 +574,11 @@ def map_page(reply, page_number, threshold=CONFIDENCE_THRESHOLD, sources=None, e
             for c in distinct:
                 wire["capacities"].append({"option_id": "All", "raw": c["raw"], "evidence_text": c["evidence"],
                                            "page": page_number})
-            bases = {_basis(f"{c['raw']}\n{c['evidence']}") for c in found}
-            wire["capacity_basis"] = _flag(bases.pop() if len(bases) == 1 else "unspecified", found[0]["evidence"],
-                                           page_number)
+            asked = [c for c in found if c["source"] == "queries"]  # only query answers propose the basis
+            bases = {_basis(f"{c['raw']}\n{c['evidence']}") for c in asked}
+            if asked:
+                wire["capacity_basis"] = _flag(bases.pop() if len(bases) == 1 else "unspecified",
+                                               asked[0]["evidence"], page_number)
         elif field == "subsidy":
             for c in distinct:
                 wire["subsidies"].append({"option_id": "All", "kind": _subsidy_kind(c["evidence"]), "raw": c["raw"],
@@ -593,14 +595,14 @@ def map_page(reply, page_number, threshold=CONFIDENCE_THRESHOLD, sources=None, e
     if gstin:
         wire["_vendor_gstin"] = gstin
     if "gstin_state" in sources and (state := src.gstin_state(page)):
-        wire["_vendor_state"] = {"value": state[0], "evidence_text": state[1], "page": page_number,
-                                 "source": "gst_registration_state"}
+        wire["_supplier_gst_state"] = {"value": state[0], "evidence_text": state[1], "page": page_number,
+                                       "source": "gst_registration_state"}
     if conflicts:
         wire["_conflicts"] = conflicts
     return wire, report
 
 
-PRIVATE = ("_vendor_gstin", "_vendor_state", "_conflicts")
+PRIVATE = ("_vendor_gstin", "_supplier_gst_state", "_conflicts")
 
 
 def _conflict_field(list_key, candidates, page, batch):
@@ -624,10 +626,10 @@ def to_contract(wire, batch):
     if errors:
         raise ExtractionFailure("invalid_mapping", "; ".join(errors[:10]))
     out = normalise_batch(cleaned, batch)
-    gstin, state = wire.get("_vendor_gstin"), wire.get("_vendor_state")
+    gstin, state = wire.get("_vendor_gstin"), wire.get("_supplier_gst_state")
     out["vendor_gstin"] = None if gstin is None else {**gstin, "batch": batch}
-    if state is not None:
-        out["vendor_state"] = {**state, "batch": batch}
+    # Information only: where the supplier is registered for GST, never the household's state.
+    out["supplier_gst_state"] = None if state is None else {**state, "batch": batch}
     page = pages[0]
     for conflict in wire.get("_conflicts") or []:
         if conflict[0] == "item":

@@ -182,11 +182,11 @@ def test_gstin_gives_only_the_suppliers_gst_registration_state():
     page = Page()
     page.line("GSTIN: 36AABCU9603R1ZO", 0.1)
     c = contract(page)
-    state = c["vendor_state"]
+    state = c["supplier_gst_state"]
     assert state["value"] == "Telangana" and state["source"] == "gst_registration_state"
     assert state["evidence_text"] == "GSTIN: 36AABCU9603R1ZO"
     q = quote(page)
-    assert q["vendor_state"]["value"] == "Telangana"
+    assert q["supplier_gst_state"]["value"] == "Telangana" and q["supplier_gst_state"]["source"] == "gst_registration_state"
     assert "state" not in (q["flags"].get("user_confirmed") or {})  # never the household's state
 
 
@@ -194,7 +194,7 @@ def test_gstin_gives_only_the_suppliers_gst_registration_state():
 def test_an_invalid_or_unknown_gstin_gives_no_state(line):
     page = Page()
     page.line(line, 0.1)
-    assert contract(page).get("vendor_state") is None
+    assert contract(page).get("supplier_gst_state") is None
 
 
 # --- each source ---------------------------------------------------------------------------------
@@ -290,3 +290,28 @@ def test_expense_summary_and_line_items_go_through_the_same_rules():
     c = contract(page, sources=frozenset({"expense"}), reply_expense=reply)
     assert amounts(c, "base_price") == ["150000"] and amounts(c, "gst_amount") == ["13350"]
     assert amounts(c, "gross_total") == ["165850"] and groups(c) == [(6, "540", None)]
+
+
+# --- rules added after the first acceptance round --------------------------------------------------
+
+def test_a_count_of_one_from_a_table_or_line_is_a_set_not_a_panel_count():
+    page = Page()
+    page.table([["Description", "Qty"], ["Solar module 540 Wp (complete set)", "1"]])
+    page.line("Solar modules 540 Wp - 1 Nos", 0.6)
+    assert [g[0] for g in groups(contract(page))] in ([], [None])
+
+
+def test_the_gstin_state_is_kept_apart_from_the_vendors_address_state():
+    page = Page()
+    page.line("GSTIN: 36AABCU9603R1ZO", 0.1)
+    c = contract(page)
+    assert c["vendor_state"] is None
+    assert c["supplier_gst_state"]["value"] == "Telangana"
+
+
+def test_only_query_answers_propose_what_the_system_size_measures():
+    page = Page()
+    page.line("System capacity 3 kWp", 0.3)
+    c = contract(page)
+    assert facts(c, "stated_capacity") == [(None, "3 kWp")]
+    assert c["flags"]["model_proposed"]["capacity_basis"] is None

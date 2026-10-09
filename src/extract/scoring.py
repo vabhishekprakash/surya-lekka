@@ -32,7 +32,7 @@ from decimal import Decimal, InvalidOperation
 
 from checks.parse import parse_amount, parse_capacity
 
-from .wire_schema import SUBSIDY_KINDS
+from .wire_schema import SUBSIDY_KINDS, count_value
 
 STATUSES = ("correct", "wrong", "missing", "conflict_flagged", "falsely_populated", "abstained")
 ABSENT = {"", "null", "none", "-", "--", "n/a", "na", "nil", "not found", "not stated", "absent", "not given"}
@@ -248,7 +248,8 @@ def truth_key(kind, text, field=None):
         key = _measure_key(r["parsed"], r["unit"], kind) if r["parse_status"] == "ok" else None
         return key or ("text", norm_text(text))
     if kind == "count":
-        return ("count", int(text)) if text.strip().isdigit() else ("text", norm_text(text))
+        number = count_value(text)  # "6 Nos" is the count 6
+        return ("count", number) if isinstance(number, int) else ("text", norm_text(text))
     if kind == "bool":
         low = " ".join(text.strip().lower().split())
         if low in YES or (low.isdigit() and int(low) > 1):
@@ -256,7 +257,10 @@ def truth_key(kind, text, field=None):
         return ("bool", False) if low in NO else ("text", norm_text(text))
     if kind == "enum":
         low = re.sub(r"[\s-]+", "_", text.strip().lower())
-        return ("enum", ENUM_VALUES.get(field, {}).get(low, low))
+        values = ENUM_VALUES.get(field, {})
+        if low not in values and low.split("_")[0] in values:  # "DC panels (...)" -> "dc"
+            low = low.split("_")[0]
+        return ("enum", values.get(low, low))
     return ("text", norm_text(text))
 
 
@@ -319,6 +323,8 @@ def _compare(truth, fields, want, got_key, field=None):
         return _result("missing", conflict)
     got = sorted(map(repr, (got_key(f) for f in present)))
     status = "correct" if sorted(map(repr, want)) == got else "wrong"
+    if status == "wrong" and all(f["value"] in NOT_SAID.get(field, ()) for f in present):
+        return _result("missing", conflict)  # the reading said "not stated": a miss, not a wrong value
     page_ok = None
     if status == "correct" and truth["pages"]:
         page_ok = bool({f.get("page") for f in present} & set(truth["pages"]))

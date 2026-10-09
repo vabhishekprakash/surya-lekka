@@ -165,7 +165,7 @@ def line_candidates(text, evidence, occurrence, source):
             out.append(candidate(price_role, raw, evidence, occurrence, True, source))
     if _PANEL.search(text) and not _INVERTER.search(text):
         count = one_count(text)
-        if count:
+        if count and int(count) >= 2:  # one "module" is a set or a lot, not a panel count
             out.append(candidate("panel_count", count, evidence, occurrence, True, source))
         watts = one_measure(text, ("w", "wp"))
         if watts:
@@ -229,7 +229,7 @@ def bom_candidates(grid, header, confidence, threshold, table_no):
         if _PANEL.search(desc) and not _INVERTER.search(desc):
             qty = cells.get(cols["qty"][0], "")
             m = re.fullmatch(r"\s*(\d{1,3})\s*(?:nos?\.?|pcs\.?|numbers?)?\s*", qty, re.I)
-            if not m:
+            if not m or int(m.group(1)) < 2:  # one "module" is a set or a lot, not a panel count
                 continue
             watts = one_measure(rating, ("w", "wp")) or one_measure(desc, ("w", "wp"))
             groups.append({"count": m.group(1), "wattage": watts, "make_model": make, "evidence": row_text,

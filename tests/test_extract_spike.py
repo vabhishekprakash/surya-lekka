@@ -569,3 +569,21 @@ def test_replay_maps_saved_replies_again_without_aws(sample_dir, capsys, live_te
     again = json.loads((replayed / "S1" / "batch-1.json").read_text(encoding="utf-8"))
     assert again["response"] == first["response"]
     assert sum(e["kept"] for e in again["confidence"]) > sum(e["kept"] for e in first["confidence"])
+
+
+# --- label forms the hand-written keys use ------------------------------------------------------
+
+def test_a_count_written_with_a_unit_word_scores_like_the_number():
+    key = scoring.parse_answer_key("[S1]\npanel_count: 6 Nos\n")["docs"]["S1"]["panel_count"]
+    assert scoring.score_field(sample_quote(), "panel_count", key)["status"] == "correct"
+
+
+def test_an_enum_label_with_words_after_it_takes_its_first_word():
+    key = scoring.parse_answer_key('[S1]\ncapacity_basis: DC panels ("3.3 kWp array")\n')["docs"]["S1"]["capacity_basis"]
+    assert scoring.score_field(sample_quote(), "capacity_basis", key)["status"] == "correct"
+
+
+def test_a_reading_that_says_not_stated_is_a_miss_not_a_wrong_value():
+    quote = sample_quote(lambda d: d.update(capacity_basis={"value": "unspecified"}))
+    key = scoring.parse_answer_key("[S1]\ncapacity_basis: DC\n")["docs"]["S1"]["capacity_basis"]
+    assert scoring.score_field(quote, "capacity_basis", key)["status"] == "missing"
