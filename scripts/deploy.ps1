@@ -107,8 +107,31 @@ Invoke-Step "Upload the sample pages and saved readings" {
     aws s3 cp .build\samples "s3://$bucket/samples/" --recursive @aws
 }
 
-$siteArgs = @("--api", $apiUrl, "--region", $Region)
+function Save-OptOutPolicy {
+    # The account's effective AI services opt-out policy, saved for build_site.py. A denied
+    # or failed call writes to stderr and leaves the page saying AWS may keep the pages.
+    $ErrorActionPreference = "Continue"
+    $reply = aws organizations describe-effective-policy --policy-type AISERVICES_OPT_OUT_POLICY `
+        --target-id $ExpectedAccount @aws --output json 2>$null
+    if ($LASTEXITCODE -ne 0 -or -not $reply) { return $null }
+    New-Item -ItemType Directory -Force .build | Out-Null
+    $path = Join-Path ".build" "ai_opt_out_policy.json"
+    Set-Content -Path $path -Value ($reply -join "`n") -Encoding UTF8
+    return $path
+}
+
+$siteArgs = @("--api", $apiUrl, "--region", $Region, "--engine", $ReadingEngine)
 if ($access.CrossRegion) { $siteArgs += "--cross-region" }
+if ($ReadingEngine -eq "textract") {
+    Write-Host "== Check the AI services opt-out policy for Textract"
+    $policy = Save-OptOutPolicy
+    $optedOut = $false
+    if ($policy) {
+        $siteArgs += @("--opt-out-reply", $policy)
+        $optedOut = (& $python -c "import json,sys; sys.path.insert(0, 'src'); from api.site_config import textract_opted_out; print(textract_opted_out(json.load(open(sys.argv[1], encoding='utf-8-sig'))))" $policy) -eq "True"
+    }
+    Write-Host "Textract opt-out confirmed: $optedOut"
+}
 if ($HostingEnabled -eq "true") {
     $siteBucket = Get-Output "SiteBucketName"
     $distribution = Get-Output "DistributionId"
@@ -143,3 +166,6 @@ if ($HostingEnabled -eq "true") {
     Write-Host $local
     Write-Host "Then open $SiteOrigin/ (the API accepts requests from that origin only)."
 }
+
+# A denied opt-out lookup leaves a non-zero exit code behind; every real failure above throws.
+exit 0

@@ -46,6 +46,11 @@ function global:aws {
             return
         }
         "cloudformation" { return $env:FAKE_STACK }
+        "organizations" {
+            if ($env:FAKE_POLICY) { return $env:FAKE_POLICY }
+            $global:LASTEXITCODE = 254
+            return
+        }
         default { return "" }
     }
 }
@@ -164,7 +169,8 @@ def test_build_site_writes_the_config_for_one_deployment(tmp_path):
         if name != "config.js":
             assert (tmp_path / name).read_bytes() == (ROOT / "web" / name).read_bytes()
     config = (tmp_path / "config.js").read_text(encoding="utf-8")
-    assert 'window.SURYA_CONFIG = {"API_BASE": "' + api + '", "REGION": "ap-south-1", "CROSS_REGION": false};' in config
+    assert ('window.SURYA_CONFIG = {"API_BASE": "' + api + '", "REGION": "ap-south-1", "CROSS_REGION": false, '
+            '"ENGINE": "none", "AI_OPT_OUT": false};') in config
     from api.local_server import config_js
 
     assert config == config_js(api, "ap-south-1", False)  # the local --api mode serves the same file
@@ -194,3 +200,40 @@ def test_deploy_with_textract_needs_no_model_lookup():
     assert not any(c.startswith("aws bedrock") for c in calls)
     (deploy,) = [c for c in calls if c.startswith("sam deploy")]
     assert "ReadingEngine=textract" in deploy and "ProfileModelArns=none" in deploy and "GlobalModelArns=none" in deploy
+
+
+def opt_out_policy(services):
+    return json.dumps({"EffectivePolicy": {"PolicyType": "AISERVICES_OPT_OUT_POLICY",
+                                           "PolicyContent": json.dumps({"services": services})}})
+
+
+@windows_powershell
+@pytest.mark.parametrize("policy,opted_out", [
+    (opt_out_policy({"default": {"opt_out_policy": "optOut"}}), True),
+    (opt_out_policy({"default": {"opt_out_policy": "optIn"}}), False),
+    (None, False),  # the call is denied or fails
+])
+def test_deploy_with_textract_checks_the_ai_opt_out_policy(policy, opted_out):
+    api = "https://abc123.execute-api.ap-south-1.amazonaws.com"
+    env = {"FAKE_STACK": outputs(("ApiUrl", api), ("BucketName", "uploads-bucket"), ("SiteBucketName", "site-bucket"),
+                                 ("DistributionId", "E123"), ("SiteUrl", "https://d111.cloudfront.net/"))}
+    if policy:
+        env["FAKE_POLICY"] = policy
+    run, calls = run_ps("deploy.ps1", f"-Profile default -Region ap-south-1 -ExpectedAccount {ACCOUNT} "
+                        "-ReadingEngine textract", env)
+    assert run.returncode == 0, run.stdout + run.stderr
+    (check,) = [c for c in calls if c.startswith("aws organizations")]
+    assert check.startswith(f"aws organizations describe-effective-policy --policy-type AISERVICES_OPT_OUT_POLICY "
+                            f"--target-id {ACCOUNT}")
+    config = (ROOT / ".build" / "web" / "config.js").read_text(encoding="utf-8")
+    assert f'"ENGINE": "textract", "AI_OPT_OUT": {str(opted_out).lower()}' in config
+    assert f"Textract opt-out confirmed: {opted_out}" in run.stdout
+
+
+@windows_powershell
+def test_deploy_without_textract_does_not_ask_for_the_policy():
+    api = "https://abc123.execute-api.ap-south-1.amazonaws.com"
+    run, calls = run_ps("deploy.ps1", f"-Profile default -Region ap-south-1 -ExpectedAccount {ACCOUNT} "
+                        "-HostingEnabled false", {"FAKE_STACK": outputs(("ApiUrl", api), ("BucketName", "b"))})
+    assert run.returncode == 0 and not any(c.startswith("aws organizations") for c in calls)
+    assert "--engine none" in run.stdout

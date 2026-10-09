@@ -49,8 +49,22 @@ def test_privacy_line_names_the_deploy_region():
         "they're removed automatically, usually within two days.")
     # With an inference profile pages may be read elsewhere, so the notice must not claim one Region.
     assert "may be read in other AWS regions" in privacy_line("crossRegion", "ap-south-1")
-    assert 'privacyLine(String(CONFIG.REGION || ""), CONFIG.CROSS_REGION === true)' in APP
     assert js_string("local") == "This copy runs on your own computer, so your pages stay on it."
+
+
+def test_textract_privacy_lines_depend_on_the_confirmed_opt_out():
+    assert privacy_line("textractOptedOut", "ap-south-1") == (
+        "Your pages are read by Amazon Textract in AWS's Mumbai region (India) and deleted from our storage after "
+        "reading. This AWS account has opted out of AWS using them to improve its services. If reading fails, "
+        "they're removed automatically, usually within two days.")
+    assert privacy_line("textract", "ap-south-1") == (
+        "Your pages are read by Amazon Textract in AWS's Mumbai region (India) and deleted from our storage after "
+        "reading. AWS may keep and use them to improve its AI services and may store some of that content in "
+        "another AWS region. If reading fails, they're removed automatically, usually within two days.")
+    assert ('privacyLine(String(CONFIG.REGION || ""), CONFIG.CROSS_REGION === true, String(CONFIG.ENGINE || ""), '
+            'CONFIG.AI_OPT_OUT === true)') in APP
+    body = APP[APP.index("function privacyLine("):APP.index("function init()")]
+    assert 'engine === "textract"' in body and "optOut ? PRIVACY.textractOptedOut : PRIVACY.textract" in body
 
 
 def test_reading_off_message_matches_the_api_and_leads_to_manual_entry():
@@ -75,7 +89,7 @@ def test_every_result_has_a_mode_label():
 
 
 def test_api_base_comes_from_the_config_file():
-    assert re.search(r'API_BASE:\s*"", REGION: "", CROSS_REGION: false', CONFIG)
+    assert re.search(r'API_BASE:\s*"", REGION: "", CROSS_REGION: false, ENGINE: "", AI_OPT_OUT: false', CONFIG)
     assert INDEX.index('src="config.js"') < INDEX.index('src="app.js"')
     assert "window.SURYA_CONFIG" in APP
 
@@ -114,7 +128,8 @@ def test_page_limits_match_the_api():
 def test_copy_has_no_dashes_or_model_hype():
     from api.common import READING_UNAVAILABLE
 
-    text = (INDEX + APP + CONFIG).replace(READING_UNAVAILABLE, "")  # the one sentence the product owner chose
+    text = (INDEX + APP + CONFIG).replace(READING_UNAVAILABLE, "")  # sentences the product owner chose
+    text = text.replace(privacy_line("textract", "ap-south-1").replace("AWS's Mumbai region (India)", "{where}"), "")
     assert "—" not in text and "–" not in text
     assert not re.search(r"\bAI\b|artificial intelligence|LLM|GPT", text)
 

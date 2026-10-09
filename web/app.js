@@ -34,6 +34,8 @@ const PRIVACY = {
   local: "This copy runs on your own computer, so your pages stay on it.",
   inRegion: "Your pages are processed in {where} and deleted after reading. If reading fails, they're removed automatically, usually within two days.",
   crossRegion: "Your pages are stored in {where} and may be read in other AWS regions through cross-Region inference. They're deleted after reading. If reading fails, they're removed automatically, usually within two days.",
+  textractOptedOut: "Your pages are read by Amazon Textract in {where} and deleted from our storage after reading. This AWS account has opted out of AWS using them to improve its services. If reading fails, they're removed automatically, usually within two days.",
+  textract: "Your pages are read by Amazon Textract in {where} and deleted from our storage after reading. AWS may keep and use them to improve its AI services and may store some of that content in another AWS region. If reading fails, they're removed automatically, usually within two days.",
 };
 const READING_UNAVAILABLE = "AI reading isn't available yet. Please type the numbers instead.";
 
@@ -1103,14 +1105,17 @@ function openResults(result) {
 
 // ---------------------------------------------------------------- start
 
-function privacyLine(region, crossRegion) {
+// With Textract, the opt-out sentence shows only when deploy.ps1 confirmed the
+// account's opt-out policy covers Textract.
+function privacyLine(region, crossRegion, engine, optOut) {
   if (!region) return PRIVACY.local;
   const where = REGION_NAMES[region] || `AWS's ${region} region`;
+  if (engine === "textract") return (optOut ? PRIVACY.textractOptedOut : PRIVACY.textract).replace("{where}", where);
   return (crossRegion ? PRIVACY.crossRegion : PRIVACY.inRegion).replace("{where}", where);
 }
 
 function init() {
-  $("#privacy-line").textContent = privacyLine(String(CONFIG.REGION || ""), CONFIG.CROSS_REGION === true);
+  $("#privacy-line").textContent = privacyLine(String(CONFIG.REGION || ""), CONFIG.CROSS_REGION === true, String(CONFIG.ENGINE || ""), CONFIG.AI_OPT_OUT === true);
   document.addEventListener("click", (event) => {
     const target = event.target.closest("[data-go]");
     if (!target) return;

@@ -39,6 +39,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer  # noqa: E40
 from urllib.parse import parse_qsl, urlsplit  # noqa: E402
 
 from api import common, jobs, manual, worker  # noqa: E402
+from api.site_config import config_js, textract_opted_out  # noqa: E402,F401
 
 WEB = ROOT / "web"
 SAVED_READINGS = ROOT / "samples" / "cached"
@@ -193,10 +194,14 @@ def parse_form(content_type, body):
     return fields, data
 
 
-def config_js(api_base, region, cross_region):
-    """config.js for a deployed API, as scripts/build_site.py writes it."""
-    settings = {"API_BASE": api_base, "REGION": region, "CROSS_REGION": cross_region}
-    return f"// Written by scripts/build_site.py for one deployment.\nwindow.SURYA_CONFIG = {json.dumps(settings)};\n"
+def opt_out_from_file(path):
+    """The Textract opt-out from a saved describe-effective-policy reply; False without one."""
+    if not path:
+        return False
+    try:
+        return textract_opted_out(json.loads(Path(path).read_text(encoding="utf-8-sig")))
+    except (OSError, ValueError):
+        return False
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -299,17 +304,18 @@ def make_server(port=8000, stub="ok", env=None):
     return ThreadingHTTPServer(("127.0.0.1", port), handler), backend
 
 
-def make_site_server(port, api_base, region, cross_region=False):
+def make_site_server(port, api_base, region, cross_region=False, engine="none", ai_opt_out=False):
     """Serves web/ only, with config.js pointing at a deployed API. No local backend."""
     if not re.fullmatch(r"https://[a-z0-9.-]+(/[A-Za-z0-9._-]+)*", api_base.rstrip("/")):
         raise ValueError("--api must be the stack's https ApiUrl")
-    config = config_js(api_base.rstrip("/"), region, cross_region).encode("utf-8")
+    config = config_js(api_base.rstrip("/"), region, cross_region, engine, ai_opt_out).encode("utf-8")
     handler = type("SiteHandler", (Handler,), {"backend": None, "config": config})
     return ThreadingHTTPServer(("127.0.0.1", port), handler)
 
 
 def serve_site(args):
-    server = make_site_server(args.port, args.api, args.region, args.cross_region)
+    server = make_site_server(args.port, args.api, args.region, args.cross_region, args.engine,
+                              opt_out_from_file(args.opt_out_reply))
     print(f"Surya Lekka web app on http://127.0.0.1:{server.server_address[1]}/ using {args.api.rstrip('/')}")
     print("Pages you upload go to that deployed stack. Ctrl+C stops this server.")
     try:
@@ -334,6 +340,9 @@ def main(argv=None):
     ap.add_argument("--region", default="ap-south-1", help="with --api: the stack's Region")
     ap.add_argument("--cross-region", action="store_true",
                     help="with --api: the stack reads with a cross-Region inference profile")
+    ap.add_argument("--engine", choices=("none", "nova", "textract"), default="none",
+                    help="with --api: the stack's ReadingEngine")
+    ap.add_argument("--opt-out-reply", help="with --api and textract: the saved AI services opt-out policy reply")
     args = ap.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     logging.getLogger("botocore").setLevel(logging.WARNING)
