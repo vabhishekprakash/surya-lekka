@@ -1,0 +1,133 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 720" width="1200" height="720" font-family="Arial, Helvetica, sans-serif">
+  <title>Surya Lekka architecture on AWS</title>
+  <desc>A household's browser loads the website from CloudFront and S3, renders quote pages with pdf.js, uploads page images directly to a private S3 bucket and talks to an HTTP API on API Gateway. Lambda functions create jobs, return results, run the deterministic checks and handle manual entry and samples. An S3 event triggers the Worker Lambda, which asks Amazon Bedrock (Nova) to read the pages and stores results in DynamoDB. Failed jobs go to SQS. Everything logs to CloudWatch without document text, and the stack is deployed with AWS SAM.</desc>
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M1 1 L9 5 L1 9" fill="none" stroke="#444" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+    </marker>
+    <style>
+      .t { font-size: 14px; font-weight: 700; fill: #1d2733; }
+      .s { font-size: 12px; fill: #46505c; }
+      .lbl { font-size: 11px; fill: #46505c; }
+      .ln { fill: none; stroke: #444; stroke-width: 1.4; }
+      .dash { fill: none; stroke: #8a93a0; stroke-width: 1.2; stroke-dasharray: 5 4; }
+    </style>
+  </defs>
+
+  <rect x="0" y="0" width="1200" height="720" fill="#ffffff"/>
+  <text x="30" y="38" font-size="20" font-weight="700" fill="#1d2733">Surya Lekka: architecture on AWS (ap-south-1)</text>
+  <text x="30" y="60" class="s">The model only reads the quote. Every finding comes from plain, tested Python checks and a dated rules file.</text>
+
+  <!-- SAM boundary -->
+  <rect x="235" y="85" width="950" height="530" rx="16" fill="none" stroke="#8a93a0" stroke-width="1.2" stroke-dasharray="7 5"/>
+  <text x="520" y="104" class="lbl">Deployed with AWS SAM (CloudFormation) · IAM least-privilege roles</text>
+
+  <!-- Browser -->
+  <rect x="30" y="285" width="175" height="150" rx="10" fill="#f4f6f8" stroke="#6b7684" stroke-width="1.2"/>
+  <text x="117" y="315" text-anchor="middle" class="t">Household's browser</text>
+  <text x="117" y="340" text-anchor="middle" class="s">pdf.js renders pages</text>
+  <text x="117" y="358" text-anchor="middle" class="s">review and correct fields</text>
+  <text x="117" y="376" text-anchor="middle" class="s">findings and vendor</text>
+  <text x="117" y="392" text-anchor="middle" class="s">questions (WhatsApp)</text>
+
+  <!-- CloudFront + S3 site -->
+  <rect x="255" y="125" width="190" height="70" rx="10" fill="#f3edff" stroke="#8c4fff" stroke-width="1.4"/>
+  <text x="350" y="153" text-anchor="middle" class="t">CloudFront + S3</text>
+  <text x="350" y="174" text-anchor="middle" class="s">static website (HTTPS)</text>
+
+  <!-- API Gateway -->
+  <rect x="255" y="325" width="190" height="70" rx="10" fill="#f3edff" stroke="#8c4fff" stroke-width="1.4"/>
+  <text x="350" y="353" text-anchor="middle" class="t">API Gateway</text>
+  <text x="350" y="374" text-anchor="middle" class="s">HTTP API, throttled</text>
+
+  <!-- Lambdas column -->
+  <rect x="500" y="140" width="215" height="60" rx="10" fill="#fff3e8" stroke="#f58536" stroke-width="1.4"/>
+  <text x="607" y="164" text-anchor="middle" class="t">Lambda: CreateJob</text>
+  <text x="607" y="184" text-anchor="middle" class="s">caps, presigned upload</text>
+
+  <rect x="500" y="220" width="215" height="60" rx="10" fill="#fff3e8" stroke="#f58536" stroke-width="1.4"/>
+  <text x="607" y="244" text-anchor="middle" class="t">Lambda: GetJob</text>
+  <text x="607" y="264" text-anchor="middle" class="s">status, findings (token)</text>
+
+  <rect x="500" y="300" width="215" height="60" rx="10" fill="#fff3e8" stroke="#f58536" stroke-width="1.4"/>
+  <text x="607" y="324" text-anchor="middle" class="t">Lambda: Recheck</text>
+  <text x="607" y="344" text-anchor="middle" class="s">checks C1 to C4 + rules</text>
+
+  <rect x="500" y="380" width="215" height="60" rx="10" fill="#fff3e8" stroke="#f58536" stroke-width="1.4"/>
+  <text x="607" y="404" text-anchor="middle" class="t">Lambda: Manual + Sample</text>
+  <text x="607" y="424" text-anchor="middle" class="s">typed numbers, saved readings</text>
+
+  <!-- S3 uploads -->
+  <rect x="780" y="125" width="200" height="70" rx="10" fill="#eef6ea" stroke="#3f8624" stroke-width="1.4"/>
+  <text x="880" y="153" text-anchor="middle" class="t">S3: uploads</text>
+  <text x="880" y="174" text-anchor="middle" class="s">private, deleted after reading</text>
+
+  <!-- Worker -->
+  <rect x="780" y="255" width="200" height="70" rx="10" fill="#fff3e8" stroke="#f58536" stroke-width="1.4"/>
+  <text x="880" y="283" text-anchor="middle" class="t">Lambda: Worker</text>
+  <text x="880" y="304" text-anchor="middle" class="s">5 pages per call, merge</text>
+
+  <!-- Bedrock -->
+  <rect x="1010" y="245" width="160" height="90" rx="10" fill="#e6f6f3" stroke="#01a88d" stroke-width="1.6"/>
+  <text x="1090" y="273" text-anchor="middle" class="t">Amazon Bedrock</text>
+  <text x="1090" y="294" text-anchor="middle" class="s">Nova 2 Lite / Nova Pro</text>
+  <text x="1090" y="312" text-anchor="middle" class="s">reads the quote</text>
+
+  <!-- DynamoDB -->
+  <rect x="780" y="390" width="200" height="70" rx="10" fill="#eef6ea" stroke="#3f8624" stroke-width="1.4"/>
+  <text x="880" y="418" text-anchor="middle" class="t">DynamoDB</text>
+  <text x="880" y="439" text-anchor="middle" class="s">jobs, results, caps (TTL)</text>
+
+  <!-- SQS -->
+  <rect x="1010" y="390" width="160" height="70" rx="10" fill="#fdeaf3" stroke="#e7157b" stroke-width="1.4"/>
+  <text x="1090" y="418" text-anchor="middle" class="t">Amazon SQS</text>
+  <text x="1090" y="439" text-anchor="middle" class="s">failed jobs</text>
+
+  <!-- CloudWatch -->
+  <rect x="500" y="525" width="215" height="60" rx="10" fill="#fdeaf3" stroke="#e7157b" stroke-width="1.4"/>
+  <text x="607" y="549" text-anchor="middle" class="t">CloudWatch</text>
+  <text x="607" y="569" text-anchor="middle" class="s">logs, no document text</text>
+
+  <!-- Safety -->
+  <rect x="780" y="525" width="390" height="60" rx="10" fill="#fdeef0" stroke="#dd344c" stroke-width="1.4"/>
+  <text x="975" y="549" text-anchor="middle" class="t">Account safety</text>
+  <text x="975" y="569" text-anchor="middle" class="s">Budgets and anomaly alerts, kill switch, daily caps</text>
+
+  <!-- Arrows -->
+  <path class="ln" d="M205 310 L255 175" marker-end="url(#a)"/>
+  <text x="212" y="235" class="lbl">loads site</text>
+
+  <path class="ln" d="M205 360 L255 360" marker-end="url(#a)"/>
+
+  <path class="ln" d="M445 350 L500 175" marker-end="url(#a)"/>
+  <path class="ln" d="M445 355 L500 252" marker-end="url(#a)"/>
+  <path class="ln" d="M445 360 L500 330" marker-end="url(#a)"/>
+  <path class="ln" d="M445 368 L500 408" marker-end="url(#a)"/>
+
+  <path class="ln" d="M117 285 L117 118 Q117 112 123 112 L470 112 Q478 112 478 118 L478 125 Q478 130 486 130 L770 130" marker-end="url(#a)"/>
+  <text x="125" y="104" class="lbl">page images (presigned POST)</text>
+
+  <path class="ln" d="M715 165 L780 160" marker-end="url(#a)"/>
+
+  <path class="ln" d="M880 195 L880 255" marker-end="url(#a)"/>
+  <text x="888" y="230" class="lbl">manifest event</text>
+
+  <path class="ln" d="M980 290 L1010 290" marker-end="url(#a)"/>
+
+  <path class="ln" d="M880 325 L880 390" marker-end="url(#a)"/>
+  <text x="888" y="362" class="lbl">results</text>
+
+  <path class="ln" d="M980 312 L1040 390" marker-end="url(#a)"/>
+
+  <path class="ln" d="M715 252 L780 412" marker-end="url(#a)"/>
+  <path class="ln" d="M715 330 L780 420" marker-end="url(#a)"/>
+  <path class="ln" d="M715 410 L780 428" marker-end="url(#a)"/>
+
+  <path class="dash" d="M607 440 L607 525" marker-end="url(#a)"/>
+  <path class="dash" d="M800 325 L715 545" marker-end="url(#a)"/>
+
+  <!-- Footer notes -->
+  <text x="30" y="650" class="s">Mode labels on every result: "Read by Amazon Nova", "Entered by you", "Sample (saved reading)".</text>
+  <text x="30" y="672" class="s">If Bedrock is unavailable, the manual-entry path still runs on Lambda; the AI reading is labelled as unavailable.</text>
+  <text x="30" y="694" class="s">Documents may be processed outside India through AWS cross-Region inference.</text>
+</svg>
