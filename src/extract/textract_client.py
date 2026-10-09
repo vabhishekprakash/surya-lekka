@@ -7,8 +7,8 @@ Mapping rules:
 - raw is the query answer as Textract read it; evidence_text is the full text
   of every LINE the answer's box overlaps on that page; page is the original
   page number. Nothing that isn't on the page is added.
-- An answer below the confidence threshold, or one that doesn't parse as its
-  field's type, is dropped (not found).
+- An answer below the confidence threshold, one that doesn't parse as its
+  field's type, or one on no LINE of the page, is dropped (not found).
 - Every surviving answer is kept, page by page. A value is never chosen
   across pages: different values reach merge_batches as a conflict for the
   user to resolve.
@@ -53,8 +53,8 @@ GSTIN = re.compile(r"\d{2}[A-Z]{5}\d{4}[A-Z][A-Z0-9]Z[A-Z0-9]")
 CENTRAL = re.compile(r"\bmnre\b|pm[\s-]*surya[\s-]*ghar|\bcentral\b|\bcfa\b", re.I)
 STATE = re.compile(r"\bstate\b|\btgredco\b|\bnredcap\b", re.I)
 GST_INCLUDED = re.compile(r"\b(?:inclusive\s+of|including|incl\.?)\s+(?:all\s+)?(?:taxes\s+and\s+)?gst\b", re.I)
-GST_EXCLUDED = re.compile(r"\b(?:plus|excluding|exclusive\s+of|excl\.?)\s+gst\b|\+\s*gst\b|\bgst\s+(?:extra|additional)\b"
-                          r"|\bextra\s+gst\b", re.I)
+GST_EXCLUDED = re.compile(r"\b(?:plus|excluding|exclusive\s+of|excl\.?)\s+gst\b|\+\s*gst\b|\bextra\s+gst\b"
+                          r"|\bgst\b[^\n]{0,25}?\b(?:extra|additional)\b", re.I)
 GIVE_IT_UP = re.compile(r"\bgive\s+it\s+up\b", re.I)
 NON_DCR = re.compile(r"\bnon[\s-]*(?:dcr|domestic)\b", re.I)
 DCR = re.compile(r"\bdcr\b|\bdomestic\s+content\b", re.I)
@@ -122,14 +122,15 @@ class _Page:
 
     def evidence(self, answer):
         """The full text of every LINE the answer's box overlaps, top to bottom. Without
-        a box, the lines that contain the answer's text."""
+        a box, the lines that contain the answer's text. None when no line qualifies:
+        the answer is then not on the page."""
         box = _box(answer)
         if box:
             found = [_tidy(l["Text"]) for l in self.lines if _box(l) and _overlaps(box, _box(l))]
         else:
             wanted = _tidy(answer.get("Text", "")).casefold()
             found = [_tidy(l["Text"]) for l in self.lines if wanted and wanted in _tidy(l["Text"]).casefold()]
-        return "\n".join(found) or _tidy(answer.get("Text", ""))
+        return "\n".join(found) or None
 
     def answers(self):
         """(alias, answer block) for every answer, in reply order."""
@@ -273,8 +274,11 @@ def map_page(reply, page_number, threshold=CONFIDENCE_THRESHOLD):
         if not _parses(kind, raw):
             entry["why"] = "unparsed"
             continue
-        entry["kept"] = True
         evidence = page.evidence(answer)
+        if evidence is None:
+            entry["why"] = "not_on_page"
+            continue
+        entry["kept"] = True
         index = seen[alias] = seen.get(alias, -1) + 1  # the nth answer to this query on the page
         target, key = TARGETS[alias]
         if target == "capacities":

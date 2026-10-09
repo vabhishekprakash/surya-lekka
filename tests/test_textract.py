@@ -1,4 +1,6 @@
+import json
 import re
+from pathlib import Path
 
 import pytest
 
@@ -81,6 +83,17 @@ def test_answer_without_a_box_uses_the_lines_that_contain_it():
     page.line("Quotation date: 12/09/2026", 0.1)
     page.answer("QUOTE_DATE", "12/09/2026")
     assert contract(page)["quote_date"]["evidence_text"] == "Quotation date: 12/09/2026"
+
+
+def test_an_answer_found_on_no_line_of_the_page_is_dropped():
+    page = Page()
+    page.line("Price breakup", 0.1)
+    page.answer("DCR_STATUS", "non-dcr", top=0.8)  # its box overlaps no line
+    page.answer("VENDOR_NAME", "Example Solar")  # no box, and no line contains it
+    wire, report = tc.map_page(page.reply(), 2)
+    assert "dcr_declaration" not in wire and "vendor_name" not in wire
+    assert [(r["alias"], r["kept"], r["why"]) for r in report] == [("DCR_STATUS", False, "not_on_page"),
+                                                                   ("VENDOR_NAME", False, "not_on_page")]
 
 
 @pytest.mark.parametrize("alias,text", [
@@ -198,7 +211,8 @@ def test_capacity_basis_only_from_positive_evidence(line, text, basis):
 @pytest.mark.parametrize("lines,treatment", [
     (["Price inclusive of GST"], "included"), (["Total including GST Rs 2,00,000"], "included"),
     (["Rs 1,90,000 plus GST"], "excluded"), (["GST extra as applicable"], "excluded"),
-    (["Price excluding GST"], "excluded"), (["Price inclusive of GST", "Installation plus GST"], "unclear"),
+    (["Price excluding GST"], "excluded"), (["GST @ 18% (extra) Rs 27,000"], "excluded"),
+    (["GST @ 8.9% extra"], "excluded"), (["Price inclusive of GST", "Installation plus GST"], "unclear"),
     (["Price Rs 1,90,000"], None),
 ])
 def test_gst_treatment_from_wording_on_the_page(lines, treatment):
@@ -374,3 +388,41 @@ def test_page_over_the_textract_size_limit_is_not_sent():
 def test_cost_estimate():
     assert tc.estimated_cost(7) == pytest.approx(0.14)
     assert tc.PRICE_PER_PAGE_USD == pytest.approx(0.020)
+
+
+# --- live replies for the synthetic samples (Textract run once on S1, S2 and S3) -----------
+
+FIXTURES = Path(__file__).parent / "fixtures" / "textract"
+
+
+def sample(sid, n):
+    return json.loads((FIXTURES / f"{sid}-page-{n}.json").read_text(encoding="utf-8"))
+
+
+def all_fields(c):
+    yield from (f["field"] for f in c["facts"])
+    for name in ("vendor_name", "quote_date", "vendor_registration", "dcr_declaration", "vendor_gstin"):
+        if c.get(name):
+            yield c[name]
+    for item in c["module_groups"] + c["inverters"]:
+        yield from (v for k, v in item.items() if isinstance(v, dict) and "evidence_text" in v)
+    yield from (f for f in c["flags"]["model_proposed"].values() if f)
+
+
+@pytest.mark.parametrize("sid", ["S1", "S2", "S3"])
+@pytest.mark.parametrize("n", [1, 2])
+def test_sample_replies_map_only_to_text_on_their_own_page(sid, n):
+    reply = sample(sid, n)
+    lines = {" ".join(b["Text"].split()) for b in reply["Blocks"] if b["BlockType"] == "LINE"}
+    c = tc.to_contract(tc.map_page(reply, n + 10)[0], n)
+    fields = list(all_fields(c))
+    for f in fields:
+        assert f["page"] == n + 10 and f["batch"] == n
+        assert all(line in lines for line in f["evidence_text"].split("\n"))
+
+
+def test_sample_reports_carry_no_answer_text():
+    for sid in ("S1", "S2", "S3"):
+        for n in (1, 2):
+            for entry in tc.map_page(sample(sid, n), n)[1]:
+                assert set(entry) == {"alias", "confidence", "kept", "why"}
