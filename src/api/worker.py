@@ -2,9 +2,10 @@
 
 It claims the job with conditional updates (awaiting_upload -> uploaded ->
 processing), so a duplicate or racing S3 event finds nothing to do. It then
-extracts the pages with Nova in batches, saving each batch's reading on the
-job as soon as it arrives, merges them, runs the initial checks, saves the
-extraction and findings, and deletes the uploaded objects.
+reads the pages in batches with the reading engine (Amazon Nova), saving each
+batch's reading on the job as soon as it arrives, merges them, runs the
+initial checks, saves the extraction and findings, and deletes the uploaded
+objects.
 
 A model call starts only when there is time left for it to time out and for
 the job to be saved; otherwise the job stops as failed with reason timed_out.
@@ -39,6 +40,7 @@ from .common import (
     manifest_key,
     now,
     page_key,
+    reading_engine,
     s3,
     table,
     transition,
@@ -82,13 +84,39 @@ class WorkerError(Exception):
 
 
 def model_id():
-    return os.environ.get("MODEL_ID", DEFAULT_MODEL)
+    return os.environ.get("MODEL_ID") or DEFAULT_MODEL
 
 
 @lru_cache(maxsize=None)
 def bedrock_client():
     region = os.environ.get("BEDROCK_REGION") or os.environ.get("AWS_REGION")
     return make_client(region, retries=0, read_timeout=READ_TIMEOUT_SECONDS)
+
+
+class NovaReader:
+    """Amazon Nova through the Bedrock Converse API. MODEL_ID is an inference
+    profile ID or a model ID in the stack's own Region."""
+
+    def __init__(self, model):
+        self.model, self.client = model, bedrock_client()
+
+    def request_size(self, batch):
+        return request_size(build_request(self.model, batch))
+
+    def read(self, batch, number):
+        return extract_batch(self.client, self.model, batch, number)
+
+
+# Readers by READING_ENGINE name (common.READING_ENGINES). A new engine needs a
+# reader here, its permissions in template.yaml and a mode label in web/app.js.
+READERS = {"nova": NovaReader}
+
+
+def reader():
+    engine = READERS.get(reading_engine())
+    if engine is None:  # reading was switched off after the pages were uploaded
+        raise JobFailed("reading_unavailable")
+    return engine(model_id())
 
 
 def handler(event, context):
@@ -206,12 +234,9 @@ def _save_batch(job_id, record):
 
 
 def _extract(job_id, pages, saved, context):
-    model, client = model_id(), bedrock_client()
-
-    def size_of(batch):
-        return request_size(build_request(model, batch))
-
-    batches, rejected = plan_batches(pages, size_of)
+    engine = reader()
+    model = engine.model
+    batches, rejected = plan_batches(pages, engine.request_size)
     records, failures, resumed = [], [], 0
     for n, batch in enumerate(batches, 1):
         numbers = [p.page for p in batch]
@@ -225,7 +250,7 @@ def _extract(job_id, pages, saved, context):
             log("out_of_time", job_id=job_id, batches=n)
             raise OutOfTime()
         try:
-            result = extract_batch(client, model, batch, n)
+            result = engine.read(batch, n)
         except ExtractionFailure as f:
             if f.stops_run:
                 raise JobFailed(REASONS.get(f.code, "model_unavailable")) from None

@@ -36,6 +36,11 @@ STALE_SECONDS = 900
 RETRYABLE_REASONS = {"timed_out", "model_busy", "model_unavailable", "storage_error", "internal_error",
                      "extraction_failed"}
 MAX_RETRIES = 2
+# Engines the worker can read quotes with (READING_ENGINE). Any other value,
+# "none" included, switches reading off: uploads and live samples are refused,
+# while saved sample readings and typed-in numbers keep working.
+READING_ENGINES = ("nova",)
+READING_UNAVAILABLE = "AI reading isn't available yet. Please type the numbers instead."
 
 
 def log(event, **fields):
@@ -57,6 +62,11 @@ def bucket_name():
 
 def uploads_enabled():
     return os.environ.get("UPLOADS_ENABLED", "true").strip().lower() == "true"
+
+
+def reading_engine():
+    name = os.environ.get("READING_ENGINE", "none").strip()
+    return name if name in READING_ENGINES else "none"
 
 
 def _cap(name, default):
@@ -200,6 +210,11 @@ def check_kill_switch():
         raise ApiError(503, "uploads_disabled", "New checks are switched off for now. Please try again later.")
 
 
+def check_reading_available():
+    if reading_engine() == "none":
+        raise ApiError(503, "reading_unavailable", READING_UNAVAILABLE)
+
+
 def source_ip(event):
     return ((event.get("requestContext") or {}).get("http") or {}).get("sourceIp") or "unknown"
 
@@ -248,7 +263,7 @@ def _take_slot(key, cap):
 
 def new_job(page_count, source, mode="nova", status="awaiting_upload", **fields):
     """Create a job, awaiting upload unless told otherwise. Returns (job_id, token).
-    mode says who read the quote: "nova", or "saved" for a sample's saved reading."""
+    mode says who read the quote: a reading engine, or "saved" for a sample's saved reading."""
     job_id = str(uuid.uuid4())
     token, digest = new_token()
     created = now()

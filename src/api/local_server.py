@@ -3,7 +3,7 @@ in-memory S3 and DynamoDB (moto) and the stub extractor, so the whole journey
 works offline. Uploaded pages stay in memory on this machine and nothing is
 sent to AWS.
 
-    python -m src.api.local_server [--port 8000] [--stub ok|slow|fail-once]
+    python -m src.api.local_server [--port 8000] [--stub ok|slow|fail-once] [--reading-off]
 
 The browser's presigned POSTs are pointed at this server, which checks the
 upload policy, stores the object and starts the worker when the manifest
@@ -48,6 +48,7 @@ ENV = {
     "AWS_ACCESS_KEY_ID": "local", "AWS_SECRET_ACCESS_KEY": "local", "AWS_SESSION_TOKEN": "local",
     "AWS_DEFAULT_REGION": REGION, "AWS_REGION": REGION, "TABLE_NAME": TABLE, "BUCKET_NAME": BUCKET,
     "UPLOADS_ENABLED": "true", "DAILY_JOB_CAP": "200", "IP_DAILY_JOB_CAP": "50", "IP_HASH_KEY": "local",
+    "READING_ENGINE": "nova",  # the stub stands in for the model
 }
 ROUTES = [
     ("POST", re.compile(r"/jobs"), jobs.create_job),
@@ -290,10 +291,14 @@ def main(argv=None):
                     help="ok: read every quote as the dry-run sample; slow: wait 75 s per call; "
                          "fail-once: fail each job's first reading so retry can be tried")
     ap.add_argument("--daily-cap", type=int, help="DAILY_JOB_CAP for this run (0 shows the limit message)")
+    ap.add_argument("--reading-off", action="store_true",
+                    help="run as a stack deployed with ReadingEngine=none: uploads are refused")
     args = ap.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     logging.getLogger("botocore").setLevel(logging.WARNING)
     env = {} if args.daily_cap is None else {"DAILY_JOB_CAP": str(args.daily_cap)}
+    if args.reading_off:
+        env["READING_ENGINE"] = "none"
     server, backend = make_server(args.port, args.stub, env)
     print(f"Surya Lekka local server on http://127.0.0.1:{server.server_address[1]}/")
     print("In-memory storage and the stub extractor: uploaded pages stay in this process. Ctrl+C stops it.")

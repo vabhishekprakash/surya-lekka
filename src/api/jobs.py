@@ -23,6 +23,7 @@ from .common import (
     body_json,
     bucket_name,
     check_kill_switch,
+    check_reading_available,
     conditional_update,
     error_response,
     guarded,
@@ -33,6 +34,7 @@ from .common import (
     page_key,
     path_param,
     query_param,
+    reading_engine,
     response,
     s3,
     table,
@@ -56,12 +58,13 @@ def _presigned_post(key, content_type, max_bytes):
 def create_job(event, context):
     """POST /jobs {"page_count": n}"""
     try:
+        check_reading_available()
         check_kill_switch()
         pages = body_json(event).get("page_count")
         if isinstance(pages, bool) or not isinstance(pages, int) or not 1 <= pages <= MAX_PAGES:
             raise ApiError(400, "bad_page_count", f"page_count must be a whole number from 1 to {MAX_PAGES}.")
         take_slots(event)
-        job_id, token = new_job(pages, "upload")
+        job_id, token = new_job(pages, "upload", mode=reading_engine())
         body = {
             "job_id": job_id,
             "token": token,
@@ -169,6 +172,7 @@ def retry_job(event, context):
     reused, so only the rest are sent to the model."""
     try:
         item = authorised_job(event)
+        check_reading_available()
         check_kill_switch()
         view = _view(item)
         if view["status"] != "failed" or not view.get("retryable"):
@@ -207,8 +211,9 @@ def create_sample_job(event, context):
     (samples/<id>/reading.json in the bucket). No model call, so no cap applies.
 
     POST /samples/{sample_id}?live=1 copies the synthetic sample pages under
-    samples/ in the bucket into a new upload, which runs the same worker and Nova
-    call as an upload and counts against the caps."""
+    samples/ in the bucket into a new upload, which runs the same worker and
+    model call as an upload and counts against the caps. It is refused while
+    reading is switched off."""
     sample_id = path_param(event, "sample_id")
     live = query_param(event, "live") == "1"
     try:
@@ -219,7 +224,7 @@ def create_sample_job(event, context):
         log("sample_refused", reason=e.code, http_status=e.status)
         return error_response(e)
     log("sample_job_created", job_id=job_id, sample_id=sample_id, pages=pages, http_status=201)
-    return response(201, {"job_id": job_id, "token": token, "mode": "nova" if live else "saved"})
+    return response(201, {"job_id": job_id, "token": token, "mode": reading_engine() if live else "saved"})
 
 
 SAMPLE_MISSING = ("sample_missing", "The sample is not available.")
@@ -255,12 +260,13 @@ def _saved_sample(event, sample_id):
 
 
 def _live_sample(event, sample_id):
+    check_reading_available()
     check_kill_switch()
     pages = _sample_object(sample_id, "manifest.json", MANIFEST_MAX_BYTES).get("pages")
     if isinstance(pages, bool) or not isinstance(pages, int) or not 1 <= pages <= MAX_PAGES:
         raise ApiError(404, *SAMPLE_MISSING)
     take_slots(event)
-    job_id, token = new_job(pages, f"sample:{sample_id}")
+    job_id, token = new_job(pages, f"sample:{sample_id}", mode=reading_engine())
     bucket = bucket_name()
     for n in range(1, pages + 1):
         s3().copy_object(Bucket=bucket, Key=page_key(job_id, n),

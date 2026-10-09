@@ -44,7 +44,7 @@ class CountingClient:
 def aws(monkeypatch):
     env = {"AWS_ACCESS_KEY_ID": "testing", "AWS_SECRET_ACCESS_KEY": "testing", "AWS_SESSION_TOKEN": "testing",
            "AWS_DEFAULT_REGION": REGION, "AWS_REGION": REGION, "TABLE_NAME": TABLE, "BUCKET_NAME": BUCKET,
-           "UPLOADS_ENABLED": "true", "DAILY_JOB_CAP": "200"}
+           "UPLOADS_ENABLED": "true", "DAILY_JOB_CAP": "200", "READING_ENGINE": "nova"}
     for k, v in env.items():
         monkeypatch.setenv(k, v)
     with mock_aws():
@@ -162,6 +162,46 @@ def test_kill_switch(aws, monkeypatch):
     assert call(jobs.create_job, {"page_count": 2})[0] == 503
     assert call(jobs.create_sample_job, path={"sample_id": "S1"}, query=LIVE)[0] == 503
     assert counter() == 0
+
+
+def test_reading_off_refuses_uploads_and_live_samples(aws, monkeypatch):
+    monkeypatch.setenv("READING_ENGINE", "none")
+    put_sample(aws)
+    for status, body in (call(jobs.create_job, {"page_count": 2}),
+                         call(jobs.create_sample_job, path={"sample_id": "S1"}, query=LIVE)):
+        assert status == 503 and body == {"error": "reading_unavailable", "message": common.READING_UNAVAILABLE}
+    assert common.READING_UNAVAILABLE == "AI reading isn't available yet. Please type the numbers instead."
+    assert scan() == []  # no job and no slot taken
+    status, job = call(jobs.create_sample_job, path={"sample_id": "S1"})  # saved readings still work
+    assert status == 201 and get(job)[1]["status"] == "done"
+
+
+@pytest.mark.parametrize("value", [None, "", "none", "bedrock", "NONE"])
+def test_reading_is_off_unless_a_known_engine_is_named(monkeypatch, value):
+    if value is None:
+        monkeypatch.delenv("READING_ENGINE", raising=False)
+    else:
+        monkeypatch.setenv("READING_ENGINE", value)
+    assert common.reading_engine() == "none"
+
+
+def test_every_reading_engine_has_a_reader():
+    assert set(worker.READERS) == set(common.READING_ENGINES) and "none" not in worker.READERS
+
+
+def test_switching_reading_off_stops_retries_and_queued_jobs(aws, monkeypatch):
+    stopped = create()
+    upload(aws, stopped)
+    assert run_worker(stopped["job_id"], LambdaClock(0)) == ["interrupted"]
+    queued = create()
+    upload(aws, queued)
+    monkeypatch.setenv("READING_ENGINE", "none")
+    status, body = retry(stopped)
+    assert status == 503 and body["error"] == "reading_unavailable"
+    assert run_worker(queued["job_id"]) == ["failed"]
+    view = get(queued)[1]
+    assert view["reason"] == "reading_unavailable" and view["retryable"] is False
+    assert uploads(aws, queued["job_id"]) == [] and worker.bedrock_client().calls == 0
 
 
 def test_daily_cap_counts_jobs_and_live_samples(aws, monkeypatch):

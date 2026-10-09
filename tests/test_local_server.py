@@ -133,6 +133,23 @@ def test_request_log_never_shows_tokens(local, caplog):
     assert job["token"] not in caplog.text and f"/jobs/{job['job_id']}" in caplog.text
 
 
+def test_reading_off_refuses_uploads_but_not_samples_or_typed_numbers():
+    server, backend = local_server.make_server(port=0, env={"READING_ENGINE": "none"})
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        port = server.server_address[1]
+        status, body = request(port, "POST", "/jobs", {"page_count": 1})
+        assert status == 503 and body["error"] == "reading_unavailable"
+        status, job = request(port, "POST", "/samples/S1")
+        assert status == 201 and wait_for(port, job)["mode"] == "saved"
+        assert request(port, "POST", "/checks", {"fields": {"panel_count": "6"}, "answers": {}})[0] == 200
+    finally:
+        server.shutdown()
+        server.server_close()
+        backend.stop()
+
+
 def test_stopping_restores_the_real_worker_client():
     server, backend = local_server.make_server(port=0)
     assert worker.bedrock_client() is backend.stub
