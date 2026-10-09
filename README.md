@@ -157,10 +157,10 @@ pip install -r requirements-dev.txt -r requirements-spike.txt
 Then, from the repo root:
 
 ```
-.\scripts\deploy.ps1 -Profile default -Region ap-south-1 -ExpectedAccount 656446902316
+.\scripts\deploy.ps1 -Profile default -Region ap-south-1 -ExpectedAccount <your-account-id>
 ```
 
-The script prints the AWS account and Region first and stops before changing anything if the account isn't the one you expected. It then renders the sample quotes, lints the template, runs `sam build` and `sam deploy` (guided the first time, which saves `samconfig.toml`), uploads the sample pages and saved readings, uploads `web/` with a `config.js` that points at the new API, and clears the CloudFront cache. It prints the API URL and the site URL at the end.
+The script prints the AWS account and Region first and stops before changing anything if the account isn't the one you expected. It then renders the sample quotes, lints the template, runs `sam build` and `sam deploy` without prompts (SAM creates its own artifacts bucket and saves the settings to `samconfig.toml`), uploads the sample pages and saved readings, uploads `web/` with a `config.js` that points at the new API, and clears the CloudFront cache. It prints the API URL and the site URL at the end.
 
 The stack deploys in `ap-south-1` (Mumbai) or `ap-southeast-2` (Sydney). The template refuses any other Region. Options:
 
@@ -173,7 +173,7 @@ The stack deploys in `ap-south-1` (Mumbai) or `ap-southeast-2` (Sydney). The tem
 New AWS accounts are sometimes blocked from creating CloudFront distributions until the account is verified. Deploy everything else with:
 
 ```
-.\scripts\deploy.ps1 -Profile default -Region ap-south-1 -ExpectedAccount 656446902316 -HostingEnabled false
+.\scripts\deploy.ps1 -Profile default -Region ap-south-1 -ExpectedAccount <your-account-id> -HostingEnabled false
 ```
 
 The API then accepts requests only from `http://127.0.0.1:8000` (the `SiteOrigin` parameter). The script prints the API URL and the command that serves `web/` on your machine against it:
@@ -187,7 +187,7 @@ Open http://127.0.0.1:8000/. In this mode the local server only serves the web a
 ### Smoke test
 
 ```
-.\scripts\smoke_test.ps1 -Profile default -Region ap-south-1 -ExpectedAccount 656446902316
+.\scripts\smoke_test.ps1 -Profile default -Region ap-south-1 -ExpectedAccount <your-account-id>
 ```
 
 It makes the same account check, then runs a sample (saved reading), the checks on S2's numbers typed in, and either the reading-off refusal or, with reading on, one synthetic page through the whole job flow (one model call). With hosting on, it also loads the site and checks that the API accepts its origin. It prints PASS or FAIL for each step and never prints document text.

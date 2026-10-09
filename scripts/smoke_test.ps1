@@ -12,12 +12,12 @@ hosting is on. It prints PASS or FAIL for each step and never prints document
 text. With reading on, the job step makes one paid model call.
 
 .EXAMPLE
-.\scripts\smoke_test.ps1 -Profile default -Region ap-south-1 -ExpectedAccount 656446902316
+.\scripts\smoke_test.ps1 -Profile default -Region ap-south-1 -ExpectedAccount <your-account-id>
 #>
 param(
     [Alias("Profile")][string]$AwsProfile = "default",
     [ValidateSet("ap-south-1", "ap-southeast-2")][string]$Region = "ap-south-1",
-    [ValidatePattern('^\d{12}$')][string]$ExpectedAccount = "656446902316",
+    [Parameter(Mandatory = $true)][ValidatePattern('^\d{12}$')][string]$ExpectedAccount,
     [string]$StackName = "surya-lekka"
 )
 

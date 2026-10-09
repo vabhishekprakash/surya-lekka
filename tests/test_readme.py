@@ -67,7 +67,8 @@ def test_results_team_and_limits_say_only_what_is_known():
 
 
 def test_deploy_commands_and_architecture_image():
-    assert ".\\scripts\\deploy.ps1 -Profile default -Region ap-south-1 -ExpectedAccount 656446902316" in README
+    assert ".\\scripts\\deploy.ps1 -Profile default -Region ap-south-1 -ExpectedAccount <your-account-id>" in README
+    assert re.search(r"(?<!\d)\d{12}(?!\d)", README) is None  # no real account number
     assert "-HostingEnabled false" in README and ".\\scripts\\smoke_test.ps1 -Profile default" in README
     images = re.findall(r"!\[[^\]]*\]\(([^)]+)\)", README)
     assert images and all((ROOT / i).is_file() for i in images)

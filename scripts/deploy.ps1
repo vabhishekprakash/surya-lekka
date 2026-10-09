@@ -6,8 +6,8 @@ Build and deploy Surya Lekka with AWS SAM, then upload the samples and the web a
 Run from anywhere; the script works from the repository root. It first prints
 the AWS account and Region for -Profile and stops unless the account is
 -ExpectedAccount. Then it renders the synthetic sample quotes, runs sam build
-and sam deploy (guided the first time, when there is no samconfig.toml yet)
-and uploads the sample pages and saved readings.
+and sam deploy without prompts (SAM's own artifacts bucket, settings saved to
+samconfig.toml) and uploads the sample pages and saved readings.
 
 With hosting on (the default) it uploads web/, with config.js pointing at the
 new API, to the site bucket and clears the CloudFront cache. With
@@ -21,12 +21,12 @@ worker may call; any other ID must be a model in -Region.
 This creates real AWS resources. With reading on, each quote read is a paid Bedrock call.
 
 .EXAMPLE
-.\scripts\deploy.ps1 -Profile default -Region ap-south-1 -ExpectedAccount 656446902316
+.\scripts\deploy.ps1 -Profile default -Region ap-south-1 -ExpectedAccount <your-account-id>
 #>
 param(
     [Alias("Profile")][string]$AwsProfile = "default",
     [ValidateSet("ap-south-1", "ap-southeast-2")][string]$Region = "ap-south-1",
-    [ValidatePattern('^\d{12}$')][string]$ExpectedAccount = "656446902316",
+    [Parameter(Mandatory = $true)][ValidatePattern('^\d{12}$')][string]$ExpectedAccount,
     [string]$StackName = "surya-lekka",
     [ValidateSet("true", "false")][string]$HostingEnabled = "true",
     [string]$SiteOrigin = "http://127.0.0.1:8000",
@@ -87,10 +87,9 @@ $deployArgs = @("--stack-name", $StackName, "--capabilities", "CAPABILITY_IAM") 
     "ReadingEngine=$ReadingEngine", "ModelId=$ModelId",
     "ProfileModelArns=$($access.ProfileModelArns)", "GlobalModelArns=$($access.GlobalModelArns)"
 )
-if (Test-Path samconfig.toml) {
-    Invoke-Step "Deploy" { sam deploy @deployArgs --no-fail-on-empty-changeset }
-} else {
-    Invoke-Step "Deploy (guided, first time)" { sam deploy --guided @deployArgs }
+# Unattended: SAM makes or reuses its own artifacts bucket and saves these settings to samconfig.toml.
+Invoke-Step "Deploy" {
+    sam deploy @deployArgs --resolve-s3 --save-params --no-confirm-changeset --no-fail-on-empty-changeset
 }
 
 $outputsJson = aws cloudformation describe-stacks --stack-name $StackName @aws --query "Stacks[0].Outputs" --output json

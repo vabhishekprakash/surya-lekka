@@ -10,7 +10,7 @@ import pytest
 
 pytest.importorskip("moto")
 
-from test_deploy_scripts import run_ps, windows_powershell
+from test_deploy_scripts import ACCOUNT, run_ps, windows_powershell
 
 from api import local_server
 
@@ -134,9 +134,10 @@ def test_smoke_script_reads_the_stack_and_runs_the_checks():
     with local_api({"READING_ENGINE": "none"}) as api:
         stack = {"Outputs": [{"OutputKey": "ApiUrl", "OutputValue": api}],
                  "Parameters": [{"ParameterKey": "ReadingEngine", "ParameterValue": "none"}]}
-        run, calls = run_ps("smoke_test.ps1", "-Profile default -Region ap-south-1", {"FAKE_STACK": json.dumps(stack)})
+        run, calls = run_ps("smoke_test.ps1", f"-Profile default -Region ap-south-1 -ExpectedAccount {ACCOUNT}",
+                            {"FAKE_STACK": json.dumps(stack)})
     assert run.returncode == 0, run.stdout + run.stderr
-    assert run.stdout.index("AWS account: 656446902316") < run.stdout.index("PASS sample")
+    assert run.stdout.index(f"AWS account: {ACCOUNT}") < run.stdout.index("PASS sample")
     assert "PASS reading" in run.stdout and "All steps passed." in run.stdout
     assert calls[1] == ("aws cloudformation describe-stacks --stack-name surya-lekka --profile default "
                         "--region ap-south-1 --query Stacks[0] --output json")
