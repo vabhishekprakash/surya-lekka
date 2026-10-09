@@ -164,3 +164,26 @@ def test_no_batches_is_incomplete():
     quote = merge_batches([], failures=[{"batch": 1, "pages": [1, 2], "kind": "unexpected_text", "code": None}])
     assert quote["processing_complete"] is False and quote["module_groups"] == []
     json.dumps(run_checks(quote)["findings"])
+
+
+# --- items that may be the same, kept apart --------------------------------------------------------
+
+def test_a_partial_item_that_fits_two_items_stays_flagged():
+    def change(first, second):
+        extra = copy.deepcopy(first["module_groups"][0])
+        extra.update(count="2")  # two lines of the same panel, 6 and 2 of them
+        first["module_groups"].append(extra)
+        second["module_groups"][0].pop("count", None)  # the other page names the panel but no count
+        second["module_groups"][0].pop("count_evidence", None)
+    quote = merge_batches(two_batches(change))
+    assert any(g.get("conflict") for g in quote["module_groups"])
+
+
+def test_two_partial_items_with_different_gaps_are_not_joined():
+    def change(first, second):
+        first["module_groups"][0].pop("wattage", None)
+        first["module_groups"][0].pop("wattage_evidence", None)
+        second["module_groups"][0].pop("count", None)
+        second["module_groups"][0].pop("count_evidence", None)
+    quote = merge_batches(two_batches(change))
+    assert any(g.get("conflict") for g in quote["module_groups"])
