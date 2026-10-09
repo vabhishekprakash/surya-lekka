@@ -175,19 +175,32 @@ class _Page:
     def cell_text(self, cell):
         return _tidy(" ".join(w.get("Text", "") for w in _children(cell, self.by_id) if w.get("BlockType") == "WORD"))
 
+    def block_confidence(self, block):
+        """The lowest confidence of a block and the words it holds."""
+        words = [float(w.get("Confidence") or 0) for w in _children(block, self.by_id) if w.get("BlockType") == "WORD"]
+        return min([float(block.get("Confidence", 100) or 0)] + words)
+
+    def line_confidence(self, line):
+        return self.block_confidence(line)
+
     def tables(self):
         """Each table as (grid {(row, col): text}, header {col: text}, confidence
-        {(row, col): cell confidence}). A merged cell's text (its cells' words in order)
-        fills every cell it covers, with the lowest confidence among them."""
+        {(row, col): lowest confidence of the cell and its words}, merged_header,
+        row_merged {cells merged across rows}, header_cells). A merged cell's text (its
+        cells' words in order) fills every cell it covers, with the lowest confidence
+        among them."""
         for table in (b for b in self.blocks if b.get("BlockType") == "TABLE"):
             cells = [c for c in _children(table, self.by_id) if c.get("BlockType") == "CELL"]
             grid = {(c["RowIndex"], c["ColumnIndex"]): self.cell_text(c) for c in cells}
-            confidence = {(c["RowIndex"], c["ColumnIndex"]): float(c.get("Confidence") or 0) for c in cells}
+            confidence = {(c["RowIndex"], c["ColumnIndex"]): self.block_confidence(c) for c in cells}
+            row_merged = set()
             headers = {(c["RowIndex"], c["ColumnIndex"]) for c in cells if "COLUMN_HEADER" in (c.get("EntityTypes") or [])}
             for merged in _children(table, self.by_id, "MERGED_CELL"):
                 parts = sorted(_children(merged, self.by_id), key=lambda c: (c["RowIndex"], c["ColumnIndex"]))
                 text = _tidy(" ".join(self.cell_text(c) for c in parts))
-                lowest = min((float(c.get("Confidence") or 0) for c in parts), default=0.0)
+                lowest = min((self.block_confidence(c) for c in parts), default=0.0)
+                if len({c["RowIndex"] for c in parts}) > 1:  # shared by several rows: belongs to none
+                    row_merged |= {(c["RowIndex"], c["ColumnIndex"]) for c in parts}
                 for c in parts:
                     grid[(c["RowIndex"], c["ColumnIndex"])] = text
                     confidence[(c["RowIndex"], c["ColumnIndex"])] = lowest
@@ -205,7 +218,8 @@ class _Page:
             merged_header = any(any(c["RowIndex"] in header_rows for c in _children(m, self.by_id))
                                 and (m.get("ColumnSpan") or 1) > 1
                                 for m in _children(table, self.by_id, "MERGED_CELL"))
-            yield {k: v for k, v in grid.items() if k[0] not in header_rows}, header, confidence, merged_header
+            yield ({k: v for k, v in grid.items() if k[0] not in header_rows}, header, confidence, merged_header,
+                   frozenset(row_merged), frozenset(headers))
 
 
 # --- parsing answers -----------------------------------------------------------------------
@@ -257,10 +271,10 @@ def _empty_wire():
 
 # --- tables ----------------------------------------------------------------------------------
 
-def _option_rows(grid, header, confidence, threshold=CONFIDENCE_THRESHOLD):
+def _option_rows(grid, header, confidence, threshold=CONFIDENCE_THRESHOLD, header_cells=()):
     """[(capacity cell, capacity raw, price cell, row text, price column)] when this
-    table offers options, else []. A row whose capacity or price cell was read below
-    the threshold is left out."""
+    table offers options, else []. A row whose capacity or price cell, or either column's
+    header, was read below the threshold is left out."""
     capacity_cols = [c for c, h in header.items() if CAPACITY_HEADER.search(h)]
     price_cols = [c for c, h in header.items() if PRICE_HEADER.search(h) and c not in capacity_cols]
     if not capacity_cols or not price_cols:
@@ -283,7 +297,9 @@ def _option_rows(grid, header, confidence, threshold=CONFIDENCE_THRESHOLD):
         price_col = next((c for c in price_cols if cells.get(c) and _parses("amount", cells[c])), None)
         if price_col is None:
             continue
-        if min(confidence.get((r, col), 0), confidence.get((r, price_col), 0)) < threshold:
+        heads = [k for k in header_cells if k[1] in (col, price_col)]
+        if min([confidence.get((r, col), 0), confidence.get((r, price_col), 0)]
+               + [confidence.get(k, 0) for k in heads]) < threshold:
             continue
         rows.append((cell, raw, cells[price_col], text, price_col))
     capacities = [parse_capacity(raw) for _, raw, _, _, _ in rows]
@@ -292,12 +308,8 @@ def _option_rows(grid, header, confidence, threshold=CONFIDENCE_THRESHOLD):
 
 
 def _price_kind(header):
-    h = header.casefold()
-    if "net" in h:
-        return "net_cost"
-    if re.search(r"before|excl|basic|base", h):
-        return "base_price"
-    return "gross_total"
+    """The role an option table's price column header names, or None: no default."""
+    return src.role(header)
 
 
 # --- the mapping -----------------------------------------------------------------------------
@@ -333,6 +345,21 @@ def _typed_value(kind, raw):
                                        or [None, None])[1]
         return found
     return None
+
+
+def _amount_on_its_line(raw, evidence, alias):
+    """A query amount counts only when it is the one amount its line prints under the same
+    rules as a line: not a percentage or a tax base, and the only amount on a subsidy line
+    that names both the central and the state subsidy."""
+    r = parse_amount(raw)
+    if r["parse_status"] != "ok":
+        return False
+    on_line = [v for _, v in src.amounts_in(evidence)]
+    if Decimal(str(r["parsed"])) not in on_line:
+        return False
+    if alias == "SUBSIDY_AMOUNT" and len(on_line) > 1 and _subsidy_kind(evidence) == "combined":
+        return False
+    return True
 
 
 def _value_key(field, raw):
@@ -381,10 +408,11 @@ def _items(table_items, loose, keys, page_number, conflicts, list_name):
     loose value (a query answer or a line) that matches no row's value makes that key a
     conflict on every row; without table rows, loose values form the items, and different
     values for one key are a conflict."""
-    items = []
+    items, options = [], []
     if table_items:
         for row in table_items:
             items.append({k: [(row[k], row["evidence"])] for k in keys if row.get(k)})
+            options.append(row.get("option_id") or "All")  # a row in an option belongs to it, never to All
         for key, values in loose.items():
             for raw, evidence in values:
                 if not any(key in it and _value_key(_field_of(key), it[key][0][0]) == _value_key(_field_of(key), raw)
@@ -399,7 +427,7 @@ def _items(table_items, loose, keys, page_number, conflicts, list_name):
         items = [indexed[i] for i in sorted(indexed)]
     out = []
     for n, item in enumerate(items):
-        wire_item = {"option_id": "All", "page": page_number}
+        wire_item = {"option_id": options[n] if options else "All", "page": page_number}
         for key, values in item.items():
             distinct, seen = [], set()
             for raw, evidence in values:
@@ -451,6 +479,19 @@ def map_page(reply, page_number, threshold=CONFIDENCE_THRESHOLD, sources=None, e
             if evidence is None:
                 entry["why"] = "not_on_page"
                 continue
+            if any(page.line_confidence(l) < threshold for l in lines):
+                entry["why"] = "low_confidence"
+                continue
+            if src.denied(evidence):  # "Subsidy not applicable", "not included", "optional"
+                entry["why"] = "negated"
+                continue
+            if kind == "amount" and not _amount_on_its_line(raw, evidence, alias):
+                entry["why"] = "not_an_amount_on_its_line"
+                continue
+            if alias == "INVERTER_CAPACITY" and src._INPUT.search(evidence) and not re.search(
+                    r"\brated\b|\boutput\b|\bac\b", evidence, re.I):
+                entry["why"] = "input_not_output"
+                continue
             entry["kept"] = True
             target, key = TARGETS[alias]
             field = QUERY_FIELDS.get(alias)
@@ -477,7 +518,7 @@ def map_page(reply, page_number, threshold=CONFIDENCE_THRESHOLD, sources=None, e
                 cands.append(src.candidate(field, raw, evidence, occurrence, named, "queries"))
 
     if "lines" in sources:
-        cands += src.from_lines(page)
+        cands += src.from_lines(page, threshold)
     if "forms" in sources:
         for key_text, value_text, value in src.form_pairs(page):
             if float(value.get("Confidence") or 0) < threshold:
@@ -534,21 +575,37 @@ def map_page(reply, page_number, threshold=CONFIDENCE_THRESHOLD, sources=None, e
     if give:
         wire["give_it_up"] = _flag("mentioned", give[0], page_number)
 
-    for table_no, (grid, header, confidence, merged_header) in enumerate(page.tables()):
-        rows = _option_rows(grid, header, confidence, threshold) if "options_table" in sources else []
+    headings = src.option_headings(page)
+    for table_no, (grid, header, confidence, merged_header, row_merged, header_cells) in enumerate(page.tables()):
+        rows = (_option_rows(grid, header, confidence, threshold, header_cells)
+                if "options_table" in sources else [])
         if rows:
             if wire["multiple_options"]["value"] != "yes":
                 wire["multiple_options"] = _flag("yes", rows[0][3], page_number)
+            price_role = None
             for cell, raw, price, text, price_col in rows:
                 wire["options"].append({"option_id": cell, "label": text, "page": page_number})
                 wire["capacities"].append({"option_id": cell, "raw": raw, "evidence_text": text, "page": page_number})
-                wire["prices"].append({"option_id": cell, "kind": _price_kind(header[price_col]), "raw": price,
-                                       "evidence_text": text, "page": page_number})
+                price_role = _price_kind(header[price_col])
+                if price_role == "subsidy":
+                    wire["subsidies"].append({"option_id": cell, "kind": _subsidy_kind(f"{header[price_col]} {text}"),
+                                              "raw": price, "evidence_text": text, "page": page_number})
+                elif price_role:  # a header that names no role leaves the amount unresolved
+                    wire["prices"].append({"option_id": cell, "kind": price_role, "raw": price,
+                                           "evidence_text": text, "page": page_number})
             continue
         if merged_header:  # a merged header cell can't be tied to one column
             continue
         if "bom_table" in sources:
-            g, i = src.bom_candidates(grid, header, confidence, threshold, table_no)
+            g, i = src.bom_candidates(grid, header, confidence, threshold, table_no, row_merged, header_cells)
+            if len(headings) >= 2:  # option sections on the page: a row without its option binds to none
+                g = [x for x in g if x.get("option_id")]
+                i = [x for x in i if x.get("option_id")]
+            for row in g + i:
+                option = row.get("option_id")
+                if option and not any(o["option_id"] == option for o in wire["options"]):
+                    wire["options"].append({"option_id": option, "label": option, "page": page_number})
+                    wire["multiple_options"] = _flag("yes", row["evidence"], page_number)
             table_groups += g
             table_inverters += i
         if "amount_table" in sources:
@@ -599,7 +656,7 @@ def map_page(reply, page_number, threshold=CONFIDENCE_THRESHOLD, sources=None, e
 
     if gstin:
         wire["_vendor_gstin"] = gstin
-    if "gstin_state" in sources and (state := src.gstin_state(page)):
+    if "gstin_state" in sources and (state := src.gstin_state(page, threshold)):
         wire["_supplier_gst_state"] = {"value": state[0], "evidence_text": state[1], "page": page_number,
                                        "source": "gst_registration_state"}
     if conflicts:

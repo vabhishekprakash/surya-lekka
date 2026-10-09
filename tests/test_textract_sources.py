@@ -75,7 +75,7 @@ def test_adv_two_module_rows_of_different_wattage_stay_two_groups():
 
 def test_adv_two_option_tables_on_one_page_keep_their_options_apart():
     page = Page()
-    page.table([["System size (kW)", "Price (Rs)"], ["3 kW", "1,90,000"], ["5 kW", "2,90,000"]])
+    page.table([["System size (kW)", "Total price (Rs)"], ["3 kW", "1,90,000"], ["5 kW", "2,90,000"]])
     page.table([["System size (kW)", "Net cost (Rs)"], ["3 kW", "1,12,000"], ["5 kW", "2,12,000"]])
     c = contract(page)
     assert sorted(facts(c, "gross_total")) == [("3 kW", "1,90,000"), ("5 kW", "2,90,000")]

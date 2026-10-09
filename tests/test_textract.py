@@ -283,7 +283,7 @@ def test_gstin_reaches_the_merged_quote_as_evidence_only():
 
 def test_option_table_gives_one_option_per_row():
     page = Page()
-    page.table([["System size (kW)", "Price (Rs)"], ["3 kW", "1,90,000"], ["5 kW", "2,90,000"]])
+    page.table([["System size (kW)", "Total price (Rs)"], ["3 kW", "1,90,000"], ["5 kW", "2,90,000"]])
     c = contract(page, number=2)
     assert c["flags"]["model_proposed"]["multiple_options"]["value"] is True
     assert [o["option_id"] for o in c["options"]] == ["3 kW", "5 kW"]
@@ -326,7 +326,7 @@ def test_capacity_without_a_unit_takes_the_header_unit():
 
 def test_merged_cells_spread_their_text_over_the_cells_they_cover():
     page = Page()
-    page.table([["System size (kW)", "Price (Rs)"], ["3 kW", "1,90,000"], ["5 kW", ""]], merged=[(2, 2, 2, 1)])
+    page.table([["System size (kW)", "Total price (Rs)"], ["3 kW", "1,90,000"], ["5 kW", ""]], merged=[(2, 2, 2, 1)])
     c = contract(page)
     assert sorted(f[2] for f in facts(c, "gross_total")) == ["1,90,000", "1,90,000"]
 
@@ -480,7 +480,7 @@ def test_an_answer_whose_box_overlaps_a_line_with_other_text_is_not_on_the_page(
 
 @pytest.mark.parametrize("line,answer", [("Total amount payable Rs. 1,90,000/-", "₹190000"),
                                          ("TOTAL PAYABLE ₹ 1,90,000", "Rs 1,90,000 /-"),
-                                         ("Grand total INR 1, 90, 000", "1,90,000")])
+                                         ("Grand total INR 1,90,000", "1,90,000")])
 def test_answer_text_is_matched_ignoring_case_spaces_commas_and_rupee_marks(line, answer):
     page = Page()
     page.line(line, 0.3)
@@ -506,3 +506,19 @@ def test_a_row_with_a_doubtful_cell_is_left_out():
     page.table(rows[:3], confidence={(2, 1): 20.0})  # one row left: not an option table
     c = contract(page)
     assert c["options"] == [] and c["flags"]["model_proposed"]["multiple_options"] is None
+
+
+def test_an_option_table_price_header_that_names_no_role_leaves_the_amount_unresolved():
+    page = Page()
+    page.table([["System size (kW)", "Price (Rs)"], ["3 kW", "1,90,000"], ["5 kW", "2,90,000"]])
+    c = contract(page)
+    assert [o["option_id"] for o in c["options"]] == ["3 kW", "5 kW"]
+    assert [f["name"] for f in c["facts"]] == ["stated_capacity", "stated_capacity"]
+
+
+def test_an_amount_split_by_spaces_is_not_taken_from_a_query_answer():
+    page = Page()
+    page.line("Grand total INR 1, 90, 000", 0.3)
+    page.answer("TOTAL_PAYABLE", "1,90,000", top=0.3)
+    wire, report = map_queries(page.reply(), 1)
+    assert wire["prices"] == [] and report[0]["why"] == "not_an_amount_on_its_line"

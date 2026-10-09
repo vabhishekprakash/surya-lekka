@@ -42,9 +42,20 @@ _GST = re.compile(r"\b(?:gst|cgst|sgst|igst)\b", re.I)
 _BASE = re.compile(r"\bbasic\b|\bbase\s+(?:price|value|cost|amount)\b|\bsub[\s-]?total\b|\bbefore\s+gst\b"
                    r"|\btaxable\s+(?:value|amount)\b|\bexcl(?:uding|usive\s+of|\.)?\s+gst\b", re.I)
 _TOTAL = re.compile(r"\bgrand\s+total\b|\btotal\b|\bpayable\b", re.I)
-_NEGATION = re.compile(r"\bnot\s+(?:included|applicable|available|considered)\b|\bno\s+subsidy\b"
-                       r"|\bwithout\s+(?:the\s+)?subsidy\b|\bexcluding\s+(?!gst\b)\w|\bexclusive\s+of\s+(?!gst\b)\w"
-                       r"|\bnil\b", re.I)
+_NEGATION = re.compile(r"\bnot\s+(?:included|applicable|available|considered|in\s+(?:our\s+)?scope)\b"
+                       r"|\bno\s+subsidy\b|\bwithout\s+(?:the\s+)?subsidy\b|\bexcluding\s+(?!gst\b)\w"
+                       r"|\bexclusive\s+of\s+(?!gst\b)\w|\bnil\b|\bexcluded\b|\boptional\b"
+                       r"|\bby\s+(?:the\s+)?(?:customer|client|owner|buyer|consumer)\b", re.I)
+# "Total before subsidy" is a total: relations to the subsidy are read before the subsidy keyword.
+_BEFORE_SUBSIDY = re.compile(r"\b(?:before|without|excluding|exclusive\s+of|prior\s+to)\s+(?:the\s+)?"
+                             r"(?:central\s+|state\s+|govt\.?\s+|government\s+)?(?:subsidy|cfa)\b", re.I)
+_PRICE_WORD = re.compile(r"\btotal\b|\bcost\b|\bprice\b|\bamount\b|\bpayable\b|\bvalue\b", re.I)
+
+
+def denied(text):
+    """True when a line or row denies or limits what it names: not included, excluded,
+    optional, by the customer, no subsidy."""
+    return bool(_NEGATION.search(_BEFORE_SUBSIDY.sub(" ", " ".join(str(text).split()))))
 
 
 _TOTAL_REFERENCE = re.compile(r"\(?\b(?:included|includes|including|inside|outside|part|not\s+part|added)\s+"
@@ -55,14 +66,16 @@ _TOTAL_REFERENCE = re.compile(r"\(?\b(?:included|includes|including|inside|outsi
 def role(text):
     """The one price role a label or line names: base_price, gst_amount, gross_total,
     net_cost or subsidy. None when it names none, more than one, or a negation."""
-    t = " ".join(str(text).split())
-    if _NEGATION.search(t):
+    t = _TOTAL_REFERENCE.sub(" ", " ".join(str(text).split()))  # "(included in Grand Total)" is another line's
+    if denied(t):
         return None
     if _NET.search(t):
         return "net_cost"
+    if _BEFORE_SUBSIDY.search(t):
+        rest = _BEFORE_SUBSIDY.sub(" ", t)
+        return "gross_total" if _PRICE_WORD.search(rest) and not _SUBSIDY.search(rest) else None
     if _SUBSIDY.search(t):
         return "subsidy"
-    t = _TOTAL_REFERENCE.sub(" ", t)  # "(included in Grand Total)" names another line's role
     base = bool(_BASE.search(t))
     rest = _GST_QUALIFIER.sub(" ", t)
     rest = re.sub(r"sub[\s-]?total", " ", rest, flags=re.I)
@@ -80,7 +93,10 @@ _CUR = r"(?:rs\.?|₹|inr)"
 _AMOUNT_TOKEN = re.compile(
     rf"(?<![\w/.,])(?:{_CUR}\s*)?(?:\d+(?:\.\d+)?\s*(?:lakhs?|lacs?)\b"
     rf"|\d{{1,3}}(?:,\d{{2}})*,\d{{3}}(?:\.\d{{1,2}})?|\d+(?:\.\d{{1,2}})?)(?:\s*/-)?(?![\w%/])", re.I)
-_UNIT_AFTER = re.compile(r"^\s*(?:kwp|kw|kva|wp|w|nos?|pcs|panels?|modules?|%|years?|yrs?|kg|mm|sq)\b", re.I)
+_UNIT_AFTER = re.compile(r"^\s*(?:kwp|kw|kva|wp|w|nos?|pcs|panels?|modules?|years?|yrs?|kg|mm|sq)\b", re.I)
+_PERCENT_AFTER = re.compile(r"^\s*(?:%|per\s*cent\b|percent\b)", re.I)
+# "GST @ 18% on Rs 1,00,000": the amount after a rate is the base the tax is worked out on.
+_TAX_BASE_BEFORE = re.compile(r"%\s*(?:on|of)\b[^%\d]{0,30}$", re.I)
 _CAP_TOKEN = re.compile(r"(?<![\w.])(\d+(?:\.\d+)?)\s*(kwp|kw|kva|wp|w)\b", re.I)
 _ALTERNATIVE = re.compile(r"\d\s*(?:kwp|kw|wp|w)?\s*(?:-|–|to|or|/)\s*\d", re.I)
 _DATE = re.compile(r"\b\d{1,2}[/.-]\d{1,2}[/.-]\d{2,4}\b|\b\d{1,2}(?:st|nd|rd|th)?[\s-]+[A-Za-z]{3,9}[\s,-]+\d{4}\b")
@@ -94,7 +110,8 @@ def amounts_in(text):
         token = m.group(0).strip()
         after = text[m.end():]
         before = text[:m.start()]
-        if _UNIT_AFTER.match(after) or before.rstrip().endswith("@"):
+        if (_UNIT_AFTER.match(after) or _PERCENT_AFTER.match(after) or before.rstrip().endswith("@")
+                or _TAX_BASE_BEFORE.search(before)):
             continue
         has_currency = bool(re.match(_CUR, token, re.I)) or "lakh" in token.lower() or "lac" in token.lower()
         digits = re.sub(r"\D", "", token.split(".")[0])
@@ -107,10 +124,10 @@ def amounts_in(text):
 
 
 def one_amount(text):
-    """The single amount in text, or None for none or several different ones."""
+    """The single amount printed in text, or None for none or several, equal or not: two
+    occurrences can carry two roles."""
     found = amounts_in(text)
-    values = {v for _, v in found}
-    return found[0][0] if len(values) == 1 else None
+    return found[0][0] if len(found) == 1 else None
 
 
 def one_measure(text, units):
@@ -142,6 +159,10 @@ _COUNT = re.compile(r"(?:\bno\.?\s*of|\bnumber\s+of|\bqty\.?|\bquantity)\b[^\d\n
 _PANEL = re.compile(r"\b(?:solar\s+)?(?:pv\s+)?(?:panels?|modules?)\b", re.I)
 _INVERTER = re.compile(r"\binverters?\b", re.I)
 _CAPACITY_LABEL = re.compile(r"\b(?:system|plant|capacity|project|rooftop|solar\s+pv)\b", re.I)
+_SETS = re.compile(r"\b(?:sets?|kits?|lots?|lump\s*sum|l\.?s\.?)\b", re.I)
+# Inverter input wording: a maximum PV or DC input is not the inverter's rated output.
+_INPUT = re.compile(r"\binput\b|\bmax(?:imum)?\b|\bpv\b|\bdc\b", re.I)
+_OPTION_HEADING = re.compile(r"^\s*(?:option|alternative)\s*[-:.#]?\s*(\w{1,3})\b", re.I)
 
 
 def one_count(text):
@@ -162,8 +183,11 @@ def candidate(field, raw, evidence, occurrence, named, source):
 
 
 def line_candidates(text, evidence, occurrence, source):
-    """Candidates from one line (or a FORMS pair read as a line)."""
+    """Candidates from one line (or a FORMS pair read as a line). A line that denies or
+    limits what it names gives nothing."""
     out = []
+    if denied(text):
+        return out
     price_role = role(text)
     if price_role:
         raw = one_amount(text)
@@ -171,7 +195,8 @@ def line_candidates(text, evidence, occurrence, source):
             out.append(candidate(price_role, raw, evidence, occurrence, True, source))
     if _PANEL.search(text) and not _INVERTER.search(text):
         count = one_count(text)
-        if count and int(count) >= 2:  # one "module" is a set or a lot, not a panel count
+        # One "module", or modules counted in sets, kits or lots, is not a panel count.
+        if count and int(count) >= 2 and not _SETS.search(text):
             out.append(candidate("panel_count", count, evidence, occurrence, True, source))
         watts = one_measure(text, ("w", "wp"))
         if watts:
@@ -188,12 +213,19 @@ def line_candidates(text, evidence, occurrence, source):
     return out
 
 
-def from_lines(page):
+def from_lines(page, threshold):
     out = []
     for line in page.lines:
+        if page.line_confidence(line) < threshold:
+            continue
         text = " ".join(line["Text"].split())
         out += line_candidates(text, text, (line["Id"],), "lines")
     return out
+
+
+def option_headings(page):
+    """Distinct option labels the page's lines head sections with ("Option A", "Option B")."""
+    return {m.group(1).upper() for line in page.lines if (m := _OPTION_HEADING.match(line["Text"]))}
 
 
 # --- tables ----------------------------------------------------------------------------------
@@ -202,7 +234,9 @@ HEADER_KINDS = [
     ("skip", re.compile(r"s\.?\s*no|sr\.?\s*no|\bsl\b|hsn|sac|\brate\b|unit\s+price|per\s+unit", re.I)),
     ("qty", re.compile(r"\bqty\b|quantity|\bnos?\b|no\.?\s*of", re.I)),
     ("make", re.compile(r"\bmake\b|brand|manufacturer", re.I)),
-    ("rating", re.compile(r"rating|capacity|spec|wattage|size", re.I)),
+    ("option", re.compile(r"\boption\b|alternative", re.I)),
+    ("input", _INPUT),
+    ("rating", re.compile(r"rated|output|\bac\b|rating|capacity|spec|wattage|size", re.I)),
     ("desc", re.compile(r"description|particulars|\bitem|material|component", re.I)),
     ("amount", re.compile(r"amount|value|price|cost|\brs\b|₹|\binr\b|total", re.I)),
 ]
@@ -215,35 +249,61 @@ def column_kinds(header):
     return kinds
 
 
-def bom_candidates(grid, header, confidence, threshold, table_no):
-    """(module groups, inverters) from a bill-of-materials table: one bound group per row."""
+def bom_candidates(grid, header, confidence, threshold, table_no, row_merged=frozenset(), header_cells=()):
+    """(module groups, inverters) from a bill-of-materials table: one bound group per row.
+    Every cell a value comes from, and its column's header, must meet the threshold. A row
+    that denies or limits what it names gives nothing; a quantity in sets, kits or lots, or
+    in a cell merged across rows, gives no count; an option column binds the row's group to
+    that option. An inverter's rating comes only from output wording, never an input column."""
     kinds = column_kinds(header)
-    cols = {k: [c for c, kind in kinds.items() if kind == k] for k in ("desc", "qty", "make", "rating")}
+    cols = {k: [c for c, kind in kinds.items() if kind == k] for k in ("desc", "qty", "make", "rating", "option")}
     if not cols["desc"] or len(cols["qty"]) != 1:
+        return [], []
+    qty_col = cols["qty"][0]
+    if any(confidence.get(k, 0) < threshold for k in header_cells if k[1] in cols["desc"] + cols["qty"]):
         return [], []
     groups, inverters = [], []
     for r in sorted({r for r, _ in grid}):
         cells = {c: t for (rr, c), t in grid.items() if rr == r}
         desc = " ".join(cells.get(c, "") for c in cols["desc"])
-        rating = " ".join(cells.get(c, "") for c in cols["rating"])
-        make = " ".join(cells.get(c, "") for c in cols["make"]).strip() or None
         row_text = " | ".join(t for _, t in sorted(cells.items()) if t)
-        used = [(r, c) for c in cols["desc"] + cols["qty"] + cols["rating"] if cells.get(c)]
-        if any(confidence.get(k, 0) < threshold for k in used):
+        if denied(row_text):
             continue
+
+        def sure(col_list):
+            """The text of these columns, or "" when a cell or its header is below the threshold."""
+            out = []
+            for c in col_list:
+                if not cells.get(c):
+                    continue
+                heads = [k for k in header_cells if k[1] == c]
+                if confidence.get((r, c), 0) < threshold or any(confidence.get(k, 0) < threshold for k in heads):
+                    return ""
+                out.append(cells[c])
+            return " ".join(out)
+        if confidence.get((r, cols["desc"][0]), 0) < threshold:
+            continue
+        rating, make = sure(cols["rating"]), sure(cols["make"]).strip() or None
+        option = sure(cols["option"]).strip() or None
         occurrence = ("table", table_no, r)
         if _PANEL.search(desc) and not _INVERTER.search(desc):
-            qty = cells.get(cols["qty"][0], "")
+            qty = sure([qty_col])
             m = re.fullmatch(r"\s*(\d{1,3})\s*(?:nos?\.?|pcs\.?|numbers?)?\s*", qty, re.I)
-            if not m or int(m.group(1)) < 2:  # one "module" is a set or a lot, not a panel count
-                continue
+            count = m.group(1) if m else None
+            if (count is not None and int(count) < 2) or (r, qty_col) in row_merged \
+                    or _SETS.search(f"{header.get(qty_col, '')} {qty} {desc}"):
+                count = None  # one "module", a set or a quantity shared across rows: no count
             watts = one_measure(rating, ("w", "wp")) or one_measure(desc, ("w", "wp"))
-            groups.append({"count": m.group(1), "wattage": watts, "make_model": make, "evidence": row_text,
-                           "occurrence": occurrence})
+            if count or watts:
+                groups.append({"count": count, "wattage": watts, "make_model": make, "evidence": row_text,
+                               "occurrence": occurrence, "option_id": option})
         elif _INVERTER.search(desc) and not _PANEL.search(desc):
-            kw = one_measure(rating, ("kw", "kva", "w")) or one_measure(desc, ("kw", "kva", "w"))
+            kw = one_measure(rating, ("kw", "kva", "w"))
+            if not kw and not _INPUT.search(desc):
+                kw = one_measure(desc, ("kw", "kva", "w"))
             if kw or make:
-                inverters.append({"rating": kw, "make_model": make, "evidence": row_text, "occurrence": occurrence})
+                inverters.append({"rating": kw, "make_model": make, "evidence": row_text, "occurrence": occurrence,
+                                  "option_id": option})
     return groups, inverters
 
 
@@ -333,13 +393,28 @@ def state_name(code):
     return " ".join(w if w in ("AND",) else w.capitalize() for w in name.split()).replace("AND", "and")
 
 
-def gstin_state(page):
-    """(state, line text) for the first valid GSTIN on a line, or None."""
+_SUPPLIER = re.compile(r"\bsupplier\b|\bvendor\b|\bseller\b|\bour\b", re.I)
+_BUYER = re.compile(r"\bbuyer\b|\bcustomer\b|\bclient\b|\brecipient\b|\bconsignee\b|\bbill(?:ed)?\s+to\b"
+                    r"|\bship(?:ped)?\s+to\b|\bpurchaser\b|\bconsumer\b", re.I)
+LETTERHEAD_TOP = 0.2  # the top fifth of the page, where the supplier's own details are printed
+
+
+def gstin_state(page, threshold=0):
+    """(state, line text) from a valid GSTIN the page attributes to the supplier: on a line
+    that says supplier, vendor, seller or our, or in the letterhead at the top of the page.
+    A buyer's or customer's GSTIN is ignored, and two supplier GSTINs from different states
+    give none."""
+    found = {}
     for line in page.lines:
         text = " ".join(line["Text"].split())
+        if page.line_confidence(line) < threshold or _BUYER.search(text):
+            continue
+        top = (line.get("Geometry") or {}).get("BoundingBox", {}).get("Top", 1)
+        if not (_SUPPLIER.search(text) or top < LETTERHEAD_TOP):
+            continue
         for m in _GSTIN.finditer(text.upper().replace(" ", "")):
             gstin = m.group(1)
             name = state_name(gstin[:2])
             if name and gstin_valid(gstin):
-                return name, text
-    return None
+                found.setdefault(name, text)
+    return next(iter(found.items())) if len(found) == 1 else None
