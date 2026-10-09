@@ -1,0 +1,26 @@
+name: tests
+
+on: push
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements-*.txt
+      # OpenCV, used by the redaction tool's tests, needs libGL.
+      - name: Install system libraries
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libgl1
+      - name: Install Python packages
+        run: pip install -r requirements-dev.txt -r requirements-redact.txt
+      - name: Tests (the known flaky redaction server test is run once more if it alone fails)
+        run: python scripts/ci_tests.py -q
+      - name: Template lint, SAM template and translated CloudFormation
+        run: python scripts/lint_template.py template.yaml
