@@ -7,6 +7,9 @@
   <meta name="description" content="Check a rooftop solar quote before you sign.">
   <link rel="stylesheet" href="style.css">
   <script src="config.js"></script>
+  <script type="importmap">
+    { "integrity": { "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.10.38/pdf.min.mjs": "sha384-+0ti2moQlmLN7WZHE2RHIf5lV8hHxhxEalN0il3YZceG26fUPyOkR0hp9daxk1i7" } }
+  </script>
   <script type="module" src="app.js"></script>
 </head>
 <body>
@@ -205,7 +208,7 @@
 
   <footer class="foot">
     <p>This is not financial or legal advice. Eligibility (DCR panels, registration, inspection) is not verified.</p>
-    <p>Documents may be processed outside India through AWS cross-Region inference. Files are deleted after reading.</p>
+    <p id="privacy-line"></p>
   </footer>
 
   <dialog id="page-viewer" aria-labelledby="page-viewer-title">

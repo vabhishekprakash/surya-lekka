@@ -1,8 +1,4 @@
-// Where the Surya Lekka API lives. Leave API_BASE empty when the API is served
-// from the same origin as this page, as with the local dev server
-// (python -m src.api.local_server). For the deployed site, set it to the
-// stack's ApiUrl output, for example
-// "https://abc123.execute-api.ap-south-1.amazonaws.com".
-window.SURYA_CONFIG = {
-  API_BASE: "",
-};
+// Where the API is and which AWS Region this copy is deployed in. scripts/build_site.py
+// writes this file for a deployment (API_BASE is the stack's ApiUrl output). Left empty,
+// the page talks to the server it came from, as the local dev server expects.
+window.SURYA_CONFIG = { API_BASE: "", REGION: "", CROSS_REGION: false };

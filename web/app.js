@@ -3,8 +3,15 @@
 
 const CONFIG = window.SURYA_CONFIG || {};
 const API_BASE = String(CONFIG.API_BASE || "").replace(/\/+$/, "");
-const PDFJS = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.10.38/pdf.min.mjs";
-const PDFJS_WORKER = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.10.38/pdf.worker.min.mjs";
+// pdf.js is pinned to one version and checked against these hashes before it runs.
+const PDFJS = {
+  url: "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.10.38/pdf.min.mjs",
+  integrity: "sha384-+0ti2moQlmLN7WZHE2RHIf5lV8hHxhxEalN0il3YZceG26fUPyOkR0hp9daxk1i7",
+};
+const PDFJS_WORKER = {
+  url: "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.10.38/pdf.worker.min.mjs",
+  integrity: "sha384-ToeVvShCxKc6CEvhHeMt0Q8A06pSPDbAlngO9nokrDmh914gk/pYd0N7D0a4Lz2o",
+};
 
 // Page limits shared with the API (src/extract/render.py).
 const MAX_PAGES = 20;
@@ -17,6 +24,18 @@ const POLL_MS = 2000;
 const SLOW_POLL_MS = 4000;
 const SLOW_AFTER_MS = 45000;
 const MAX_CHARGES = 10;
+
+// The privacy notice, from the Region this copy is deployed in (config.js).
+const REGION_NAMES = {
+  "ap-south-1": "AWS's Mumbai region (India)",
+  "ap-southeast-2": "AWS's Sydney region (Australia)",
+};
+const PRIVACY = {
+  local: "This copy runs on your own computer, so your pages stay on it.",
+  inRegion: "Your pages are processed in {where} and deleted after reading. If reading fails, they're removed automatically, usually within two days.",
+  crossRegion: "Your pages are stored in {where} and may be read in other AWS regions through cross-Region inference. They're deleted after reading. If reading fails, they're removed automatically, usually within two days.",
+};
+const READING_UNAVAILABLE = "AI reading isn't available yet. Please type the numbers instead.";
 
 const MODE_LABELS = {
   saved: "Sample (saved reading)",
@@ -145,6 +164,7 @@ const FAILURES = {
   result_too_large: "This quote has more detail than can be stored.",
   storage_error: "Something went wrong on our side.",
   internal_error: "Something went wrong on our side.",
+  reading_unavailable: "Reading was switched off before this quote was read.",
 };
 
 const state = {
@@ -288,7 +308,9 @@ function showProblem(title, message, { retry = false, sample = false } = {}) {
 }
 
 function showApiError(error) {
-  if (error.status === 429) {
+  if (error.code === "reading_unavailable") {
+    showProblem("Quote reading is off for now", READING_UNAVAILABLE, { sample: true });
+  } else if (error.status === 429) {
     showProblem("Daily limit reached", error.message, { sample: true });
   } else if (error.status === 503) {
     showProblem("New checks are paused", error.message, { sample: true });
@@ -333,12 +355,37 @@ function newJob(job, mode) {
 
 let pdfjsLoading = null;
 
+// The module goes through a modulepreload link with integrity and crossorigin
+// attributes, so the browser checks its hash before import() runs it (the import
+// map in index.html holds the same hash). The worker is fetched with the same
+// check and handed to pdf.js as a local blob.
+function preloadModule({ url, integrity }) {
+  return new Promise((resolve, reject) => {
+    const link = el("link", { rel: "modulepreload", href: url, integrity, crossorigin: "anonymous" });
+    if (!link.relList.supports("modulepreload")) {
+      reject(new Error("modulepreload is not supported"));
+      return;
+    }
+    link.addEventListener("load", resolve);
+    link.addEventListener("error", () => reject(new Error("pdf.js failed its integrity check or didn't load")));
+    document.head.append(link);
+  });
+}
+
+async function verifiedScriptUrl({ url, integrity }) {
+  const res = await fetch(url, { integrity, mode: "cors", credentials: "omit" });
+  if (!res.ok) throw new Error("the pdf.js worker didn't load");
+  return URL.createObjectURL(new Blob([await res.blob()], { type: "text/javascript" }));
+}
+
 function loadPdfjs() {
   if (!pdfjsLoading) {
-    pdfjsLoading = import(PDFJS).then((pdfjs) => {
-      pdfjs.GlobalWorkerOptions.workerSrc = PDFJS_WORKER;
+    pdfjsLoading = (async () => {
+      const [, workerSrc] = await Promise.all([preloadModule(PDFJS), verifiedScriptUrl(PDFJS_WORKER)]);
+      const pdfjs = await import(PDFJS.url);
+      pdfjs.GlobalWorkerOptions.workerSrc = workerSrc;
       return pdfjs;
-    });
+    })();
     pdfjsLoading.catch(() => { pdfjsLoading = null; });
   }
   return pdfjsLoading;
@@ -1055,7 +1102,14 @@ function openResults(result) {
 
 // ---------------------------------------------------------------- start
 
+function privacyLine(region, crossRegion) {
+  if (!region) return PRIVACY.local;
+  const where = REGION_NAMES[region] || `AWS's ${region} region`;
+  return (crossRegion ? PRIVACY.crossRegion : PRIVACY.inRegion).replace("{where}", where);
+}
+
 function init() {
+  $("#privacy-line").textContent = privacyLine(String(CONFIG.REGION || ""), CONFIG.CROSS_REGION === true);
   document.addEventListener("click", (event) => {
     const target = event.target.closest("[data-go]");
     if (!target) return;
