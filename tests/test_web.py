@@ -165,3 +165,10 @@ def test_every_charge_question_sits_beside_the_charges_and_is_never_prefilled():
 def test_amounts_on_the_page_use_the_rupee_sign_without_a_space():
     assert 'return "₹" + n.toLocaleString("en-IN", { maximumFractionDigits: 2 });' in APP
     assert "Rs " not in APP.replace("Rs ${", "") and 'placeholder="Rs"' not in INDEX
+
+
+def test_the_suppliers_gst_state_is_shown_as_information_only():
+    review = APP[APP.index("function renderReviewFields()"):APP.index("function renderOptionChoice()")]
+    assert "q.supplier_gst_state" in review
+    assert "registered for GST in" in review and "not where your house is" in review
+    assert "supplier_gst_state" not in APP[APP.index("function renderQuestions("):APP.index("// ---------------------------------------------------------------- manual entry")]

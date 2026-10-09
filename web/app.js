@@ -788,10 +788,15 @@ function renderReviewFields() {
       || inputValue(pick(q, name)) !== "")
     .map(([name, label]) => textRow(name, label, pick(q, name), { inputmode: "decimal" }));
   groups.push(["Subsidy and net cost", subsidyRows]);
+  // Information only: the GSTIN's state code says where the vendor is registered for GST. It
+  // never fills in the household's own state.
+  const gst = q.supplier_gst_state && !q.supplier_gst_state.conflict ? q.supplier_gst_state : null;
   groups.push(["Other details", [
     selectRow("dcr_declaration", "DCR declaration (panels and cells made in India)", q.dcr_declaration, DCR_CHOICES),
     textRow("vendor_registration", "Vendor registration number", q.vendor_registration),
-  ]]);
+    gst ? el("p", { class: "hint", text: `The vendor is registered for GST in ${gst.value} (from the GSTIN on page ${gst.page}). `
+      + "That's the vendor's registration, not where your house is." }) : null,
+  ].filter(Boolean)]);
 
   $("#review-fields").replaceChildren(...groups.filter(([, rows]) => rows.length).map(([title, rows]) =>
     el("fieldset", { class: "group" }, el("legend", { text: title }), rows)));
