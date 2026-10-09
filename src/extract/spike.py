@@ -46,7 +46,8 @@ from extract.render import DEFAULT_DPI, MAX_PAGES, render_document
 from extract import textract_client
 from extract.textract_queries import MONEY
 
-HELDOUT = ("Q10", "Q11", "Q13", "Q14")
+# Held out in two frozen label files; read together in one final run.
+HELDOUT = ("Q04", "Q07", "Q08", "Q09", "Q10", "Q11", "Q13", "Q14", "Q15")
 HELDOUT_MARKER = "HELDOUT_RUN_DONE.json"
 CONFIDENCE_BUCKETS = (0, 50, 60, 70, 80, 90, 95)
 # Report column -> scoring status. "conflict" is a missing field the merge marked as a conflict.
@@ -297,6 +298,11 @@ def check_heldout_names(docs, args):
     if held and not args.final_heldout:
         raise RunStopped(f"{', '.join(held)} are held out for the final evaluation. "
                          "Give --final-heldout to run them, once.")
+    if args.final_heldout and (len(docs) != len(HELDOUT) or {d.upper() for d in docs} != set(HELDOUT)):
+        raise RunStopped(f"--final-heldout reads all nine held-out quotes together and nothing else: "
+                         f"--files {','.join(HELDOUT)}.")
+    if args.final_heldout and args.max_pages > MAX_PAGES:
+        raise RunStopped(f"--final-heldout keeps the product's {MAX_PAGES}-page limit.")
 
 
 def claim_heldout_run(docs, args, out_root):
