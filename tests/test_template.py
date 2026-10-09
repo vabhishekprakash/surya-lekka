@@ -15,7 +15,7 @@ RES = TEMPLATE["Resources"]
 
 
 def statements(name):
-    return [s for p in RES[name]["Properties"]["Policies"] for s in p["Statement"]]
+    return [s for p in RES[name]["Properties"].get("Policies", []) for s in p["Statement"]]
 
 
 def actions(statement):
@@ -56,7 +56,7 @@ def test_http_api_throttling_and_cors():
     routes = {(e["Properties"]["Method"], e["Properties"]["Path"]) for r in RES.values()
               for e in (r.get("Properties", {}).get("Events") or {}).values() if e["Type"] == "HttpApi"}
     assert routes == {("POST", "/jobs"), ("GET", "/jobs/{id}"), ("POST", "/jobs/{id}/checks"),
-                      ("POST", "/jobs/{id}/retry"), ("POST", "/samples/{sample_id}")}
+                      ("POST", "/jobs/{id}/retry"), ("POST", "/samples/{sample_id}"), ("POST", "/checks")}
 
 
 def test_logs_kept_seven_days_for_every_function():
@@ -133,6 +133,7 @@ def test_worker_permissions():
     ("RecheckFunction", {"dynamodb:GetItem", "dynamodb:UpdateItem"}),
     ("SampleJobFunction", {"dynamodb:PutItem", "dynamodb:UpdateItem", "s3:GetObject", "s3:PutObject"}),
     ("RetryFunction", {"dynamodb:GetItem", "dynamodb:UpdateItem", "s3:PutObject"}),
+    ("ManualCheckFunction", set()),
 ])
 def test_api_functions_least_privilege(name, allowed):
     granted = set().union(*(actions(s) for s in statements(name)))

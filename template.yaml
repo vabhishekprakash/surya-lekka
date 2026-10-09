@@ -218,6 +218,19 @@ Resources:
             Path: /jobs/{id}/retry
             Method: POST
 
+  # Checks on numbers the user typed in: no storage, no model call, so no extra permissions.
+  ManualCheckFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: api.manual.handler
+      Events:
+        Api:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /checks
+            Method: POST
+
   SampleJobFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -350,6 +363,12 @@ Resources:
     Type: AWS::Logs::LogGroup
     Properties:
       LogGroupName: !Sub "/aws/lambda/${RetryFunction}"
+      RetentionInDays: 7
+
+  ManualCheckLogs:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${ManualCheckFunction}"
       RetentionInDays: 7
 
   SampleJobLogs:
