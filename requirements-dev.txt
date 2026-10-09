@@ -5,3 +5,4 @@ botocore==1.43.109
 moto[s3,dynamodb]==5.2.3
 cfn-lint==1.57.2
 aws-sam-translator==1.113.0
+aws-xray-sdk==2.15.0

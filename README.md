@@ -124,7 +124,7 @@ Sources:
 - Both buckets block public access and refuse plain HTTP. Only the CloudFront distribution can read the site bucket, through origin access control. The API and the upload bucket accept requests from one origin: the CloudFront domain, or with hosting off the local address set in `SiteOrigin`.
 - Each Lambda function has its own role with only the actions it needs. The worker's Bedrock permission exists only while Nova reads, and names the exact model or inference profile and the Regions that profile lists. Its `textract:AnalyzeDocument` permission exists only while Textract reads. That action has no resource-level permissions, so the statement uses `"*"`. The worker sends page bytes, so Textract needs no access to the bucket.
 - The web app places every piece of quote text with `textContent`, never as HTML. pdf.js is pinned to one version on cdnjs and checked against its SRI hash before it runs.
-- X-Ray traces Lambda invocations only. The code has no X-Ray SDK, so no request or document data goes into traces.
+- X-Ray traces each Lambda invocation and, through the AWS X-Ray SDK's botocore patch, each AWS call it makes (Textract, S3, DynamoDB), so the service map shows them. A traced call records its operation, Region, request id, status and a few parameters (table names, bucket names and object keys, which hold job ids but never tokens). No request or response body is recorded, so no page image, quote text or token reaches a trace; a test checks this.
 
 ## Run it locally
 

@@ -44,6 +44,22 @@ READING_ENGINES = ("nova", "textract")
 READING_UNAVAILABLE = "AI reading isn't available yet. Please type the numbers instead."
 
 
+def trace_aws_calls():
+    """In Lambda, record each AWS SDK call (Textract, S3, DynamoDB) as an X-Ray subsegment,
+    so traces and the service map show them. The SDK's botocore patch records the
+    operation, Region, request id, HTTP status and a short list of request parameters
+    (DynamoDB table names, S3 bucket names and object keys, which hold job ids but never
+    tokens). It records no request or response bodies, so no page image, quote text or job
+    token reaches a trace; tests/test_xray.py checks this. Local runs and tests are not
+    patched."""
+    if not os.environ.get("AWS_LAMBDA_FUNCTION_NAME"):
+        return
+    from aws_xray_sdk.core import patch, xray_recorder
+
+    xray_recorder.configure(context_missing="LOG_ERROR")
+    patch(["botocore"])
+
+
 def log(event, **fields):
     unknown = set(fields) - LOG_FIELDS
     if unknown:
@@ -359,3 +375,6 @@ def authorised_job(event):
     if int(item.get("expires_at", 0)) <= now():
         raise not_found
     return item
+
+
+trace_aws_calls()
