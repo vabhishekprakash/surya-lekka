@@ -75,40 +75,79 @@ def test_typed_numbers_come_from_the_saved_reading():
     assert smoke["expected_statuses"]()["C1_capacity"] == "inconsistent"
 
 
-def fake_site(allow_origin):
-    """A site and API in one: the page, a config.js naming this server, and CORS preflights."""
+PAGE = (b'<!doctype html><html><head><link rel="stylesheet" href="style.css"><script src="config.js"></script>'
+        b'<script type="module" src="app.js"></script></head><body><a href="#home">x</a></body></html>')
+
+
+def fake_site(allow_origin, missing=()):
+    """A site under /app/ and an API in one: the page and its assets, a config.js naming
+    this server, CORS preflights, POST /jobs and the presigned upload it hands out."""
+    seen = {"upload_origin": None}
+
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *args):
             pass
 
-        def do_GET(self):
-            base = f"http://127.0.0.1:{self.server.server_address[1]}"
-            body, kind = ((b"<!doctype html><html></html>", "text/html") if self.path == "/" else
-                          (local_server.config_js(base, "ap-south-1", False).encode(), "text/javascript"))
-            self.send_response(200)
+        def _send(self, status, body=b"", kind="text/plain", headers=()):
+            self.send_response(status)
             self.send_header("content-type", kind)
+            for k, v in headers:
+                self.send_header(k, v)
             self.end_headers()
             self.wfile.write(body)
 
-        def do_OPTIONS(self):
-            self.send_response(204)
-            self.send_header("access-control-allow-origin", allow_origin(self.server.server_address[1]))
-            self.end_headers()
+        def do_GET(self):
+            base = f"http://127.0.0.1:{self.server.server_address[1]}"
+            files = {"/app/": (PAGE, "text/html"), "/app/style.css": (b"body{}", "text/css"),
+                     "/app/app.js": (b"", "text/javascript"),
+                     "/app/config.js": (local_server.config_js(base, "ap-south-1", False).encode(), "text/javascript")}
+            if self.path in files and self.path not in missing:
+                self._send(200, *files[self.path])
+            else:
+                self._send(404)
 
-    return ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        def do_OPTIONS(self):
+            self._send(204, headers=[("access-control-allow-origin", allow_origin(self.server.server_address[1]))])
+
+        def do_POST(self):
+            base = f"http://127.0.0.1:{self.server.server_address[1]}"
+            self.rfile.read(int(self.headers.get("content-length", 0)))
+            if self.path == "/jobs":
+                target = {"url": base + "/upload", "fields": {"key": "uploads/x/page-01.jpg"}}
+                body = {"job_id": "x", "token": "t", "uploads": [{"page": 1, **target}], "manifest": target,
+                        "manifest_body": {"pages": 1}}
+                self._send(201, json.dumps(body).encode(), "application/json")
+            else:
+                seen["upload_origin"] = self.headers.get("origin")
+                allowed = allow_origin(self.server.server_address[1])
+                self._send(204, headers=[("access-control-allow-origin", allowed)] if allowed else [])
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    server.seen = seen
+    return server
 
 
 @pytest.mark.parametrize("allowed,result", [(lambda port: f"http://127.0.0.1:{port}", "PASS"),
                                             (lambda port: "https://elsewhere.example", "FAIL")])
 def test_site_step_checks_the_page_config_and_cors(allowed, result):
-    with serving(fake_site(allowed)) as url:
-        args = type("Args", (), {"site": url + "/"})
+    site = fake_site(allowed)
+    with serving(site) as url:
+        args = type("Args", (), {"site": url + "/app/", "page": str(smoke["DEFAULT_PAGE"])})
         try:
             outcome = "PASS" if smoke["step_site"](smoke["Api"](url), args) else "FAIL"
         except smoke["Failed"] as e:
             outcome = "FAIL"
             assert "does not accept requests from" in str(e)
     assert outcome == result
+    if result == "PASS":
+        assert site.seen["upload_origin"] == url  # the upload was sent from the site's origin
+
+
+def test_site_step_loads_every_asset_under_the_site_path():
+    with serving(fake_site(lambda port: f"http://127.0.0.1:{port}", missing=("/app/style.css",))) as url:
+        args = type("Args", (), {"site": url + "/app/", "page": str(smoke["DEFAULT_PAGE"])})
+        with pytest.raises(smoke["Failed"], match="style.css"):
+            smoke["step_site"](smoke["Api"](url), args)
 
 
 def test_local_site_mode_serves_web_against_a_deployed_api():

@@ -7,7 +7,10 @@ Steps:
   manual   POST /checks with S2's numbers typed in gives the same capacity and price results.
   reading  With reading off: POST /jobs is refused with reading_unavailable.
   job      With reading on: one synthetic page goes through the whole job flow (one model call).
-  site     With --site: the web app loads, its config names this API, and the API accepts its origin.
+  site     With --site: the page and every file it loads come back from under the site's path,
+           config.js names this API, the API's CORS preflight passes for the site's origin, and
+           a real presigned S3 POST of one page (no manifest, so nothing is read) succeeds from
+           that origin.
 
 Prints PASS or FAIL for each step with status codes, counts and reason codes
 only, never document text. Exits 0 when every step passes.
@@ -15,6 +18,7 @@ only, never document text. Exits 0 when every step passes.
 
 import argparse
 import json
+import re
 import sys
 import time
 import urllib.error
@@ -167,10 +171,11 @@ def multipart(fields, data):
     return b"".join(parts) + f"--{boundary}--\r\n".encode(), f"multipart/form-data; boundary={boundary}"
 
 
-def post_form(target, data, what):
+def post_form(target, data, what, headers=None):
     body, content_type = multipart(target["fields"], data)
-    status, _, _ = http("POST", target["url"], body, {"content-type": content_type})
+    status, _, reply_headers = http("POST", target["url"], body, {"content-type": content_type, **(headers or {})})
     expect(status in (200, 201, 204), f"uploading the {what} returned HTTP {status}")
+    return reply_headers
 
 
 def page_image(path):
@@ -201,18 +206,34 @@ def step_job(api, args):
     return f"read in about {seconds} s, mode {view.get('mode')}, {found} top-level fields found"
 
 
+ASSET = re.compile(r'(?:src|href)="([^"#:?]+\.(?:js|css))"')
+ASSET_TYPES = {".js": "javascript", ".css": "text/css"}
+
+
 def step_site(api, args):
     site = args.site.rstrip("/")
     status, page, headers = http("GET", site + "/")
     expect(status == 200 and "text/html" in headers.get("content-type", ""), f"GET {site}/ returned HTTP {status}")
-    status, config, headers = http("GET", site + "/config.js")
-    expect(status == 200 and "javascript" in headers.get("content-type", ""), f"GET config.js returned HTTP {status}")
-    expect(json.dumps(api.base) in config.decode("utf-8", "replace"), "config.js does not name this API")
+    assets = sorted(set(ASSET.findall(page.decode("utf-8", "replace"))))
+    expect("config.js" in assets, "the page does not load config.js")
+    for name in assets:
+        status, body, headers = http("GET", f"{site}/{name}")
+        kind = ASSET_TYPES[Path(name).suffix]
+        expect(status == 200 and kind in headers.get("content-type", ""), f"GET {name} returned HTTP {status}")
+        if name == "config.js":
+            expect(json.dumps(api.base) in body.decode("utf-8", "replace"), "config.js does not name this API")
     origin = "{0.scheme}://{0.netloc}".format(urlsplit(site))
     status, _, headers = http("OPTIONS", api.base + "/checks", None, {
         "origin": origin, "access-control-request-method": "POST", "access-control-request-headers": "content-type"})
     expect(headers.get("access-control-allow-origin") == origin, f"the API does not accept requests from {origin}")
-    return f"page, config and CORS for {origin}"
+    # One page through a real presigned POST, sent as the browser would from the site. No
+    # manifest follows, so nothing is read; the bucket's lifecycle rule removes the page.
+    status, job = api.call("POST", "/jobs", {"page_count": 1})
+    expect(status == 201, f"POST /jobs returned {refused(status, job)}")
+    data = page_image(Path(args.page))
+    reply = post_form(job["uploads"][0], data, "page", {"origin": origin})
+    expect(reply.get("access-control-allow-origin") == origin, f"the upload bucket does not accept uploads from {origin}")
+    return f"page and {len(assets)} files under {urlsplit(site).path or '/'}, CORS and a presigned upload for {origin}"
 
 
 def steps(args):

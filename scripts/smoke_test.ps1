@@ -18,7 +18,9 @@ param(
     [Alias("Profile")][string]$AwsProfile = "default",
     [ValidateSet("ap-south-1", "ap-southeast-2")][string]$Region = "ap-south-1",
     [Parameter(Mandatory = $true)][ValidatePattern('^\d{12}$')][string]$ExpectedAccount,
-    [string]$StackName = "surya-lekka"
+    [string]$StackName = "surya-lekka",
+    # The web app's address when it is served outside the stack, such as GitHub Pages.
+    [string]$SiteUrl
 )
 
 $ErrorActionPreference = "Stop"
@@ -33,13 +35,13 @@ $stackJson = aws cloudformation describe-stacks --stack-name $StackName --profil
 if ($LASTEXITCODE -ne 0) { throw "Reading stack $StackName failed (exit code $LASTEXITCODE)" }
 $stack = $stackJson | ConvertFrom-Json
 $apiUrl = ($stack.Outputs | Where-Object { $_.OutputKey -eq "ApiUrl" }).OutputValue
-$siteUrl = ($stack.Outputs | Where-Object { $_.OutputKey -eq "SiteUrl" }).OutputValue
+if (-not $SiteUrl) { $SiteUrl = ($stack.Outputs | Where-Object { $_.OutputKey -eq "SiteUrl" }).OutputValue }
 $engine = ($stack.Parameters | Where-Object { $_.ParameterKey -eq "ReadingEngine" }).ParameterValue
 if (-not $apiUrl) { throw "Stack $StackName has no ApiUrl output." }
 if (-not $engine) { $engine = "none" }
 
 $smokeArgs = @("scripts\smoke_test.py", "--api", $apiUrl, "--reading-engine", $engine)
-if ($siteUrl) { $smokeArgs += @("--site", $siteUrl) }
+if ($SiteUrl) { $smokeArgs += @("--site", $SiteUrl) }
 Write-Host "== Smoke test (reading engine: $engine)"
 & $python @smokeArgs
 exit $LASTEXITCODE
