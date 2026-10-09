@@ -54,6 +54,8 @@ SAVE_RESERVE_SECONDS = 30
 # A call starts only with time left for it to time out and for the job to be saved.
 CALL_BUDGET_MS = (READ_TIMEOUT_SECONDS + CONNECT_TIMEOUT_SECONDS + SAVE_RESERVE_SECONDS) * 1000
 SAVED_KEYS = ("batch", "pages", "model_id", "contract", "usage")
+DELETE_ATTEMPTS = 3
+DELETE_BACKOFF_SECONDS = 0.5
 # Safe reason codes for an error that stops the job.
 REASONS = {
     "AccessDeniedException": "model_access_denied",
@@ -257,5 +259,22 @@ def _fail(bucket, job_id, page_count, reason, retries_left, started):
 
 
 def _delete_uploads(bucket, job_id, page_count):
+    """Delete the job's uploads, trying again for any object S3 reports as not
+    deleted. Logs counts only. The bucket's lifecycle rule removes anything left."""
+    from botocore.exceptions import BotoCoreError, ClientError
+
     keys = [page_key(job_id, n) for n in range(1, page_count + 1)] + [manifest_key(job_id)]
-    s3().delete_objects(Bucket=bucket, Delete={"Objects": [{"Key": k} for k in keys], "Quiet": True})
+    remaining = keys
+    for attempt in range(DELETE_ATTEMPTS):
+        if attempt:
+            time.sleep(DELETE_BACKOFF_SECONDS * attempt)
+        try:
+            reply = s3().delete_objects(Bucket=bucket, Delete={"Objects": [{"Key": k} for k in remaining],
+                                                               "Quiet": True})
+        except (BotoCoreError, ClientError):
+            continue
+        failed = {e.get("Key") for e in reply.get("Errors") or []}
+        remaining = [k for k in remaining if k in failed]
+        if not remaining:
+            break
+    log("uploads_deleted", job_id=job_id, deleted=len(keys) - len(remaining), delete_errors=len(remaining))

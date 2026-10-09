@@ -476,6 +476,59 @@ def test_unretryable_failure_deletes_the_uploads(aws):
     assert run_worker(job["job_id"]) == ["failed"] and uploads(aws, job["job_id"]) == []
 
 
+def flaky_deletes(monkeypatch, failing_calls, raise_error=False):
+    """S3 reports the first key of each of the first failing_calls delete calls as not deleted."""
+    from botocore.exceptions import ClientError
+
+    real = common.s3()
+    delete, calls = real.delete_objects, []
+
+    def delete_objects(**kwargs):
+        keys = [o["Key"] for o in kwargs["Delete"]["Objects"]]
+        calls.append(keys)
+        if len(calls) > failing_calls:
+            return delete(**kwargs)
+        if raise_error:
+            raise ClientError({"Error": {"Code": "InternalError", "Message": "Sentinel delete text"}}, "DeleteObjects")
+        delete(Bucket=kwargs["Bucket"], Delete={"Objects": [{"Key": k} for k in keys[1:]], "Quiet": True})
+        return {"Errors": [{"Key": keys[0], "Code": "InternalError", "Message": "Sentinel delete text"}]}
+
+    monkeypatch.setattr(real, "delete_objects", delete_objects)
+    monkeypatch.setattr(worker, "DELETE_BACKOFF_SECONDS", 0)
+    return calls
+
+
+def deletion_logs(caplog):
+    return [json.loads(r.getMessage()) for r in caplog.records
+            if r.name == "surya_lekka" and json.loads(r.getMessage())["event"] == "uploads_deleted"]
+
+
+@pytest.mark.parametrize("raise_error", [False, True])
+def test_delete_errors_are_retried(aws, monkeypatch, caplog, raise_error):
+    calls = flaky_deletes(monkeypatch, failing_calls=1, raise_error=raise_error)
+    job = create()
+    upload(aws, job)
+    with caplog.at_level("INFO", logger="surya_lekka"):
+        assert run_worker(job["job_id"]) == ["done"]
+    assert len(calls) == 2 and calls[1] == (calls[0] if raise_error else calls[0][:1])
+    assert uploads(aws, job["job_id"]) == []
+    (event,) = deletion_logs(caplog)
+    assert (event["deleted"], event["delete_errors"]) == (3, 0)
+    assert "Sentinel" not in caplog.text and "page-01" not in caplog.text
+
+
+def test_deletes_that_keep_failing_are_counted_not_described(aws, monkeypatch, caplog):
+    calls = flaky_deletes(monkeypatch, failing_calls=99)
+    job = create()
+    upload(aws, job)
+    with caplog.at_level("INFO", logger="surya_lekka"):
+        assert run_worker(job["job_id"]) == ["done"]  # the lifecycle rule is the backstop
+    assert len(calls) == worker.DELETE_ATTEMPTS and get(job)[1]["status"] == "done"
+    (event,) = deletion_logs(caplog)
+    assert (event["deleted"], event["delete_errors"]) == (2, 1)
+    assert "Sentinel" not in caplog.text and "page-01" not in caplog.text and "InternalError" not in caplog.text
+
+
 def test_other_objects_are_ignored(aws):
     event = {"Records": [{"s3": {"bucket": {"name": BUCKET}, "object": {"key": "uploads/x/page-01.jpg"}}}]}
     assert worker.handler(event, None) == {"outcomes": []}
