@@ -30,7 +30,7 @@ It never recommends a system size, predicts savings or payback, ranks vendors, a
 
 ### What happens to my quote?
 
-The page turns your quote into page images on your own device and only those images are uploaded. Your pages are processed in AWS's Mumbai region (India) and deleted after reading. If reading fails, they're removed automatically, usually within two days. Logs hold job ids, timings and reason codes, never the text of your quote. See [Privacy and safety](#privacy-and-safety) for the details, including the notice shown when Amazon Textract reads the pages and what changes when Nova is reached through a cross-Region inference profile.
+The page turns your quote into page images on your own device and only those images are uploaded. On the public site the notice reads: "Your pages are read by Amazon Textract in AWS's Mumbai region (India) and deleted from our storage after reading. This AWS account has opted out of AWS using them to improve its services. If reading fails, they're removed automatically, usually within two days." Logs hold job ids, timings and reason codes, never the text of your quote. See [Privacy and safety](#privacy-and-safety) for the details, including the notice shown when Amazon Textract reads the pages and what changes when Nova is reached through a cross-Region inference profile.
 
 ### Why not just use a subsidy calculator?
 
@@ -54,6 +54,8 @@ A calculator needs you to find each number, know which figure is the DC panel ca
 There are two other ways in. The three samples are made-up quotes with saved readings, so trying one never calls the model. "Type the numbers instead" sends the figures the user types straight to the checks, with nothing stored. Every result carries a label saying where its values came from: "Read by Amazon Textract", "Read by Amazon Nova", "Sample (saved reading)" or "Entered by you".
 
 The stack is defined in `template.yaml` (AWS SAM): an HTTP API on API Gateway, seven Lambda functions on Python 3.12, a private S3 bucket for uploads, DynamoDB for jobs, an SQS queue for worker events that failed, CloudWatch logs kept for 7 days, X-Ray tracing, and the web app in a second private bucket behind CloudFront.
+
+While our AWS account is blocked from creating CloudFront distributions, the public site is served from GitHub Pages instead, at https://vabhishekprakash.github.io/surya-lekka/, and talks to the same API. The template still supports CloudFront: `HostingEnabled` is only switched off until the account is verified.
 
 ## What it checks
 
@@ -176,7 +178,17 @@ The stack deploys in `ap-south-1` (Mumbai) or `ap-southeast-2` (Sydney). The tem
 
 ### Without CloudFront
 
-New AWS accounts are sometimes blocked from creating CloudFront distributions until the account is verified. Deploy everything else with:
+New AWS accounts are sometimes blocked from creating CloudFront distributions until the account is verified. Ours is, so our public site is on GitHub Pages for now. The template still creates CloudFront and the site bucket when `HostingEnabled` is true.
+
+To publish the web app on GitHub Pages instead, set the repository's Pages source to GitHub Actions, then run:
+
+```
+.\scripts\deploy.ps1 -Profile default -Region ap-south-1 -ExpectedAccount <your-account-id> -HostingEnabled false -ReadingEngine textract -SiteOrigin https://<your-user>.github.io -Pages
+```
+
+After the stack is deployed, the script checks the AI services opt-out policy, sets the repo variables the site needs with `gh variable set` (API URL, Region, reading engine, opt-out status, cross-Region), then starts `.github/workflows/pages.yml` with `gh workflow run`. That workflow runs only when started by hand, never on push, so it never publishes stale settings. It builds `web/` with `scripts/build_site.py` from those variables and needs no AWS credentials. A missing or unknown opt-out value gives the notice that AWS may keep the pages. The API accepts requests only from the `SiteOrigin` you pass.
+
+To serve the web app from your own machine instead, deploy everything else with:
 
 ```
 .\scripts\deploy.ps1 -Profile default -Region ap-south-1 -ExpectedAccount <your-account-id> -HostingEnabled false
@@ -196,7 +208,7 @@ Open http://127.0.0.1:8000/. In this mode the local server only serves the web a
 .\scripts\smoke_test.ps1 -Profile default -Region ap-south-1 -ExpectedAccount <your-account-id>
 ```
 
-It makes the same account check, then runs a sample (saved reading), the checks on S2's numbers typed in, and either the reading-off refusal or, with reading on, one synthetic page through the whole job flow (one model call). With hosting on, it also loads the site and checks that the API accepts its origin. It prints PASS or FAIL for each step and never prints document text.
+It makes the same account check, then runs a sample (saved reading), the checks on S2's numbers typed in, and either the reading-off refusal or, with reading on, one synthetic page through the whole job flow (one model call). With hosting on, or with `-SiteUrl` for a site served elsewhere such as GitHub Pages, it also loads the page and every file it uses from under the site's path, checks that the API accepts the site's origin, and sends one page through a real presigned upload from that origin (no manifest follows, so nothing is read). It prints PASS or FAIL for each step and never prints document text.
 
 ## Tests
 

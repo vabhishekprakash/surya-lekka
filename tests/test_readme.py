@@ -52,7 +52,7 @@ def test_gate_table_follows_the_code():
 def test_privacy_line_matches_the_web_app():
     line = ("Your pages are processed in AWS's Mumbai region (India) and deleted after reading. If reading fails, "
             "they're removed automatically, usually within two days.")
-    assert f'"{line}"' in section("Privacy and safety") and line in section("FAQ")
+    assert f'"{line}"' in section("Privacy and safety")
     assert "inRegion: \"Your pages are processed in {where} and deleted after reading." in APP
     assert "AWS's Sydney region (Australia)" in README
 
@@ -100,3 +100,18 @@ def test_textract_engine_privacy_cost_and_limits():
 def test_limits_say_how_panel_answers_are_paired():
     assert ("paired in the order Textract returns them on a page" in section("Limits")
             and "the household confirms the pairing" in section("Limits"))
+
+
+def test_the_privacy_summary_near_the_top_is_the_sentence_the_site_shows():
+    # The public site reads with Textract and the account's opt-out is confirmed.
+    line = json.loads(re.search(r'^\s*textractOptedOut: (".*"),$', APP, re.M).group(1))
+    assert line.replace("{where}", "AWS's Mumbai region (India)") in section("FAQ")
+
+
+def test_the_site_is_on_github_pages_while_cloudfront_is_blocked():
+    how = section("How it works")
+    assert "GitHub Pages" in how and "CloudFront" in how and "still" in how
+    deploy = section("Deploy")
+    assert "-SiteOrigin https://<your-user>.github.io -Pages" in deploy
+    assert ".github/workflows/pages.yml" in deploy and "gh variable set" in deploy
+    assert "https://vabhishekprakash.github.io/surya-lekka/" in README
