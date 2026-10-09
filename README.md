@@ -238,7 +238,12 @@ GitHub Actions runs the tests and the lint on every push (`.github/workflows/tes
 
 Evaluation pending.
 
-The method: 12 real quotes, hand-labelled by us, 8 for development and 4 held out. The held-out set is run once. Raw extraction is scored per field separately from the results after the user's corrections. The quotes and labels stay outside this repo, and only aggregate numbers will be published.
+The method: 17 real quotes, hand-labelled by us, 8 for development and 9 held out. The held-out set is run once, all nine quotes together. Raw extraction is scored per field separately from the results after the user's corrections. The quotes and labels stay outside this repo, and only aggregate numbers will be published.
+
+Evaluation notes:
+
+- Vendor name: when a label lists several names printed on the quote, separated by semicolons, the reading counts as correct if it matches any one of them. A note in square brackets at the end of a label is ours, not part of a name. This rule was set before the held-out run.
+- Page limit: the held-out run keeps the product's 20-page limit. One held-out quote has 43 pages, so only pages 1 to 20 are read and its result is marked as processing incomplete, as it would be for a user.
 
 ## Team
 

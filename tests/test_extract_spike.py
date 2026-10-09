@@ -439,7 +439,7 @@ def textract_args(tmp, files="S1,S2", *extra):
 
 
 class SampleTextract:
-    """Answers with the committed replies for S1 and S2, page by page."""
+    """Answers with the committed replies for S1 and S2, page by page, round and round."""
 
     def __init__(self):
         fixtures = ROOT / "tests" / "fixtures" / "textract"
@@ -450,7 +450,7 @@ class SampleTextract:
     def analyze_document(self, **request):
         assert set(request) == {"Document", "FeatureTypes", "QueriesConfig"}
         self.calls += 1
-        return self.replies[self.calls - 1]
+        return self.replies[(self.calls - 1) % len(self.replies)]
 
 
 @pytest.fixture
@@ -498,7 +498,7 @@ def test_models_are_for_nova_only(sample_dir, capsys):
     assert spike.main(argv) == spike.STOPPED and "nova only" in capsys.readouterr().err
 
 
-@pytest.mark.parametrize("doc", ["Q10", "Q11", "Q13", "Q14", "q13"])
+@pytest.mark.parametrize("doc", ["Q04", "Q07", "Q08", "Q09", "Q10", "Q11", "Q13", "Q14", "Q15", "q13", "q09"])
 def test_heldout_documents_are_refused_before_anything_is_read(tmp_path, capsys, doc):
     argv = ["--engine", "textract", "--files", f"S1,{doc}", "--in", str(tmp_path / "missing"),
             "--out", str(tmp_path / "out"), "--dry-run"]
@@ -506,17 +506,39 @@ def test_heldout_documents_are_refused_before_anything_is_read(tmp_path, capsys,
     assert "held out" in capsys.readouterr().err and not (tmp_path / "out").exists()
 
 
+ALL_HELDOUT = ("Q04", "Q07", "Q08", "Q09", "Q10", "Q11", "Q13", "Q14", "Q15")
+
+
+def test_the_heldout_list_is_the_nine_quotes():
+    assert sorted(spike.HELDOUT) == sorted(ALL_HELDOUT)
+
+
+def heldout_inputs(sample_dir):
+    """The nine held-out names, each a copy of a synthetic sample (2 pages each)."""
+    import shutil
+    for i, doc in enumerate(ALL_HELDOUT):
+        shutil.copy(sample_dir / "in" / f"S{i % 2 + 1}.pdf", sample_dir / "in" / f"{doc}.pdf")
+
+
+@pytest.mark.parametrize("files", ["Q10,Q13", "Q04,Q07,Q08,Q09,Q10,Q11,Q13,Q14",
+                                   "Q04,Q07,Q08,Q09,Q10,Q11,Q13,Q14,Q15,S1"])
+def test_the_final_run_must_name_all_nine_and_nothing_else(sample_dir, capsys, live_textract, files):
+    heldout_inputs(sample_dir)
+    assert spike.main(textract_args(sample_dir, files, "--final-heldout")) == spike.STOPPED
+    assert "all nine" in capsys.readouterr().err and live_textract.calls == 0
+    assert not (sample_dir / "out" / "textract" / spike.HELDOUT_MARKER).exists()
+
+
 def test_the_heldout_run_happens_once_and_dry_runs_never_count(sample_dir, capsys, live_textract, monkeypatch):
-    (sample_dir / "in" / "S1.pdf").rename(sample_dir / "in" / "Q10.pdf")
-    (sample_dir / "in" / "S2.pdf").rename(sample_dir / "in" / "Q13.pdf")
-    argv = textract_args(sample_dir, "Q10,Q13", "--final-heldout")
+    heldout_inputs(sample_dir)
+    argv = textract_args(sample_dir, ",".join(ALL_HELDOUT), "--final-heldout", "--max-usd", "1")
     marker = sample_dir / "out" / "textract" / spike.HELDOUT_MARKER
     assert spike.main(argv + ["--dry-run"]) == 0 and spike.main(argv + ["--dry-run"]) == 0
     assert not marker.exists() and live_textract.calls == 0
     assert spike.main(argv) == 0
-    assert json.loads(marker.read_text(encoding="utf-8"))["files"] == ["Q10", "Q13"]
+    assert json.loads(marker.read_text(encoding="utf-8"))["files"] == list(ALL_HELDOUT)
     assert spike.main(argv) == spike.STOPPED
-    assert "already done" in capsys.readouterr().err and live_textract.calls == 4
+    assert "already done" in capsys.readouterr().err and live_textract.calls == 18
 
 
 def test_answer_keys_combine_and_a_document_may_be_in_only_one(sample_dir, capsys):
@@ -590,3 +612,36 @@ def test_a_reading_that_says_not_stated_is_a_miss_not_a_wrong_value():
     quote = sample_quote(lambda d: d.update(capacity_basis={"value": "unspecified"}))
     key = scoring.parse_answer_key("[S1]\ncapacity_basis: DC\n")["docs"]["S1"]["capacity_basis"]
     assert scoring.score_field(quote, "capacity_basis", key)["status"] == "missing"
+
+
+# --- vendor_name: a label listing several printed names -------------------------------------------
+
+def test_the_vendor_name_label_lists_names_with_semicolons():
+    key = scoring.parse_answer_key("[S1]\nvendor_name: Alpha Solar; Example Solar Pvt Ltd; Gamma Power "
+                                   "[letterhead, footer note] | 1, 2\n")["docs"]["S1"]["vendor_name"]
+    assert scoring.vendor_names(key["value"]) == ["Alpha Solar", "Example Solar Pvt Ltd", "Gamma Power"]
+    assert scoring.vendor_names("Example (India) Solar Pvt Ltd") == ["Example (India) Solar Pvt Ltd"]
+
+
+@pytest.mark.parametrize("label,status", [
+    ("Alpha Solar; Example Solar Pvt Ltd; Gamma Power", "correct"),
+    ("Example Solar Pvt Ltd; Alpha Solar", "correct"),
+    ("Alpha Solar; Example Solar Pvt Ltd [letterhead, footer]", "correct"),
+    ("Alpha Solar; Gamma Power", "wrong"),
+    ("Example Solar", "wrong"),
+])
+def test_any_one_listed_vendor_name_counts_as_correct(label, status):
+    assert scoring.score_field(sample_quote(), "vendor_name", truth(label))["status"] == status
+
+
+def test_other_text_fields_keep_exact_matching():
+    quote = sample_quote()
+    assert scoring.score_field(quote, "module_make_model", truth("Alpha; example pv exm-550"))["status"] != "correct"
+
+
+
+def test_the_final_run_keeps_the_product_page_limit(sample_dir, capsys, live_textract):
+    heldout_inputs(sample_dir)
+    argv = textract_args(sample_dir, ",".join(ALL_HELDOUT), "--final-heldout", "--max-pages", "43")
+    assert spike.main(argv) == spike.STOPPED
+    assert "20-page limit" in capsys.readouterr().err and live_textract.calls == 0

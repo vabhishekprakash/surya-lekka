@@ -331,6 +331,15 @@ def _compare(truth, fields, want, got_key, field=None):
     return _result(status, conflict, page_ok)
 
 
+_NOTE = re.compile(r"\s*\[[^\]]*\]\s*$")
+
+
+def vendor_names(text):
+    """The printed names a vendor_name label lists, separated by semicolons. A trailing
+    [note] is the labeller's, not part of a name; parentheses are kept."""
+    return [_NOTE.sub("", p).strip() for p in text.split(";") if _NOTE.sub("", p).strip()]
+
+
 def _split(text):
     return [p.strip() for p in re.split(r"[+;]", text) if p.strip()]
 
@@ -363,6 +372,11 @@ def score_field(quote, key, truth, doc_truth=None):
         parts, notes = [first], rest
     elif isinstance(where, tuple) and where[0] == "list":
         parts = _split(truth["value"])
+    elif key == "vendor_name":  # any one listed name counts as correct
+        names = vendor_names(truth["value"])
+        said = {repr(predicted_key(kind, f["value"], field)) for f in fields
+                if not f.get("conflict") and f.get("value") is not None}
+        parts = [next((n for n in names if repr(truth_key(kind, n, field)) in said), names[0])]
     else:
         parts = [truth["value"]]
     want = [truth_key(kind, p, field) for p in parts]
