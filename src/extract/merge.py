@@ -56,7 +56,10 @@ def _conflict_value(kind):
 
 
 def _candidate(f):
-    return {k: f.get(k) for k in ("value", "evidence_text", "page", "batch")}
+    out = {k: f.get(k) for k in ("value", "evidence_text", "page", "batch")}
+    if f.get("source"):  # e.g. a state read from the GSTIN, labelled as the GST registration state
+        out["source"] = f["source"]
+    return out
 
 
 class _Merger:
@@ -64,7 +67,14 @@ class _Merger:
         self.conflicts = []
 
     def field(self, path, kind, fields):
-        fields = [f for f in fields if f is not None and f.get("value") is not None]
+        # A field a page's own sources already disagreed on stays a conflict.
+        flagged = [c for f in fields if f is not None and f.get("conflict") for c in f.get("candidates") or []]
+        fields = [f for f in fields if f is not None and f.get("value") is not None and not f.get("conflict")]
+        if flagged:
+            candidates = flagged + [_candidate(f) for f in fields]
+            self.conflicts.append({"field": path, "reason": "sources disagree", "candidates": candidates})
+            return {"value": _conflict_value(kind), "evidence_text": None, "page": None, "batch": None,
+                    "conflict": True, "candidates": candidates}
         if not fields:
             return None
         candidates = [_candidate(f) for f in fields]

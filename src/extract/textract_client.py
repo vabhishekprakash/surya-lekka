@@ -36,9 +36,10 @@ from decimal import Decimal
 
 from checks.parse import parse_amount, parse_capacity
 
+from . import textract_sources as src
 from .nova_client import ExtractionFailure
 from .textract_queries import KINDS, TARGETS, queries_config
-from .wire_schema import count_value, normalise_batch, validate
+from .wire_schema import capacity_value, count_value, normalise_batch, validate
 
 MODEL_ID = "textract"
 PRICE_PER_PAGE_USD = 0.020  # AnalyzeDocument with tables and queries, per page, Mumbai
@@ -132,6 +133,21 @@ class _Page:
         lines = [b for b in self.blocks if b.get("BlockType") == "LINE" and _tidy(b.get("Text", ""))]
         self.lines = sorted(lines, key=lambda b: (_box(b) or (0, 0))[1::-1])
 
+    def children(self, block, kind="CHILD"):
+        return _children(block, self.by_id, kind)
+
+    def evidence_lines(self, answer):
+        """The LINE blocks evidence() quotes, or [] when the answer isn't on them."""
+        wanted = _loose(answer.get("Text", ""))
+        box = _box(answer)
+        if box:
+            found = [l for l in self.lines if _box(l) and _overlaps(box, _box(l))]
+        else:
+            found = [l for l in self.lines if wanted and wanted in _loose(l["Text"])]
+        if not wanted or wanted not in _loose("".join(l["Text"] for l in found)):
+            return []
+        return found
+
     def evidence(self, answer):
         """The full text of every LINE the answer's box overlaps, top to bottom. Without
         a box, the lines that contain the answer's text. None when the answer's text
@@ -186,7 +202,10 @@ class _Page:
             for r, c in sorted(headers):
                 header[c] = _tidy(f"{header.get(c, '')} {grid[(r, c)]}")
             header_rows = {r for r, _ in headers}
-            yield {k: v for k, v in grid.items() if k[0] not in header_rows}, header, confidence
+            merged_header = any(any(c["RowIndex"] in header_rows for c in _children(m, self.by_id))
+                                and (m.get("ColumnSpan") or 1) > 1
+                                for m in _children(table, self.by_id, "MERGED_CELL"))
+            yield {k: v for k, v in grid.items() if k[0] not in header_rows}, header, confidence, merged_header
 
 
 # --- parsing answers -----------------------------------------------------------------------
@@ -283,63 +302,223 @@ def _price_kind(header):
 
 # --- the mapping -----------------------------------------------------------------------------
 
-def map_page(reply, page_number, threshold=CONFIDENCE_THRESHOLD):
+# Every source the reader can use; SOURCES are the ones the deployed reader uses, chosen on
+# the development quotes by the acceptance rule (more matches, nothing new wrong).
+ALL_SOURCES = frozenset({"queries", "options_table", "answer_values", "lines", "bom_table", "amount_table",
+                         "forms", "expense", "gstin_state"})
+SOURCES = frozenset({"queries", "options_table"})
+QUERY_FIELDS = {"SYSTEM_CAPACITY": "stated_capacity", "PANEL_COUNT": "panel_count", "PANEL_WATTAGE": "panel_wattage",
+                "PANEL_MAKE_MODEL": "panel_make", "INVERTER_MAKE_MODEL": "inverter_make",
+                "INVERTER_CAPACITY": "inverter_rating", "PRICE_BEFORE_GST": "base_price", "GST_AMOUNT": "gst_amount",
+                "TOTAL_PAYABLE": "gross_total", "SUBSIDY_AMOUNT": "subsidy", "NET_COST": "net_cost",
+                "VENDOR_NAME": "vendor_name", "QUOTE_DATE": "quote_date"}
+PRICE_FIELDS = ("base_price", "gst_amount", "gross_total", "net_cost", "subsidy")
+GROUP_KEYS = {"panel_count": "count", "panel_wattage": "wattage", "panel_make": "make_model"}
+INVERTER_KEYS = {"inverter_rating": "rating", "inverter_make": "make_model"}
+
+
+def _typed_value(kind, raw):
+    """A typed value inside an answer with extra words, when exactly one candidate fits."""
+    if kind == "amount":
+        return src.one_amount(raw)
+    if kind in UNITS:
+        found = src.one_measure(raw, tuple(u.lower() for u in UNITS[kind]))
+        return found if found and _parses(kind, found) else None
+    if kind == "count":
+        found = src.one_count(raw) or (re.fullmatch(r"\s*(\d{1,3})\s*(?:solar\s+)?(?:panels?|modules?)\s*", raw, re.I)
+                                       or [None, None])[1]
+        return found
+    return None
+
+
+def _value_key(field, raw):
+    if field in PRICE_FIELDS:
+        r = parse_amount(raw)
+        return ("amount", Decimal(str(r["parsed"])).normalize()) if r["parse_status"] == "ok" else ("raw", _loose(raw))
+    if field in ("stated_capacity", "panel_wattage", "inverter_rating"):
+        return src.measure_key(parse_capacity(raw))
+    if field == "panel_count":
+        value = count_value(raw)
+        return ("count", value) if isinstance(value, int) else ("raw", _loose(raw))
+    return ("text", " ".join(str(raw).casefold().split()))
+
+
+def _resolve_occurrences(cands):
+    """One printed occurrence fills at most one price field: when several fields claim it,
+    only the field its own line or row names keeps it; otherwise none does."""
+    by_occurrence = {}
+    for c in cands:
+        if c["field"] in PRICE_FIELDS and c["occurrence"]:
+            by_occurrence.setdefault(c["occurrence"], []).append(c)
+    dropped = set()
+    for claims in by_occurrence.values():
+        fields = {c["field"] for c in claims}
+        if len(fields) < 2:
+            continue
+        named = {c["field"] for c in claims if c["named"]}
+        keep = named.pop() if len(named) == 1 else None
+        dropped |= {id(c) for c in claims if c["field"] != keep}
+    return [c for c in cands if id(c) not in dropped]
+
+
+def _distinct(field, cands):
+    """Candidates with distinct values, first evidence kept for each."""
+    out, seen = [], set()
+    for c in cands:
+        key = _value_key(field, c["raw"])
+        if key not in seen:
+            seen.add(key)
+            out.append(c)
+    return out
+
+
+def _items(table_items, loose, keys, page_number, conflicts, list_name):
+    """Panel groups (or inverters) for the page. Rows from a table bind their values. A
+    loose value (a query answer or a line) that matches no row's value makes that key a
+    conflict on every row; without table rows, loose values form the items, and different
+    values for one key are a conflict."""
+    items = []
+    if table_items:
+        for row in table_items:
+            items.append({k: [(row[k], row["evidence"])] for k in keys if row.get(k)})
+        for key, values in loose.items():
+            for raw, evidence in values:
+                if not any(key in it and _value_key(_field_of(key), it[key][0][0]) == _value_key(_field_of(key), raw)
+                           for it in items):
+                    for it in items:
+                        it.setdefault(key, []).append((raw, evidence))
+    else:
+        indexed = {}
+        for key, values in loose.items():
+            for index, (raw, evidence) in values:
+                indexed.setdefault(index, {}).setdefault(key, []).append((raw, evidence))
+        items = [indexed[i] for i in sorted(indexed)]
+    out = []
+    for n, item in enumerate(items):
+        wire_item = {"option_id": "All", "page": page_number}
+        for key, values in item.items():
+            distinct, seen = [], set()
+            for raw, evidence in values:
+                k = _value_key(_field_of(key), raw)
+                if k not in seen:
+                    seen.add(k)
+                    distinct.append((raw, evidence))
+            wire_item[key], wire_item[f"{key}_evidence"] = distinct[0]
+            if len(distinct) > 1:
+                conflicts.append(("item", list_name, n, key, distinct))
+        if len(wire_item) > 2:
+            out.append(wire_item)
+    return out
+
+
+def _field_of(key):
+    return {"count": "panel_count", "wattage": "panel_wattage", "rating": "inverter_rating"}.get(key, "text")
+
+
+def map_page(reply, page_number, threshold=CONFIDENCE_THRESHOLD, sources=None, expense=None):
     """(wire input for this page, confidence report). The report lists every answer
-    with its alias, confidence and whether it was kept; never its text."""
+    with its alias, confidence and whether it was kept; never its text. sources picks
+    the readers to use (SOURCES by default); expense is the page's AnalyzeExpense reply."""
+    sources = SOURCES if sources is None else sources
     page = _Page(reply)
     wire, report = _empty_wire(), []
-    groups, inverters, gstin = {}, {}, None
+    cands, gstin, conflicts = [], None, []
+    group_loose, inverter_loose = {}, {}
     seen = {}
-    for alias, answer in page.answers():
-        if alias not in TARGETS:
-            continue
-        kind, raw = KINDS[alias], _tidy(answer["Text"])
-        confidence = float(answer.get("Confidence") or 0)
-        entry = {"alias": alias, "confidence": round(confidence, 1), "kept": False, "why": None}
-        report.append(entry)
-        if confidence < threshold:
-            entry["why"] = "low_confidence"
-            continue
-        if not _parses(kind, raw):
-            entry["why"] = "unparsed"
-            continue
-        evidence = page.evidence(answer)
-        if evidence is None:
-            entry["why"] = "not_on_page"
-            continue
-        entry["kept"] = True
-        index = seen[alias] = seen.get(alias, -1) + 1  # the nth answer to this query on the page
-        target, key = TARGETS[alias]
-        if target == "capacities":
-            wire["capacities"].append({"option_id": "All", "raw": raw, "evidence_text": evidence, "page": page_number})
-            basis = _basis(f"{raw}\n{evidence}")
-            current = wire.get("capacity_basis")
-            if current is None:
-                wire["capacity_basis"] = _flag(basis, evidence, page_number)
-            elif current["value"] != basis:
-                current["value"] = "unspecified"
-        elif target == "prices":
-            wire["prices"].append({"option_id": "All", "kind": key, "raw": raw, "evidence_text": evidence,
-                                   "page": page_number})
-        elif target == "subsidies":
-            wire["subsidies"].append({"option_id": "All", "kind": _subsidy_kind(evidence), "raw": raw,
-                                      "evidence_text": evidence, "page": page_number})
-        elif target in ("module_groups", "inverters"):
-            items = groups if target == "module_groups" else inverters
-            item = items.setdefault(index, {"option_id": "All", "page": page_number})
-            item[key], item[f"{key}_evidence"] = raw, evidence
-        elif target == "dcr_declaration":
-            if _dcr_value(f"{raw}\n{evidence}") is None:
-                entry["kept"], entry["why"] = False, "unparsed"
-            elif "dcr_declaration" not in wire:
-                wire["dcr_declaration"] = _flag(_dcr_value(raw), evidence, page_number)
-        elif target == "vendor_registration" and GSTIN.fullmatch(re.sub(r"\s+", "", raw).upper()):
-            entry["kept"], entry["why"] = False, "gstin"
-            gstin = gstin or {"value": re.sub(r"\s+", "", raw).upper(), "evidence_text": evidence, "page": page_number}
-        elif target not in wire:
-            wire[target] = {"value": raw, "evidence_text": evidence, "page": page_number}
-    wire["module_groups"] = [groups[i] for i in sorted(groups)]
-    wire["inverters"] = [inverters[i] for i in sorted(inverters)]
+    if "queries" in sources:
+        for alias, answer in page.answers():
+            if alias not in TARGETS:
+                continue
+            kind, raw = KINDS[alias], _tidy(answer["Text"])
+            confidence = float(answer.get("Confidence") or 0)
+            entry = {"alias": alias, "confidence": round(confidence, 1), "kept": False, "why": None}
+            report.append(entry)
+            if confidence < threshold:
+                entry["why"] = "low_confidence"
+                continue
+            lines = page.evidence_lines(answer)
+            evidence = page.evidence(answer)
+            if not _parses(kind, raw):
+                typed = _typed_value(kind, raw) if "answer_values" in sources else None
+                if typed is None or evidence is None:
+                    entry["why"] = "unparsed"
+                    continue
+                raw = typed
+            if evidence is None:
+                entry["why"] = "not_on_page"
+                continue
+            entry["kept"] = True
+            target, key = TARGETS[alias]
+            field = QUERY_FIELDS.get(alias)
+            occurrence = next((tuple([l["Id"]]) for l in lines if _loose(raw) in _loose(l["Text"])),
+                              tuple(l["Id"] for l in lines))
+            if target == "dcr_declaration":
+                if _dcr_value(f"{raw}\n{evidence}") is None:
+                    entry["kept"], entry["why"] = False, "unparsed"
+                elif "dcr_declaration" not in wire:
+                    wire["dcr_declaration"] = _flag(_dcr_value(raw), evidence, page_number)
+            elif target == "vendor_registration":
+                if GSTIN.fullmatch(re.sub(r"\s+", "", raw).upper()):
+                    entry["kept"], entry["why"] = False, "gstin"
+                    gstin = gstin or {"value": re.sub(r"\s+", "", raw).upper(), "evidence_text": evidence,
+                                      "page": page_number}
+                elif "vendor_registration" not in wire:
+                    wire["vendor_registration"] = {"value": raw, "evidence_text": evidence, "page": page_number}
+            elif field in GROUP_KEYS or field in INVERTER_KEYS:
+                index = seen[alias] = seen.get(alias, -1) + 1  # the nth answer to this query on the page
+                loose = group_loose if field in GROUP_KEYS else inverter_loose
+                loose.setdefault(key, []).append((index, (raw, evidence)))
+            else:
+                named = src.role(evidence) == field if field in PRICE_FIELDS else True
+                cands.append(src.candidate(field, raw, evidence, occurrence, named, "queries"))
+
+    if "lines" in sources:
+        cands += src.from_lines(page)
+    if "forms" in sources:
+        for key_text, value_text, value in src.form_pairs(page):
+            if float(value.get("Confidence") or 0) < threshold:
+                continue
+            lines = page.evidence_lines({"Text": value_text, "Geometry": value.get("Geometry")})
+            evidence = page.evidence({"Text": value_text, "Geometry": value.get("Geometry")})
+            if evidence:
+                cands += src.line_candidates(f"{key_text} {value_text}", evidence, tuple(l["Id"] for l in lines),
+                                             "forms")
+    table_groups, table_inverters = [], []
+    if "expense" in sources and expense:
+        summary, items = src.expense_fields(expense)
+        for kind, label, value, geometry, confidence in summary:
+            if confidence < threshold:
+                continue
+            pseudo = {"Text": value, "Geometry": geometry}
+            evidence = page.evidence(pseudo)
+            if not evidence:
+                continue
+            occurrence = tuple(l["Id"] for l in page.evidence_lines(pseudo))
+            if kind == "VENDOR_NAME":
+                cands.append(src.candidate("vendor_name", _tidy(value), evidence, occurrence, True, "expense"))
+            elif kind == "INVOICE_RECEIPT_DATE":
+                date = src.one_date(value)
+                if date:
+                    cands.append(src.candidate("quote_date", date, evidence, occurrence, True, "expense"))
+            else:
+                price_role = src.role(label or evidence)
+                raw = src.one_amount(value) if "%" not in value else None
+                if price_role and raw:
+                    cands.append(src.candidate(price_role, raw, evidence, occurrence, True, "expense"))
+        for row in items:
+            item_text, geometry, confidence = row.get("ITEM", ("", None, 0))
+            evidence = page.evidence({"Text": item_text, "Geometry": geometry}) if item_text else None
+            if not evidence or confidence < threshold:
+                continue
+            if src._PANEL.search(item_text) and not src._INVERTER.search(item_text):
+                qty = re.fullmatch(r"\s*(\d{1,3})(?:\.0+)?\s*(?:nos?\.?)?\s*", row.get("QUANTITY", ("",))[0] or "")
+                if qty:
+                    table_groups.append({"count": qty.group(1), "wattage": src.one_measure(item_text, ("w", "wp")),
+                                         "make_model": None, "evidence": evidence})
+            elif src._INVERTER.search(item_text):
+                kw = src.one_measure(item_text, ("kw", "kva", "w"))
+                if kw:
+                    table_inverters.append({"rating": kw, "make_model": None, "evidence": evidence})
 
     included = [_tidy(l["Text"]) for l in page.lines if GST_INCLUDED.search(l["Text"])]
     excluded = [_tidy(l["Text"]) for l in page.lines if GST_EXCLUDED.search(l["Text"])]
@@ -350,33 +529,113 @@ def map_page(reply, page_number, threshold=CONFIDENCE_THRESHOLD):
     if give:
         wire["give_it_up"] = _flag("mentioned", give[0], page_number)
 
-    for grid, header, confidence in page.tables():
-        rows = _option_rows(grid, header, confidence, threshold)
-        if not rows:
+    for table_no, (grid, header, confidence, merged_header) in enumerate(page.tables()):
+        rows = _option_rows(grid, header, confidence, threshold) if "options_table" in sources else []
+        if rows:
+            if wire["multiple_options"]["value"] != "yes":
+                wire["multiple_options"] = _flag("yes", rows[0][3], page_number)
+            for cell, raw, price, text, price_col in rows:
+                wire["options"].append({"option_id": cell, "label": text, "page": page_number})
+                wire["capacities"].append({"option_id": cell, "raw": raw, "evidence_text": text, "page": page_number})
+                wire["prices"].append({"option_id": cell, "kind": _price_kind(header[price_col]), "raw": price,
+                                       "evidence_text": text, "page": page_number})
             continue
-        if wire["multiple_options"]["value"] != "yes":
-            wire["multiple_options"] = _flag("yes", rows[0][3], page_number)
-        for cell, raw, price, text, price_col in rows:
-            wire["options"].append({"option_id": cell, "label": text, "page": page_number})
-            wire["capacities"].append({"option_id": cell, "raw": raw, "evidence_text": text, "page": page_number})
-            wire["prices"].append({"option_id": cell, "kind": _price_kind(header[price_col]), "raw": price,
-                                   "evidence_text": text, "page": page_number})
+        if merged_header:  # a merged header cell can't be tied to one column
+            continue
+        if "bom_table" in sources:
+            g, i = src.bom_candidates(grid, header, confidence, threshold, table_no)
+            table_groups += g
+            table_inverters += i
+        if "amount_table" in sources:
+            cands += src.amount_table_candidates(grid, header, confidence, threshold, table_no)
+
+    # Panel and inverter values from lines join the loose values; table rows bind theirs.
+    for c in [c for c in cands if c["field"] in GROUP_KEYS or c["field"] in INVERTER_KEYS]:
+        loose = group_loose if c["field"] in GROUP_KEYS else inverter_loose
+        key = (GROUP_KEYS if c["field"] in GROUP_KEYS else INVERTER_KEYS)[c["field"]]
+        loose.setdefault(key, []).append((0, (c["raw"], c["evidence"])))
+    cands = [c for c in cands if c["field"] not in GROUP_KEYS and c["field"] not in INVERTER_KEYS]
+    for loose, rows in ((group_loose, table_groups), (inverter_loose, table_inverters)):
+        if rows:
+            for key in loose:
+                loose[key] = [value for _, value in loose[key]]
+    wire["module_groups"] = _items(table_groups, group_loose, ("count", "wattage", "make_model"), page_number,
+                                   conflicts, "module_groups")
+    wire["inverters"] = _items(table_inverters, inverter_loose, ("rating", "make_model"), page_number,
+                               conflicts, "inverters")
+
+    cands = _resolve_occurrences(cands)
+    by_field = {}
+    for c in cands:
+        by_field.setdefault(c["field"], []).append(c)
+    for field, found in by_field.items():
+        distinct = _distinct(field, found)
+        if field == "stated_capacity":
+            for c in distinct:
+                wire["capacities"].append({"option_id": "All", "raw": c["raw"], "evidence_text": c["evidence"],
+                                           "page": page_number})
+            bases = {_basis(f"{c['raw']}\n{c['evidence']}") for c in found}
+            wire["capacity_basis"] = _flag(bases.pop() if len(bases) == 1 else "unspecified", found[0]["evidence"],
+                                           page_number)
+        elif field == "subsidy":
+            for c in distinct:
+                wire["subsidies"].append({"option_id": "All", "kind": _subsidy_kind(c["evidence"]), "raw": c["raw"],
+                                          "evidence_text": c["evidence"], "page": page_number})
+        elif field in PRICE_FIELDS:
+            for c in distinct:
+                wire["prices"].append({"option_id": "All", "kind": field, "raw": c["raw"],
+                                       "evidence_text": c["evidence"], "page": page_number})
+        else:  # vendor_name, quote_date
+            wire[field] = {"value": distinct[0]["raw"], "evidence_text": distinct[0]["evidence"], "page": page_number}
+            if len(distinct) > 1:
+                conflicts.append(("plain", field, [(c["raw"], c["evidence"]) for c in distinct]))
+
     if gstin:
         wire["_vendor_gstin"] = gstin
+    if "gstin_state" in sources and (state := src.gstin_state(page)):
+        wire["_vendor_state"] = {"value": state[0], "evidence_text": state[1], "page": page_number,
+                                 "source": "gst_registration_state"}
+    if conflicts:
+        wire["_conflicts"] = conflicts
     return wire, report
+
+
+PRIVATE = ("_vendor_gstin", "_vendor_state", "_conflicts")
+
+
+def _conflict_field(list_key, candidates, page, batch):
+    convert = {"count": count_value, "wattage": capacity_value, "rating": capacity_value}.get(list_key, str.strip)
+    kind_value = {"wattage": {"raw": None, "parsed": None, "unit": None, "parse_status": "conflict"},
+                  "rating": {"raw": None, "parsed": None, "unit": None, "parse_status": "conflict"}}.get(list_key)
+    return {"value": kind_value, "evidence_text": None, "page": None, "batch": None, "conflict": True,
+            "candidates": [{"value": convert(raw), "evidence_text": evidence, "page": page, "batch": batch}
+                           for raw, evidence in candidates]}
 
 
 def to_contract(wire, batch):
     """Validate and normalise the mapped wire input exactly as for Nova, then add the
-    GSTIN, when a registration answer was one, as its own evidence item."""
+    GSTIN (when a registration answer was one) and the supplier's GST registration
+    state as evidence items, and mark values the page's own sources disagree on as
+    conflicts for the household to resolve."""
     pages = sorted({wire[k]["page"] for k in wire if isinstance(wire[k], dict) and "page" in wire[k]}
-                   | {i["page"] for k in wire if isinstance(wire[k], list) for i in wire[k]}) or [None]
-    gstin = wire.get("_vendor_gstin")
-    cleaned, errors, _ = validate({k: v for k, v in wire.items() if k != "_vendor_gstin"}, pages)
+                   | {i["page"] for k in wire if isinstance(wire[k], list) and k not in PRIVATE for i in wire[k]})
+    pages = pages or [None]
+    cleaned, errors, _ = validate({k: v for k, v in wire.items() if k not in PRIVATE}, pages)
     if errors:
         raise ExtractionFailure("invalid_mapping", "; ".join(errors[:10]))
     out = normalise_batch(cleaned, batch)
+    gstin, state = wire.get("_vendor_gstin"), wire.get("_vendor_state")
     out["vendor_gstin"] = None if gstin is None else {**gstin, "batch": batch}
+    if state is not None:
+        out["vendor_state"] = {**state, "batch": batch}
+    page = pages[0]
+    for conflict in wire.get("_conflicts") or []:
+        if conflict[0] == "item":
+            _, list_name, index, key, candidates = conflict
+            out[list_name][index][key] = _conflict_field(key, candidates, page, batch)
+        else:
+            _, name, candidates = conflict
+            out[name] = _conflict_field(name, candidates, page, batch)
     return out
 
 

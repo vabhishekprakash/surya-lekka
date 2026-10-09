@@ -29,7 +29,12 @@ def facts(c, name):
 
 
 def amounts(c, name):
-    return sorted(f["field"]["value"]["parsed"] for f in c["facts"] if f["name"] == name)
+    from decimal import Decimal
+
+    def text(value):
+        d = Decimal(value)
+        return str(int(d)) if d == d.to_integral_value() else str(d)
+    return sorted(text(f["field"]["value"]["parsed"]) for f in c["facts"] if f["name"] == name)
 
 
 def groups(c):
@@ -151,7 +156,7 @@ def test_a_query_and_a_pattern_that_disagree_keep_the_findings_waiting():
     answers = {"state": "Telangana", "consumer_type": "individual_household", "gst_treatment": "included",
                "extra_charges_complete": True, "portal_application_on_or_after_cutoff": True,
                "first_system": True, "prior_central_subsidy": False, "give_it_up": False,
-               "net_cost_subsidy_basis": "central"}
+               "net_cost_subsidy_basis": "central", "multiple_options": False}
     q["base_price"] = {"value": {"raw": "1,90,000", "parsed": "190000", "parse_status": "ok"},
                        "evidence_text": "x", "page": 1, "batch": 1}
     q["net_cost"] = {"value": {"raw": "1,12,000", "parsed": "112000", "parse_status": "ok"},
@@ -242,7 +247,7 @@ def test_an_answer_with_extra_words_gives_its_one_typed_value(answer, line, valu
     assert c["inverters"][0]["rating"]["evidence_text"] == line
 
 
-@pytest.mark.parametrize("alias,answer", [("INVERTER_CAPACITY", "3 or 5 kW"), ("INVERTER_CAPACITY", "3-5 kW"),
+@pytest.mark.parametrize("alias,answer", [("INVERTER_CAPACITY", "3 or 5 kW"), ("INVERTER_CAPACITY", "Inverter 3-5 kW"),
                                           ("TOTAL_PAYABLE", "18% GST"), ("SUBSIDY_AMOUNT", "Rs 78,000 or 85,800")])
 def test_an_answer_with_two_values_or_a_percentage_gives_nothing(alias, answer):
     page = Page()
