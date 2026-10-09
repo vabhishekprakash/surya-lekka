@@ -410,7 +410,8 @@ def test_each_engine_gets_only_its_own_permission(engine):
         (grant,) = textract
         # AnalyzeDocument has no resource types in the Service Authorization Reference.
         assert actions(grant) == {"textract:AnalyzeDocument"} and grant["Resource"] == "*"
-        assert grant["Effect"] == "Allow" and "Condition" not in grant
+        assert grant["Effect"] == "Allow"
+        assert grant["Condition"] == {"StringEquals": {"aws:RequestedRegion": {"Ref": "AWS::Region"}}}
     # Pages go to Textract as bytes, so nothing but the worker's own S3 statement touches the bucket.
     s3 = [s for s in statements("WorkerFunction", resolve(**params)["Resources"])
           if any(a.startswith("s3:") for a in actions(s))]
@@ -428,3 +429,9 @@ def test_daily_page_cap_reaches_the_functions():
     assert param["Default"] == 300 and param["MinValue"] == 0 and param["Type"] == "Number"
     env = TEMPLATE["Globals"]["Function"]["Environment"]["Variables"]
     assert env["DAILY_PAGE_CAP"] == {"Ref": "DailyPageCap"}
+
+
+def test_retry_writes_only_manifests():
+    s3 = [s for s in statements("RetryFunction") if any(a.startswith("s3:") for a in actions(s))]
+    assert [actions(s) for s in s3] == [{"s3:PutObject"}]
+    assert text(s3[0]["Resource"]).endswith("/uploads/*/manifest.json'}")

@@ -214,6 +214,7 @@ GitHub Actions runs the tests and the lint on every push (`.github/workflows/tes
 - Lambda concurrency on our account is 10.
 - Amazon Nova reading is switched off until Bedrock access is granted. Amazon Textract reads the quotes in the meantime. With `ReadingEngine=none`, the samples and typed-in numbers work, and uploads get a message asking the household to type the numbers in.
 - Amazon Textract's limits: at most 15 queries per page, and queries in English only. Text smaller than about 15 pixels tall on the page image may be missed, and each page image must be under 10 MB and 10,000 pixels a side. Textract has no question for the vendor's state or for charges outside the total, so those always come from the household.
+- Panel count and wattage answers are paired in the order Textract returns them on a page. When a page has several, the household confirms the pairing.
 - Only the central subsidy for an individual household is checked. State top-ups are not checked, and applications received before 13 Feb 2024 follow earlier rules that aren't covered.
 - Eligibility is never verified: not DCR panels, not the vendor's registration, not the inspection.
 - The reading can be wrong, so every value is shown with its source text for the household to confirm or correct.

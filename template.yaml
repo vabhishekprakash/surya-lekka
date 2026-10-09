@@ -349,8 +349,8 @@ Resources:
               Action: [dynamodb:GetItem, dynamodb:UpdateItem]
               Resource: !GetAtt JobsTable.Arn
             - Effect: Allow
-              Action: s3:PutObject
-              Resource: !Sub "arn:${AWS::Partition}:s3:::${StackPrefix}-${AWS::AccountId}-${AWS::Region}/uploads/*"
+              Action: s3:PutObject  # a retry only writes the job's manifest again
+              Resource: !Sub "arn:${AWS::Partition}:s3:::${StackPrefix}-${AWS::AccountId}-${AWS::Region}/uploads/*/manifest.json"
       Events:
         Api:
           Type: HttpApi
@@ -473,6 +473,9 @@ Resources:
                 Effect: Allow
                 Action: textract:AnalyzeDocument
                 Resource: "*"
+                Condition:
+                  StringEquals:
+                    aws:RequestedRegion: !Ref AWS::Region
           - !Ref AWS::NoValue
       Events:
         ManifestUploaded:

@@ -347,12 +347,15 @@ def claim(job_id):
 
 
 def authorised_job(event):
-    """The job for /jobs/{id}?t=token, or ApiError 404 for an unknown id or a wrong token."""
+    """The job for /jobs/{id}?t=token, or ApiError 404 for an unknown id, a wrong token
+    or an expired job (DynamoDB's TTL deletion can lag by days)."""
     job_id, token = path_param(event, "id"), query_param(event, "t")
     not_found = ApiError(404, "not_found", "No check matches this link.")
     if not isinstance(job_id, str) or not JOB_ID.fullmatch(job_id):
         raise not_found
     item = table().get_item(Key={"job_id": job_id}).get("Item")
     if not token_matches(token, (item or {}).get("token_hash")) or item is None:
+        raise not_found
+    if int(item.get("expires_at", 0)) <= now():
         raise not_found
     return item

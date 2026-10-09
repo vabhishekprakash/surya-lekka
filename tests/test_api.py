@@ -824,3 +824,12 @@ def test_textract_client_is_made_for_the_stack_region(monkeypatch):
     client = worker.textract_client()
     assert client.meta.region_name == "ap-south-1" and client.meta.service_model.service_name == "textract"
     worker.textract_client.cache_clear()
+
+
+def test_an_expired_job_is_not_found_even_before_ttl_deletes_it(aws):
+    job = create()
+    unknown = get({"job_id": "00000000-0000-4000-8000-000000000000", "token": job["token"]})
+    common.table().update_item(Key={"job_id": job["job_id"]}, UpdateExpression="SET expires_at = :t",
+                               ExpressionAttributeValues={":t": common.now()})
+    assert get(job) == unknown == (404, {"error": "not_found", "message": "No check matches this link."})
+    assert retry(job)[0] == 404

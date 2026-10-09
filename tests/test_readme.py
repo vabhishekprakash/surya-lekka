@@ -95,3 +95,8 @@ def test_textract_engine_privacy_cost_and_limits():
     limits = section("Limits")
     assert "English" in limits and "15 queries" in limits and "15 pixels" in limits
     assert "set on the AWS account by hand" in README and "template creates" not in README
+
+
+def test_limits_say_how_panel_answers_are_paired():
+    assert ("paired in the order Textract returns them on a page" in section("Limits")
+            and "the household confirms the pairing" in section("Limits"))
