@@ -13,7 +13,9 @@ from checks.contract import CONTRACT_VERSION
 
 from .wire_schema import FACT_FIELDS, FLAG_FIELDS, PLAIN_FIELDS as WIRE_PLAIN_FIELDS
 
-PLAIN_FIELDS = (*WIRE_PLAIN_FIELDS, "dcr_declaration")
+# vendor_gstin is evidence only (Textract keeps a GSTIN it found where it asked for the
+# registration number); no check reads it.
+PLAIN_FIELDS = (*WIRE_PLAIN_FIELDS, "dcr_declaration", "vendor_gstin")
 # kW, kWp, W and Wp compare as one dimension; kVA only ever with kVA.
 DIMENSIONS = {"kw": ("kw", Decimal(1)), "kwp": ("kw", Decimal(1)), "w": ("kw", Decimal("0.001")),
               "wp": ("kw", Decimal("0.001")), "kva": ("kva", Decimal(1))}
