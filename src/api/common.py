@@ -106,7 +106,11 @@ def s3():
     import boto3
     from botocore.config import Config
 
-    return boto3.client("s3", config=Config(signature_version="s3v4"))
+    # Presigned POSTs name the Region's own endpoint: for up to a day after a bucket
+    # is made outside us-east-1, the global endpoint answers with a 307 redirect.
+    region = boto3.session.Session().region_name
+    return boto3.client("s3", region_name=region, endpoint_url=f"https://s3.{region}.amazonaws.com",
+                        config=Config(signature_version="s3v4", s3={"addressing_style": "virtual"}))
 
 
 @lru_cache(maxsize=None)

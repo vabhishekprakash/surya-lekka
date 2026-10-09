@@ -142,6 +142,9 @@ def test_create_job_returns_presigned_posts(aws):
     conditions = json.loads(base64.b64decode(first["policy"]))["conditions"]
     assert ["content-length-range", 1, 3_750_000] in conditions and {"Content-Type": "image/jpeg"} in conditions
     assert job["manifest"]["fields"]["key"] == f"uploads/{job['job_id']}/manifest.json"
+    # The Region's own endpoint: a new bucket outside us-east-1 answers the global one with a 307 redirect.
+    assert {u["url"] for u in job["uploads"]} | {job["manifest"]["url"]} == {
+        f"https://{BUCKET}.s3.{REGION}.amazonaws.com/"}
     stored = item(job["job_id"])
     assert stored["status"] == "awaiting_upload" and int(stored["page_count"]) == 3
     assert stored["token_hash"] == common.token_hash(job["token"])
