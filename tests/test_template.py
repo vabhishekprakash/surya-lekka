@@ -11,11 +11,77 @@ from cfnlint.decode import decode
 
 ROOT = Path(__file__).resolve().parent.parent
 TEMPLATE, _ = decode(str(ROOT / "template.yaml"))
-RES = TEMPLATE["Resources"]
+RAW = TEMPLATE["Resources"]
+NO_VALUE = {"Ref": "AWS::NoValue"}
 
 
-def statements(name):
-    return [s for p in RES[name]["Properties"].get("Policies", []) for s in p["Statement"]]
+def parameters(**overrides):
+    """Template defaults with overrides, as CloudFormation passes them (lists split on commas)."""
+    values = {}
+    for name, p in TEMPLATE["Parameters"].items():
+        value = overrides.get(name, p.get("Default"))
+        if p["Type"] == "CommaDelimitedList" and isinstance(value, str):
+            value = value.split(",")
+        values[name] = value
+    return values
+
+
+def evaluate(node, params, condition):
+    """A condition expression, or a value used in one."""
+    if isinstance(node, list):
+        return [evaluate(n, params, condition) for n in node]
+    if not isinstance(node, dict):
+        return node
+    (fn, arg), = node.items()
+    if fn == "Ref":
+        return params[arg]
+    if fn == "Condition":
+        return condition(arg)
+    args = evaluate(arg, params, condition)
+    return {"Fn::Equals": lambda: str(args[0]) == str(args[1]), "Fn::Not": lambda: not args[0],
+            "Fn::And": lambda: all(args), "Fn::Or": lambda: any(args),
+            "Fn::Join": lambda: args[0].join(args[1])}[fn]()
+
+
+def resolve(**overrides):
+    """The template as CloudFormation sees it for these parameters: conditions
+    evaluated, Fn::If resolved, AWS::NoValue and resources with a false condition removed."""
+    params, cache = parameters(**overrides), {}
+
+    def condition(name):
+        if name not in cache:
+            cache[name] = evaluate(TEMPLATE["Conditions"][name], params, condition)
+        return cache[name]
+
+    lists = {n for n, p in TEMPLATE["Parameters"].items() if p["Type"] == "CommaDelimitedList"}
+
+    def walk(node):
+        if isinstance(node, dict):
+            if set(node) == {"Ref"} and node["Ref"] in lists:
+                return params[node["Ref"]]
+            if set(node) == {"Fn::If"}:
+                name, yes, no = node["Fn::If"]
+                return walk(yes if condition(name) else no)
+            out = {k: walk(v) for k, v in node.items()}
+            return {k: v for k, v in out.items() if v != NO_VALUE}
+        if isinstance(node, list):
+            return [v for v in (walk(n) for n in node) if v != NO_VALUE]
+        return node
+
+    out = {}
+    for section in ("Resources", "Outputs"):
+        out[section] = {k: walk(v) for k, v in TEMPLATE.get(section, {}).items()
+                        if "Condition" not in v or condition(v["Condition"])}
+    out["Conditions"] = {name: condition(name) for name in TEMPLATE["Conditions"]}
+    return out
+
+
+RES = resolve()["Resources"]
+
+
+def statements(name, resources=None):
+    resources = resources or RES
+    return [s for p in resources[name]["Properties"].get("Policies", []) for s in p["Statement"]]
 
 
 def actions(statement):
@@ -70,7 +136,7 @@ def test_reserved_concurrency_is_optional_and_off_by_default():
     assert TEMPLATE["Parameters"]["ReservedConcurrency"]["Default"] == 0
     note = " ".join(TEMPLATE["Parameters"]["ReservedConcurrency"]["Description"].split())
     assert "at least 100" in note and "at least 10 " not in note
-    assert RES["WorkerFunction"]["Properties"]["ReservedConcurrentExecutions"] == {
+    assert RAW["WorkerFunction"]["Properties"]["ReservedConcurrentExecutions"] == {
         "Fn::If": ["UseReservedConcurrency", {"Ref": "ReservedConcurrency"}, {"Ref": "AWS::NoValue"}]}
 
 
@@ -83,33 +149,76 @@ def as_list(value):
     return value if isinstance(value, list) else [value]
 
 
-GLOBAL_PROFILE = "arn:${AWS::Partition}:bedrock:ap-south-1:${AWS::AccountId}:inference-profile/global.amazon.nova-2-lite-v1:0"
-APAC_PROFILE = "arn:${AWS::Partition}:bedrock:ap-south-1:${AWS::AccountId}:inference-profile/apac.amazon.nova-pro-v1:0"
-APAC_REGIONS = ("ap-south-1", "ap-southeast-1", "ap-southeast-2", "ap-northeast-1", "ap-northeast-2", "ap-northeast-3")
+PROFILE = "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/${ModelId}"
+VIA_PROFILE = text({"StringEquals": {"bedrock:InferenceProfileArn": {"Fn::Sub": PROFILE}}})
+APAC_ARNS = [f"arn:aws:bedrock:{r}::foundation-model/amazon.nova-pro-v1:0" for r in
+             ("ap-south-1", "ap-southeast-1", "ap-southeast-2", "ap-northeast-1")]
+GLOBAL_ARN = "arn:aws:bedrock:::foundation-model/amazon.nova-2-lite-v1:0"
+LITE_HERE = "arn:aws:bedrock:ap-south-1::foundation-model/amazon.nova-2-lite-v1:0"
 
 
-def test_worker_bedrock_permissions_are_exact():
-    bedrock = [s for s in statements("WorkerFunction") if any(a.startswith("bedrock:") for a in actions(s))]
+def bedrock_grants(**overrides):
+    resources = resolve(**overrides)["Resources"]
+    bedrock = [s for s in statements("WorkerFunction", resources)
+               if any(a.startswith("bedrock:") for a in actions(s))]
     assert all(actions(s) == {"bedrock:InvokeModel"} and s["Effect"] == "Allow" for s in bedrock)
-    granted = {(sub(r), text(s.get("Condition"))) for s in bedrock for r in as_list(s["Resource"])}
-    lite_via = text({"StringEquals": {"bedrock:InferenceProfileArn": {"Fn::Sub": GLOBAL_PROFILE}}})
-    pro_via = text({"StringEquals": {"bedrock:InferenceProfileArn": {"Fn::Sub": APAC_PROFILE}}})
-    global_any = text({"StringEquals": {"aws:RequestedRegion": "unspecified",
-                                        "bedrock:InferenceProfileArn": {"Fn::Sub": GLOBAL_PROFILE}}})
-    assert granted == {
-        (GLOBAL_PROFILE, "None"),
-        ("arn:${AWS::Partition}:bedrock:ap-south-1::foundation-model/amazon.nova-2-lite-v1:0", lite_via),
-        ("arn:${AWS::Partition}:bedrock:::foundation-model/amazon.nova-2-lite-v1:0", global_any),
-        (APAC_PROFILE, "None"),
-        *{(f"arn:${{AWS::Partition}}:bedrock:{r}::foundation-model/amazon.nova-pro-v1:0", pro_via)
-          for r in APAC_REGIONS},
-    }
-    assert not any("*" in r for r, _ in granted)
+    return {(sub(r), text(s.get("Condition"))) for s in bedrock for r in as_list(s["Resource"])}
 
 
-def test_stack_is_pinned_to_the_region_the_permissions_name():
-    (assertion,) = TEMPLATE["Rules"]["BedrockRegion"]["Assertions"]
-    assert assertion["Assert"] == {"Fn::Equals": [{"Ref": "AWS::Region"}, "ap-south-1"]}
+def test_no_bedrock_permission_while_reading_is_off():
+    assert TEMPLATE["Parameters"]["ReadingEngine"]["Default"] == "none"
+    assert bedrock_grants() == set()
+    assert bedrock_grants(ModelId="global.amazon.nova-2-lite-v1:0", GlobalModelArns=GLOBAL_ARN) == set()
+
+
+def test_bedrock_permission_for_a_regional_inference_profile():
+    assert bedrock_grants(ReadingEngine="nova", ModelId="apac.amazon.nova-pro-v1:0",
+                          ProfileModelArns=",".join(APAC_ARNS)) == {
+        (PROFILE, "None"), *{(arn, VIA_PROFILE) for arn in APAC_ARNS}}
+
+
+def test_bedrock_permission_for_a_global_inference_profile():
+    global_via = text({"StringEquals": {"aws:RequestedRegion": "unspecified",
+                                        "bedrock:InferenceProfileArn": {"Fn::Sub": PROFILE}}})
+    assert bedrock_grants(ReadingEngine="nova", ModelId="global.amazon.nova-2-lite-v1:0",
+                          ProfileModelArns=LITE_HERE, GlobalModelArns=GLOBAL_ARN) == {
+        (PROFILE, "None"), (LITE_HERE, VIA_PROFILE), (GLOBAL_ARN, global_via)}
+
+
+def test_bedrock_permission_for_a_model_in_the_stack_region():
+    assert bedrock_grants(ReadingEngine="nova", ModelId="amazon.nova-pro-v1:0") == {
+        ("arn:${AWS::Partition}:bedrock:${AWS::Region}::foundation-model/${ModelId}", "None")}
+
+
+def test_model_id_cannot_widen_the_grant():
+    allowed = re.compile(TEMPLATE["Parameters"]["ModelId"]["AllowedPattern"])
+    assert allowed.fullmatch("amazon.nova-pro-v1:0") and allowed.fullmatch("global.amazon.nova-2-lite-v1:0")
+    assert not any(allowed.fullmatch(bad) for bad in ("*", "amazon.*", "a/b", "x" * 129))
+    rule = TEMPLATE["Rules"]["NovaNeedsAModel"]
+    assert rule["RuleCondition"] == {"Fn::Equals": [{"Ref": "ReadingEngine"}, "nova"]}
+    assert rule["Assertions"][0]["Assert"] == {"Fn::Not": [{"Fn::Equals": [{"Ref": "ModelId"}, ""]}]}
+
+
+def test_reading_engines_match_the_api():
+    from api.common import READING_ENGINES
+
+    assert TEMPLATE["Parameters"]["ReadingEngine"]["AllowedValues"] == ["none", *READING_ENGINES]
+    env = TEMPLATE["Globals"]["Function"]["Environment"]["Variables"]
+    assert env["READING_ENGINE"] == {"Ref": "ReadingEngine"}
+    assert RAW["WorkerFunction"]["Properties"]["Environment"]["Variables"]["MODEL_ID"] == {"Ref": "ModelId"}
+
+
+def test_stack_deploys_only_in_supported_regions():
+    (assertion,) = TEMPLATE["Rules"]["SupportedRegion"]["Assertions"]
+    assert assertion["Assert"] == {"Fn::Contains": [["ap-south-1", "ap-southeast-2"], {"Ref": "AWS::Region"}]}
+    assert "BedrockRegion" not in TEMPLATE["Rules"]
+
+
+def test_every_arn_is_built_from_the_stack_region_and_account():
+    arns = re.findall(r"arn:[^\s\"']+", (ROOT / "template.yaml").read_text(encoding="utf-8"))
+    assert arns and all(a.startswith("arn:${AWS::Partition}:") for a in arns)
+    assert not any(re.search(r"(ap|us|eu)-[a-z]+-[0-9]|[0-9]{12}", a) for a in arns)
+    assert all(":${AWS::Region}:" in a for a in arns if ":bedrock:" in a)
 
 
 def test_worker_permissions():
@@ -119,7 +228,7 @@ def test_worker_permissions():
     assert text(s3[0]["Resource"]).endswith("/uploads/*'}")
     assert all(text(s["Resource"]) == text({"Fn::GetAtt": ["JobsTable", "Arn"]})
                for s in worker if any(a.startswith("dynamodb:") for a in actions(s)))
-    props = RES["WorkerFunction"]["Properties"]
+    props = RAW["WorkerFunction"]["Properties"]
     assert props["EventInvokeConfig"]["MaximumRetryAttempts"] == 1
     assert actions(next(s for s in worker if s["Resource"] == {"Fn::GetAtt": ["JobsTable", "Arn"]})) == {
         "dynamodb:GetItem", "dynamodb:UpdateItem"}
@@ -162,7 +271,8 @@ def test_worker_failures_go_to_an_encrypted_queue():
     lint = runpy.run_path(str(ROOT / "scripts" / "lint_template.py"))
     translated = lint["translate"](ROOT / "template.yaml")["Resources"]
     role = translated["WorkerFunctionRole"]["Properties"]["Policies"]
-    sends = [s for p in role for s in p["PolicyDocument"]["Statement"] if "sqs:SendMessage" in actions(s)]
+    sends = [s for p in role if "PolicyDocument" in p for s in p["PolicyDocument"]["Statement"]
+             if "sqs:SendMessage" in actions(s)]
     assert sends and all(text(s["Resource"]) == text({"Fn::GetAtt": ["WorkerFailures", "Arn"]}) for s in sends)
 
 

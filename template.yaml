@@ -28,10 +28,32 @@ Parameters:
     Default: 10
     MinValue: 0
     Description: New checks allowed per source IP address per UTC day. 0 refuses every new check.
+  ReadingEngine:
+    Type: String
+    Default: none
+    AllowedValues: [none, nova]
+    Description: >-
+      What reads uploaded quotes. none switches reading off: uploads and live samples are refused,
+      while saved sample readings and typed-in numbers keep working. More engines can be added here.
   ModelId:
     Type: String
-    Default: global.amazon.nova-2-lite-v1:0
-    AllowedValues: [global.amazon.nova-2-lite-v1:0, apac.amazon.nova-pro-v1:0]
+    Default: ""
+    AllowedPattern: "^[A-Za-z0-9._:-]{0,128}$"
+    Description: >-
+      Model for ReadingEngine nova: an inference profile ID (global. or apac.) or a model ID in this
+      Region (for example amazon.nova-pro-v1:0, for accounts that can't use cross-Region inference).
+  ProfileModelArns:
+    Type: CommaDelimitedList
+    Default: none
+    Description: >-
+      Model ARNs in each Region the inference profile routes to, or none for a model ID in this Region.
+      scripts/deploy.ps1 reads them with aws bedrock get-inference-profile.
+  GlobalModelArns:
+    Type: CommaDelimitedList
+    Default: none
+    Description: >-
+      Model ARNs with no Region, which a global inference profile routes to, or none.
+      scripts/deploy.ps1 reads them with aws bedrock get-inference-profile.
   ReservedConcurrency:
     Type: Number
     Default: 0
@@ -42,13 +64,27 @@ Parameters:
       or less (new accounts often have 10).
 
 Rules:
-  BedrockRegion:
+  SupportedRegion:
     Assertions:
-      - Assert: !Equals [!Ref "AWS::Region", ap-south-1]
-        AssertDescription: The worker's Bedrock permissions name ap-south-1, so the stack must be deployed there.
+      - Assert: !Contains [[ap-south-1, ap-southeast-2], !Ref "AWS::Region"]
+        AssertDescription: >-
+          Deploy in ap-south-1 (Mumbai) or ap-southeast-2 (Sydney). The web app's privacy notice names
+          the Region, and these are the two it knows.
+  NovaNeedsAModel:
+    RuleCondition: !Equals [!Ref ReadingEngine, nova]
+    Assertions:
+      - Assert: !Not [!Equals [!Ref ModelId, ""]]
+        AssertDescription: ReadingEngine nova needs a ModelId.
 
 Conditions:
   UseReservedConcurrency: !Not [!Equals [!Ref ReservedConcurrency, 0]]
+  NovaReading: !Equals [!Ref ReadingEngine, nova]
+  HasRegionalModels: !Not [!Equals [!Join [",", !Ref ProfileModelArns], none]]
+  HasGlobalModels: !Not [!Equals [!Join [",", !Ref GlobalModelArns], none]]
+  NovaThroughProfile: !And [!Condition NovaReading, !Or [!Condition HasRegionalModels, !Condition HasGlobalModels]]
+  NovaRegionalModels: !And [!Condition NovaReading, !Condition HasRegionalModels]
+  NovaGlobalModels: !And [!Condition NovaReading, !Condition HasGlobalModels]
+  NovaInRegion: !And [!Condition NovaReading, !Not [!Condition NovaThroughProfile]]
 
 Globals:
   Function:
@@ -62,6 +98,7 @@ Globals:
         TABLE_NAME: !Ref JobsTable
         BUCKET_NAME: !Sub "${StackPrefix}-${AWS::AccountId}-${AWS::Region}"
         UPLOADS_ENABLED: !Ref UploadsEnabled
+        READING_ENGINE: !Ref ReadingEngine
         DAILY_JOB_CAP: !Ref DailyJobCap
         IP_DAILY_JOB_CAP: !Ref IpDailyJobCap
         IP_HASH_KEY: !Ref AWS::StackId
@@ -273,44 +310,6 @@ Resources:
             Destination: !GetAtt WorkerFailures.Arn
       Policies:
         - Statement:
-            # Global profile for Nova 2 Lite, called from ap-south-1.
-            - Sid: NovaLiteGlobalProfile
-              Effect: Allow
-              Action: bedrock:InvokeModel
-              Resource: !Sub "arn:${AWS::Partition}:bedrock:ap-south-1:${AWS::AccountId}:inference-profile/global.amazon.nova-2-lite-v1:0"
-            - Sid: NovaLiteInSourceRegion
-              Effect: Allow
-              Action: bedrock:InvokeModel
-              Resource: !Sub "arn:${AWS::Partition}:bedrock:ap-south-1::foundation-model/amazon.nova-2-lite-v1:0"
-              Condition:
-                StringEquals:
-                  bedrock:InferenceProfileArn: !Sub "arn:${AWS::Partition}:bedrock:ap-south-1:${AWS::AccountId}:inference-profile/global.amazon.nova-2-lite-v1:0"
-            - Sid: NovaLiteGlobalRouting
-              Effect: Allow
-              Action: bedrock:InvokeModel
-              Resource: !Sub "arn:${AWS::Partition}:bedrock:::foundation-model/amazon.nova-2-lite-v1:0"
-              Condition:
-                StringEquals:
-                  aws:RequestedRegion: unspecified
-                  bedrock:InferenceProfileArn: !Sub "arn:${AWS::Partition}:bedrock:ap-south-1:${AWS::AccountId}:inference-profile/global.amazon.nova-2-lite-v1:0"
-            # APAC profile for Nova Pro: the profile in ap-south-1 and the model in each Region it routes to.
-            - Sid: NovaProApacProfile
-              Effect: Allow
-              Action: bedrock:InvokeModel
-              Resource: !Sub "arn:${AWS::Partition}:bedrock:ap-south-1:${AWS::AccountId}:inference-profile/apac.amazon.nova-pro-v1:0"
-            - Sid: NovaProApacRegions
-              Effect: Allow
-              Action: bedrock:InvokeModel
-              Resource:
-                - !Sub "arn:${AWS::Partition}:bedrock:ap-south-1::foundation-model/amazon.nova-pro-v1:0"
-                - !Sub "arn:${AWS::Partition}:bedrock:ap-southeast-1::foundation-model/amazon.nova-pro-v1:0"
-                - !Sub "arn:${AWS::Partition}:bedrock:ap-southeast-2::foundation-model/amazon.nova-pro-v1:0"
-                - !Sub "arn:${AWS::Partition}:bedrock:ap-northeast-1::foundation-model/amazon.nova-pro-v1:0"
-                - !Sub "arn:${AWS::Partition}:bedrock:ap-northeast-2::foundation-model/amazon.nova-pro-v1:0"
-                - !Sub "arn:${AWS::Partition}:bedrock:ap-northeast-3::foundation-model/amazon.nova-pro-v1:0"
-              Condition:
-                StringEquals:
-                  bedrock:InferenceProfileArn: !Sub "arn:${AWS::Partition}:bedrock:ap-south-1:${AWS::AccountId}:inference-profile/apac.amazon.nova-pro-v1:0"
             - Sid: ReadAndDeleteUploads
               Effect: Allow
               Action: [s3:GetObject, s3:DeleteObject]
@@ -319,6 +318,47 @@ Resources:
               Effect: Allow
               Action: [dynamodb:GetItem, dynamodb:UpdateItem]
               Resource: !GetAtt JobsTable.Arn
+        # Bedrock only while Nova reads the quotes. Through an inference profile: the profile in this
+        # Region, then the model in each Region it routes to, only when called through that profile.
+        - !If
+          - NovaThroughProfile
+          - Statement:
+              - Sid: NovaInferenceProfile
+                Effect: Allow
+                Action: bedrock:InvokeModel
+                Resource: !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/${ModelId}"
+          - !Ref AWS::NoValue
+        - !If
+          - NovaRegionalModels
+          - Statement:
+              - Sid: NovaProfileRegions
+                Effect: Allow
+                Action: bedrock:InvokeModel
+                Resource: !Ref ProfileModelArns
+                Condition:
+                  StringEquals:
+                    bedrock:InferenceProfileArn: !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/${ModelId}"
+          - !Ref AWS::NoValue
+        - !If
+          - NovaGlobalModels
+          - Statement:
+              - Sid: NovaGlobalRouting
+                Effect: Allow
+                Action: bedrock:InvokeModel
+                Resource: !Ref GlobalModelArns
+                Condition:
+                  StringEquals:
+                    aws:RequestedRegion: unspecified
+                    bedrock:InferenceProfileArn: !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/${ModelId}"
+          - !Ref AWS::NoValue
+        - !If
+          - NovaInRegion
+          - Statement:
+              - Sid: NovaInRegionModel
+                Effect: Allow
+                Action: bedrock:InvokeModel
+                Resource: !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}::foundation-model/${ModelId}"
+          - !Ref AWS::NoValue
       Events:
         ManifestUploaded:
           Type: S3
