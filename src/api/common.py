@@ -221,14 +221,16 @@ def _take_slot(key, cap):
     return True
 
 
-def new_job(page_count, source):
-    """Create a job awaiting upload. Returns (job_id, token)."""
+def new_job(page_count, source, mode="nova", status="awaiting_upload", **fields):
+    """Create a job, awaiting upload unless told otherwise. Returns (job_id, token).
+    mode says who read the quote: "nova", or "saved" for a sample's saved reading."""
     job_id = str(uuid.uuid4())
     token, digest = new_token()
     created = now()
     table().put_item(
-        Item={"job_id": job_id, "status": "awaiting_upload", "token_hash": digest, "page_count": page_count,
-              "source": source, "created_at": created, "expires_at": created + job_ttl_seconds()},
+        Item={"job_id": job_id, "status": status, "token_hash": digest, "page_count": page_count,
+              "source": source, "mode": mode, "created_at": created, "expires_at": created + job_ttl_seconds(),
+              **fields},
         ConditionExpression="attribute_not_exists(job_id)",
     )
     return job_id, token

@@ -70,3 +70,14 @@ def test_samples_use_made_up_vendor_only():
     for path in SAMPLES:
         text = path.read_text(encoding="utf-8")
         assert "Example Solar Pvt Ltd" in text and "+91 00000 00000" in text
+
+
+@pytest.mark.parametrize("path", SAMPLES, ids=lambda p: p.stem)
+def test_saved_reading_matches_the_sample(path):
+    import runpy
+
+    saved_reading = runpy.run_path(str(ROOT / "samples" / "generate.py"))["saved_reading"]
+    sample = load(path)
+    cached = load(ROOT / "samples" / "cached" / path.name)
+    assert cached == saved_reading(sample)  # regenerate with: python samples/generate.py --saved-readings
+    assert cached["reading"] == "saved" and "not read by a model" in cached["_reading"]

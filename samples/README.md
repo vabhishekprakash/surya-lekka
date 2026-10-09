@@ -10,6 +10,8 @@ Three made-up rooftop solar quotes for testing the checks. The vendor (Example S
 
 `expected/<id>.json` holds the page text, the quote in contract v1 form, the user's answers, and the findings and vendor questions we expect. `tests/test_samples.py` runs the checks on each one and compares.
 
+`cached/<id>.json` is the saved reading that the "Try a sample" button shows. It is copied from the expected quote and page text, so no model read it. After changing a sample, run `python samples/generate.py --saved-readings`.
+
 The PDFs are not kept in git. The deploy step will generate them from the JSON files. To make them locally, run:
 
 ```

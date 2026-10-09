@@ -10,6 +10,7 @@ pytest.importorskip("moto")
 from moto import mock_aws
 
 from api import common, jobs, worker
+from checks import run_checks
 from extract.dryrun import DryRunClient, load_dry_run_wire, remap_pages, stubbed_client, tool_response
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -145,7 +146,7 @@ def test_kill_switch(aws, monkeypatch):
     monkeypatch.setenv("UPLOADS_ENABLED", "false")
     monkeypatch.setenv("DAILY_JOB_CAP", "0")  # the kill switch is checked first
     assert call(jobs.create_job, {"page_count": 2})[0] == 503
-    assert call(jobs.create_sample_job, path={"sample_id": "S1"})[0] == 503
+    assert call(jobs.create_sample_job, path={"sample_id": "S1"}, query=LIVE)[0] == 503
     assert counter() == 0
 
 
@@ -230,7 +231,7 @@ def test_stale_processing_reported_as_timed_out(aws):
     job = create()
     common.transition(job["job_id"], "awaiting_upload", "processing", claimed_at=common.now() - 3600)
     assert get(job)[1] | {"job_id": None, "page_count": None} == {
-        "job_id": None, "page_count": None, "status": "failed", "reason": "timed_out"}
+        "job_id": None, "page_count": None, "status": "failed", "reason": "timed_out", "mode": "nova"}
 
 
 # --- worker ------------------------------------------------------------------------------------
@@ -338,29 +339,61 @@ def test_other_objects_are_ignored(aws):
 
 # --- POST /samples/{id} ----------------------------------------------------------------------------
 
+def saved_reading(sample_id):
+    return (ROOT / "samples" / "cached" / f"{sample_id}.json").read_bytes()
+
+
 def put_sample(s3, sample_id="S1", pages=2):
     for n in range(1, pages + 1):
         s3.put_object(Bucket=BUCKET, Key=f"samples/{sample_id}/page-{n:02d}.jpg", Body=JPEG)
     s3.put_object(Bucket=BUCKET, Key=f"samples/{sample_id}/manifest.json", Body=json.dumps({"pages": pages}))
+    s3.put_object(Bucket=BUCKET, Key=f"samples/{sample_id}/reading.json", Body=saved_reading(sample_id))
 
 
-def test_sample_route_uses_the_real_upload_path(aws):
+def test_sample_route_serves_the_saved_reading_by_default(aws, monkeypatch):
+    monkeypatch.setenv("UPLOADS_ENABLED", "false")  # no model call, so the kill switch and caps don't apply
+    monkeypatch.setenv("DAILY_JOB_CAP", "0")
     put_sample(aws)
     status, job = call(jobs.create_sample_job, path={"sample_id": "S1"})
-    assert status == 201 and set(job) == {"job_id", "token"}
+    assert status == 201 and set(job) == {"job_id", "token", "mode"} and job["mode"] == "saved"
+    assert uploads(aws, job["job_id"]) == [] and worker.bedrock_client().calls == 0
+    assert [i["job_id"] for i in scan()] == [job["job_id"]]  # no counters touched
+    assert item(job["job_id"])["source"] == "sample:S1"
+    reading = json.loads(saved_reading("S1"))
+    body = get(job)[1]
+    assert body["status"] == "done" and body["mode"] == "saved" and body["processing_complete"] is True
+    assert body["extraction"] == reading["quote"] and body["page_text"] == reading["pages"]
+    assert body["findings"] == json.loads(json.dumps(run_checks(reading["quote"])["findings"], default=str))
+    status, checked = call(jobs.recheck, {"answers": S1_ANSWERS}, path={"id": job["job_id"]},
+                           query={"t": job["token"]})
+    assert status == 200 and {f["status"] for f in checked["findings"]} == {"consistent"}
+
+
+def test_sample_route_uses_the_real_upload_path_when_live(aws):
+    put_sample(aws)
+    status, job = call(jobs.create_sample_job, path={"sample_id": "S1"}, query=LIVE)
+    assert status == 201 and set(job) == {"job_id", "token", "mode"} and job["mode"] == "nova"
     assert sorted(uploads(aws, job["job_id"])) == [
         f"uploads/{job['job_id']}/manifest.json", f"uploads/{job['job_id']}/page-01.jpg",
         f"uploads/{job['job_id']}/page-02.jpg"]
     assert item(job["job_id"])["source"] == "sample:S1" and counter() == 1
     assert run_worker(job["job_id"]) == ["done"]  # what the manifest's S3 event starts
     assert get(job)[1]["status"] == "done" and worker.bedrock_client().calls == 1
-    assert len(aws.list_objects_v2(Bucket=BUCKET, Prefix="samples/S1/")["Contents"]) == 3  # samples stay
+    assert get(job)[1]["mode"] == "nova" and "page_text" not in get(job)[1]
+    assert len(aws.list_objects_v2(Bucket=BUCKET, Prefix="samples/S1/")["Contents"]) == 4  # samples stay
 
 
-def test_unknown_or_missing_sample(aws):
-    assert call(jobs.create_sample_job, path={"sample_id": "S9"})[0] == 404
-    assert counter() == 0  # an unknown name is refused before the cap
-    status, body = call(jobs.create_sample_job, path={"sample_id": "S2"})
+@pytest.mark.parametrize("query", [None, LIVE])
+def test_unknown_or_missing_sample(aws, query):
+    assert call(jobs.create_sample_job, path={"sample_id": "S9"}, query=query)[0] == 404
+    status, body = call(jobs.create_sample_job, path={"sample_id": "S2"}, query=query)
+    assert status == 404 and body["error"] == "sample_missing"
+    assert scan() == []
+
+
+def test_bad_saved_reading_is_missing(aws):
+    aws.put_object(Bucket=BUCKET, Key="samples/S1/reading.json", Body=b"not json")
+    status, body = call(jobs.create_sample_job, path={"sample_id": "S1"})
     assert status == 404 and body["error"] == "sample_missing"
 
 

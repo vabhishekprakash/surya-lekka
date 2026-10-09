@@ -17,6 +17,8 @@ def test_render_samples_writes_the_layout_the_sample_route_reads(tmp_path):
         images = sorted(folder.glob("page-*.jpg"))
         assert [p.name for p in images] == [f"page-{n:02d}.jpg" for n in range(1, pages + 1)]
         assert all(p.read_bytes()[:3] == b"\xff\xd8\xff" and p.stat().st_size <= 3_750_000 for p in images)
+        reading = json.loads((folder / "reading.json").read_text(encoding="utf-8"))
+        assert reading["sample_id"] == sid and reading["reading"] == "saved"
 
 
 def test_deploy_script_steps():

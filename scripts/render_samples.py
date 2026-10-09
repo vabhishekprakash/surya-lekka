@@ -2,8 +2,9 @@
 
     python scripts/render_samples.py --out .build/samples
 
-Writes <out>/<id>/page-NN.jpg and <out>/<id>/manifest.json ({"pages": n}), the
-layout POST /samples/{id} reads from s3://<bucket>/samples/. Needs PyMuPDF.
+Writes <out>/<id>/page-NN.jpg, <out>/<id>/manifest.json ({"pages": n}) and
+<out>/<id>/reading.json (the saved reading from samples/cached/), the layout
+POST /samples/{id} reads from s3://<bucket>/samples/. Needs PyMuPDF.
 """
 
 import argparse
@@ -35,6 +36,7 @@ def render_samples(out_dir):
             for page in result.pages:
                 (folder / f"page-{page.page:02d}.jpg").write_bytes(page.jpeg)
             (folder / "manifest.json").write_text(json.dumps({"pages": len(result.pages)}), encoding="utf-8")
+            (folder / "reading.json").write_bytes((ROOT / "samples" / "cached" / f"{sid}.json").read_bytes())
             written[sid] = len(result.pages)
     return written
 

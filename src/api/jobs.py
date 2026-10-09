@@ -26,6 +26,7 @@ from .common import (
     now,
     page_key,
     path_param,
+    query_param,
     response,
     s3,
     table,
@@ -73,7 +74,10 @@ def _view(item):
     status, reason = item["status"], item.get("reason")
     if status == "processing" and now() - int(item.get("claimed_at", now())) > WORKER_TIMEOUT_SECONDS:
         status, reason = "failed", "timed_out"
-    view = {"job_id": item["job_id"], "status": status, "reason": reason, "page_count": int(item["page_count"])}
+    view = {"job_id": item["job_id"], "status": status, "reason": reason, "page_count": int(item["page_count"]),
+            "mode": item.get("mode", "nova")}
+    if item.get("page_text"):
+        view["page_text"] = json.loads(item["page_text"])
     if status == "done":
         result = json.loads(item.get("checked") or item["result"])
         view.update({
@@ -145,33 +149,68 @@ def sample_ids():
 
 
 def create_sample_job(event, context):
-    """POST /samples/{sample_id}: a job from the synthetic sample pages under samples/
-    in the bucket. It runs the same worker and Nova call as an upload and counts
-    against the daily cap."""
-    from botocore.exceptions import ClientError
+    """POST /samples/{sample_id}: a done job holding the sample's saved reading
+    (samples/<id>/reading.json in the bucket). No model call, so no cap applies.
 
+    POST /samples/{sample_id}?live=1 copies the synthetic sample pages under
+    samples/ in the bucket into a new upload, which runs the same worker and Nova
+    call as an upload and counts against the caps."""
     sample_id = path_param(event, "sample_id")
+    live = query_param(event, "live") == "1"
     try:
         if sample_id not in sample_ids():
             raise ApiError(404, "no_such_sample", "There is no sample with that name.")
-        check_kill_switch()
-        bucket = bucket_name()
-        try:
-            raw = s3().get_object(Bucket=bucket, Key=f"samples/{sample_id}/manifest.json")["Body"].read()
-            pages = json.loads(raw)["pages"]
-        except (ClientError, ValueError, KeyError, TypeError):
-            raise ApiError(404, "sample_missing", "The sample's pages are not available.") from None
-        if isinstance(pages, bool) or not isinstance(pages, int) or not 1 <= pages <= MAX_PAGES:
-            raise ApiError(404, "sample_missing", "The sample's pages are not available.")
-        take_slots(event)
-        job_id, token = new_job(pages, f"sample:{sample_id}")
-        for n in range(1, pages + 1):
-            s3().copy_object(Bucket=bucket, Key=page_key(job_id, n),
-                             CopySource={"Bucket": bucket, "Key": f"samples/{sample_id}/page-{n:02d}.jpg"})
-        s3().put_object(Bucket=bucket, Key=manifest_key(job_id), Body=json.dumps({"pages": pages}).encode(),
-                        ContentType="application/json")
+        job_id, token, pages = (_live_sample if live else _saved_sample)(event, sample_id)
     except ApiError as e:
         log("sample_refused", reason=e.code, http_status=e.status)
         return error_response(e)
     log("sample_job_created", job_id=job_id, sample_id=sample_id, pages=pages, http_status=201)
-    return response(201, {"job_id": job_id, "token": token})
+    return response(201, {"job_id": job_id, "token": token, "mode": "nova" if live else "saved"})
+
+
+SAMPLE_MISSING = ("sample_missing", "The sample is not available.")
+READING_MAX_BYTES = 200_000
+
+
+def _sample_object(sample_id, name, limit):
+    from botocore.exceptions import ClientError
+
+    try:
+        body = s3().get_object(Bucket=bucket_name(), Key=f"samples/{sample_id}/{name}")["Body"].read(limit + 1)
+        data = json.loads(body) if len(body) <= limit else None
+    except (ClientError, ValueError):
+        data = None
+    if not isinstance(data, dict):
+        raise ApiError(404, *SAMPLE_MISSING)
+    return data
+
+
+def _saved_sample(event, sample_id):
+    reading = _sample_object(sample_id, "reading.json", READING_MAX_BYTES)
+    quote, pages = reading.get("quote"), reading.get("pages")
+    if reading.get("reading") != "saved" or not isinstance(quote, dict) or not isinstance(pages, dict):
+        raise ApiError(404, *SAMPLE_MISSING)
+    result = run_checks(quote)
+    checked = {k: result[k] for k in ("findings", "questions", "vendor_message")}
+    job_id, token = new_job(
+        len(pages), f"sample:{sample_id}", mode="saved", status="done",
+        extraction=json.dumps(quote, default=str), result=json.dumps(checked, default=str),
+        processing_complete=quote.get("processing_complete") is True, page_text=json.dumps(pages),
+        finished_at=now())
+    return job_id, token, len(pages)
+
+
+def _live_sample(event, sample_id):
+    check_kill_switch()
+    pages = _sample_object(sample_id, "manifest.json", MANIFEST_MAX_BYTES).get("pages")
+    if isinstance(pages, bool) or not isinstance(pages, int) or not 1 <= pages <= MAX_PAGES:
+        raise ApiError(404, *SAMPLE_MISSING)
+    take_slots(event)
+    job_id, token = new_job(pages, f"sample:{sample_id}")
+    bucket = bucket_name()
+    for n in range(1, pages + 1):
+        s3().copy_object(Bucket=bucket, Key=page_key(job_id, n),
+                         CopySource={"Bucket": bucket, "Key": f"samples/{sample_id}/page-{n:02d}.jpg"})
+    s3().put_object(Bucket=bucket, Key=manifest_key(job_id), Body=json.dumps({"pages": pages}).encode(),
+                    ContentType="application/json")
+    return job_id, token, pages

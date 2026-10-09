@@ -16,7 +16,7 @@ Parameters:
     Type: String
     Default: "true"
     AllowedValues: ["true", "false"]
-    Description: Kill switch for new checks.
+    Description: Kill switch for uploads and live samples. Saved sample readings still work.
   DailyJobCap:
     Type: Number
     Default: 200

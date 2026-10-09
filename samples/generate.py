@@ -1,6 +1,7 @@
 """Render the synthetic sample quotes in samples/expected/*.json as PDFs.
 
     python samples/generate.py [--out DIR]
+    python samples/generate.py --saved-readings
 
 Each page carries a "SAMPLE - NOT A REAL QUOTATION" watermark and a real
 text layer. The vendor, address, phone and figures are made up. Needs
@@ -40,10 +41,41 @@ def load_samples(directory=HERE / "expected"):
     return [json.loads(p.read_text(encoding="utf-8")) for p in sorted(Path(directory).glob("S*.json"))]
 
 
+def saved_reading(sample):
+    """The saved reading the "Try a sample" button shows: the sample's expected
+    quote and page text, not a model's output."""
+    sid = sample["sample_id"]
+    return {
+        "_reading": (f"Saved reading for synthetic sample {sid}, made from samples/expected/{sid}.json. "
+                     "It was not read by a model. Every value is made up."),
+        "sample_id": sid,
+        "reading": "saved",
+        "quote": sample["quote"],
+        "pages": sample["pages"],
+    }
+
+
+def write_saved_readings(directory=HERE / "cached"):
+    directory = Path(directory)
+    directory.mkdir(parents=True, exist_ok=True)
+    paths = []
+    for sample in load_samples():
+        path = directory / f"{sample['sample_id']}.json"
+        path.write_text(json.dumps(saved_reading(sample), indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
+        paths.append(path)
+    return paths
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", default=str(HERE))
+    ap.add_argument("--saved-readings", action="store_true",
+                    help="write samples/cached/<id>.json instead of the PDFs")
     args = ap.parse_args(argv)
+    if args.saved_readings:
+        for path in write_saved_readings():
+            print(f"wrote {path}")
+        return
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
     for sample in load_samples():
