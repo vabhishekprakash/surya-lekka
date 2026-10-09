@@ -60,9 +60,14 @@ def aws(monkeypatch):
     common.reset_clients()
 
 
-def call(handler, body=None, path=None, query=None):
-    event = {"body": None if body is None else json.dumps(body), "isBase64Encoded": False,
-             "pathParameters": path, "queryStringParameters": query}
+IP = "198.51.100.7"
+LIVE = {"live": "1"}
+
+
+def call(handler, body=None, path=None, query=None, ip=IP, raw=None):
+    event = {"body": raw if raw is not None else None if body is None else json.dumps(body),
+             "isBase64Encoded": False, "pathParameters": path, "queryStringParameters": query,
+             "requestContext": {"http": {"sourceIp": ip}}}
     r = handler(event, None)
     assert r["headers"]["cache-control"] == "no-store"
     return r["statusCode"], json.loads(r["body"])
@@ -144,15 +149,64 @@ def test_kill_switch(aws, monkeypatch):
     assert counter() == 0
 
 
-def test_daily_cap_counts_jobs_and_samples(aws, monkeypatch):
+def test_daily_cap_counts_jobs_and_live_samples(aws, monkeypatch):
     monkeypatch.setenv("DAILY_JOB_CAP", "2")
     put_sample(aws)
     assert call(jobs.create_job, {"page_count": 2})[0] == 201
-    assert call(jobs.create_sample_job, path={"sample_id": "S1"})[0] == 201
-    status, body = call(jobs.create_job, {"page_count": 99})  # the cap is checked before validation
+    assert call(jobs.create_sample_job, path={"sample_id": "S1"}, query=LIVE)[0] == 201
+    status, body = call(jobs.create_job, {"page_count": 2})
     assert status == 429 and body["error"] == "daily_limit"
-    assert call(jobs.create_sample_job, path={"sample_id": "S1"})[0] == 429
+    assert call(jobs.create_sample_job, path={"sample_id": "S1"}, query=LIVE)[0] == 429
     assert counter() == 2
+
+
+def scan():
+    return common.table().scan()["Items"]
+
+
+@pytest.mark.parametrize("request_kwargs", [
+    {"body": {"page_count": 99}}, {"body": {"page_count": "2"}}, {"body": {}}, {"raw": "not json"},
+    {"raw": json.dumps({"page_count": 2, "pad": "x" * 70000})},
+])
+def test_invalid_requests_take_no_slot(aws, request_kwargs):
+    status, body = call(jobs.create_job, **request_kwargs)
+    assert status in (400, 413) and body["error"] in ("bad_page_count", "bad_json", "body_too_large")
+    assert scan() == []
+
+
+def test_missing_live_sample_takes_no_slot(aws):
+    status, body = call(jobs.create_sample_job, path={"sample_id": "S2"}, query=LIVE)
+    assert status == 404 and body["error"] == "sample_missing"
+    assert scan() == []
+
+
+@pytest.mark.parametrize("name,code", [("DAILY_JOB_CAP", "daily_limit"), ("IP_DAILY_JOB_CAP", "ip_limit")])
+@pytest.mark.parametrize("value", ["0", "-1", "lots", ""])
+def test_cap_of_zero_or_unreadable_refuses_without_writing(aws, monkeypatch, name, code, value):
+    monkeypatch.setenv(name, value)
+    put_sample(aws)
+    status, body = call(jobs.create_job, {"page_count": 2})
+    assert status == 429 and body["error"] == code
+    assert call(jobs.create_sample_job, path={"sample_id": "S1"}, query=LIVE)[1]["error"] == code
+    assert scan() == []
+
+
+def test_per_ip_daily_limit(aws, monkeypatch):
+    monkeypatch.setenv("IP_DAILY_JOB_CAP", "2")
+    put_sample(aws)
+    assert call(jobs.create_job, {"page_count": 1}, ip="203.0.113.9")[0] == 201
+    assert call(jobs.create_sample_job, path={"sample_id": "S1"}, query=LIVE, ip="203.0.113.9")[0] == 201
+    status, body = call(jobs.create_job, {"page_count": 1}, ip="203.0.113.9")
+    assert status == 429 and body["error"] == "ip_limit"
+    assert call(jobs.create_sample_job, path={"sample_id": "S1"}, query=LIVE, ip="203.0.113.9")[0] == 429
+    assert call(jobs.create_job, {"page_count": 1}, ip="203.0.113.10")[0] == 201
+    assert counter() == 3  # refused requests take no slot for the day
+    assert "203.0.113.9" not in json.dumps(scan(), default=str)  # the address is stored only as a keyed hash
+
+
+def test_per_ip_limit_defaults_to_ten(monkeypatch):
+    monkeypatch.delenv("IP_DAILY_JOB_CAP", raising=False)
+    assert common.ip_daily_cap() == 10
 
 
 # --- GET /jobs/{id} --------------------------------------------------------------------------

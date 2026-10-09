@@ -134,5 +134,12 @@ def test_api_functions_least_privilege(name, allowed):
     assert all("*" not in a for a in granted)
 
 
+def test_caps_reach_the_functions():
+    env = TEMPLATE["Globals"]["Function"]["Environment"]["Variables"]
+    assert env["DAILY_JOB_CAP"] == {"Ref": "DailyJobCap"} and env["IP_DAILY_JOB_CAP"] == {"Ref": "IpDailyJobCap"}
+    assert TEMPLATE["Parameters"]["IpDailyJobCap"]["Default"] == 10
+    assert env["IP_HASH_KEY"] == {"Ref": "AWS::StackId"}
+
+
 def test_outputs():
     assert set(TEMPLATE["Outputs"]) == {"ApiUrl", "BucketName"}

@@ -50,8 +50,21 @@ def uploads_enabled():
     return os.environ.get("UPLOADS_ENABLED", "true").strip().lower() == "true"
 
 
+def _cap(name, default):
+    """A cap from the environment. Anything that is not a whole number reads as 0,
+    which refuses every new job."""
+    try:
+        return int(os.environ.get(name, default))
+    except ValueError:
+        return 0
+
+
 def daily_cap():
-    return int(os.environ.get("DAILY_JOB_CAP", "200"))
+    return _cap("DAILY_JOB_CAP", "200")
+
+
+def ip_daily_cap():
+    return _cap("IP_DAILY_JOB_CAP", "10")
 
 
 def job_ttl_seconds():
@@ -157,25 +170,49 @@ def manifest_key(job_id):
     return f"uploads/{job_id}/manifest.json"
 
 
-def check_gates():
-    """Kill switch first, then the daily cap. Raises ApiError when either refuses."""
+def check_kill_switch():
     if not uploads_enabled():
         raise ApiError(503, "uploads_disabled", "New checks are switched off for now. Please try again later.")
-    if not take_daily_slot():
-        raise ApiError(429, "daily_limit", "Today's limit of checks has been reached. Please try again tomorrow.")
 
 
-def take_daily_slot():
-    """Conditional increment of today's counter item. False once the cap is reached."""
+def source_ip(event):
+    return ((event.get("requestContext") or {}).get("http") or {}).get("sourceIp") or "unknown"
+
+
+def _ip_counter_key(day, ip):
+    """The address is kept only as a keyed hash, and only for the day's counter."""
+    key = os.environ.get("IP_HASH_KEY", "").encode("utf-8")
+    digest = hmac.new(key, f"{day}|{ip}".encode("utf-8"), hashlib.sha256).hexdigest()[:32]
+    return f"ipcount#{day}#{digest}"
+
+
+def take_slots(event):
+    """One of the source address's daily slots, then one of the day's. Call only
+    once the request is valid. A cap of 0 refuses before anything is written."""
+    ip_limit = ApiError(429, "ip_limit", "You have reached today's limit of checks. Please try again tomorrow.")
+    day_limit = ApiError(429, "daily_limit", "Today's limit of checks has been reached. Please try again tomorrow.")
+    ip_cap, cap = ip_daily_cap(), daily_cap()
+    if ip_cap <= 0:
+        raise ip_limit
+    if cap <= 0:
+        raise day_limit
+    day = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    if not _take_slot(_ip_counter_key(day, source_ip(event)), ip_cap):
+        raise ip_limit
+    if not _take_slot(f"counter#{day}", cap):
+        raise day_limit
+
+
+def _take_slot(key, cap):
+    """Conditional increment of a counter item. False once it reaches cap."""
     from botocore.exceptions import ClientError
 
-    day = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     try:
         table().update_item(
-            Key={"job_id": f"counter#{day}"},
+            Key={"job_id": key},
             UpdateExpression="ADD job_count :one SET expires_at = :expires",
             ConditionExpression="attribute_not_exists(job_count) OR job_count < :cap",
-            ExpressionAttributeValues={":one": 1, ":cap": daily_cap(), ":expires": now() + 2 * 86400},
+            ExpressionAttributeValues={":one": 1, ":cap": cap, ":expires": now() + 2 * 86400},
         )
     except ClientError as e:
         if error_code(e) == "ConditionalCheckFailedException":

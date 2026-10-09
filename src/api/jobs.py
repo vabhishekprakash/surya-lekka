@@ -18,7 +18,7 @@ from .common import (
     authorised_job,
     body_json,
     bucket_name,
-    check_gates,
+    check_kill_switch,
     error_response,
     log,
     manifest_key,
@@ -29,6 +29,7 @@ from .common import (
     response,
     s3,
     table,
+    take_slots,
 )
 
 RESULT_MAX_BYTES = 350_000
@@ -46,10 +47,11 @@ def _presigned_post(key, content_type, max_bytes):
 def create_job(event, context):
     """POST /jobs {"page_count": n}"""
     try:
-        check_gates()
+        check_kill_switch()
         pages = body_json(event).get("page_count")
         if isinstance(pages, bool) or not isinstance(pages, int) or not 1 <= pages <= MAX_PAGES:
             raise ApiError(400, "bad_page_count", f"page_count must be a whole number from 1 to {MAX_PAGES}.")
+        take_slots(event)
         job_id, token = new_job(pages, "upload")
         body = {
             "job_id": job_id,
@@ -152,7 +154,7 @@ def create_sample_job(event, context):
     try:
         if sample_id not in sample_ids():
             raise ApiError(404, "no_such_sample", "There is no sample with that name.")
-        check_gates()
+        check_kill_switch()
         bucket = bucket_name()
         try:
             raw = s3().get_object(Bucket=bucket, Key=f"samples/{sample_id}/manifest.json")["Body"].read()
@@ -161,6 +163,7 @@ def create_sample_job(event, context):
             raise ApiError(404, "sample_missing", "The sample's pages are not available.") from None
         if isinstance(pages, bool) or not isinstance(pages, int) or not 1 <= pages <= MAX_PAGES:
             raise ApiError(404, "sample_missing", "The sample's pages are not available.")
+        take_slots(event)
         job_id, token = new_job(pages, f"sample:{sample_id}")
         for n in range(1, pages + 1):
             s3().copy_object(Bucket=bucket, Key=page_key(job_id, n),
