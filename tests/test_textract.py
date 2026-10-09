@@ -113,8 +113,9 @@ def test_answers_that_do_not_parse_as_their_type_are_dropped(alias, text):
 def test_answers_below_the_threshold_are_dropped():
     page = Page()
     page.line("Total payable Rs 2,00,000", 0.3)
+    page.line("GST Rs 10,000", 0.5)
     page.answer("TOTAL_PAYABLE", "Rs 2,00,000", confidence=tc.CONFIDENCE_THRESHOLD - 0.1, top=0.3)
-    page.answer("GST_AMOUNT", "Rs 10,000", confidence=tc.CONFIDENCE_THRESHOLD, top=0.3)
+    page.answer("GST_AMOUNT", "Rs 10,000", confidence=tc.CONFIDENCE_THRESHOLD, top=0.5)
     page.unanswered("NET_COST")
     wire, report = tc.map_page(page.reply(), 1)
     assert [(p["kind"], p["raw"]) for p in wire["prices"]] == [("gst_amount", "Rs 10,000")]
@@ -439,3 +440,61 @@ def test_what_textract_gets_from_sample_s2():
     assert quote["module_groups"][0]["wattage"] is None and quote["stated_capacity"] is None
     assert all(quote[k] is None for k in ("subsidy_central", "subsidy_state", "subsidy_combined", "subsidy_unspecified"))
     assert quote["net_cost"]["value"]["parsed"] == "80050"
+
+
+# --- regression cases from the outside review (synthetic replies) ----------------------------
+
+@pytest.mark.parametrize("answer", ["DCR not confirmed", "DCR subject to availability", "DCR or non-DCR",
+                                    "DCR/Non-DCR", "DCR on request", "DCR if available", "DCR optional",
+                                    "DCR TBC", "DCR to be confirmed", "No DCR"])
+def test_dcr_answers_with_doubt_negation_or_both_kinds_are_not_found(answer):
+    page = Page()
+    page.line(f"Panels: {answer}", 0.3)
+    page.answer("DCR_STATUS", answer, top=0.3)
+    assert contract(page)["dcr_declaration"] is None
+
+
+@pytest.mark.parametrize("line", ["Module type: DCR or Non-DCR as available", "DCR (subject to availability)"])
+def test_a_plain_dcr_answer_on_a_doubtful_line_is_not_found(line):
+    page = Page()
+    page.line(line, 0.3)
+    page.answer("DCR_STATUS", "DCR", top=0.3)
+    assert contract(page)["dcr_declaration"] is None
+
+
+def test_an_answer_whose_box_overlaps_a_line_with_other_text_is_not_on_the_page():
+    page = Page()
+    page.line("Total amount payable Rs 1,00,000", 0.3)
+    page.answer("TOTAL_PAYABLE", "9,00,000", top=0.3)
+    wire, report = tc.map_page(page.reply(), 1)
+    assert wire["prices"] == [] and report[0]["why"] == "not_on_page"
+
+
+@pytest.mark.parametrize("line,answer", [("Total amount payable Rs. 1,90,000/-", "₹190000"),
+                                         ("TOTAL PAYABLE ₹ 1,90,000", "Rs 1,90,000 /-"),
+                                         ("Grand total INR 1, 90, 000", "1,90,000")])
+def test_answer_text_is_matched_ignoring_case_spaces_commas_and_rupee_marks(line, answer):
+    page = Page()
+    page.line(line, 0.3)
+    page.answer("TOTAL_PAYABLE", answer, top=0.3)
+    assert [p["raw"] for p in tc.map_page(page.reply(), 1)[0]["prices"]] == [answer]
+
+
+def test_each_option_row_takes_its_price_kind_from_its_own_column():
+    page = Page()
+    page.table([["System size (kW)", "Base price (Rs)", "Net cost (Rs)"],
+                ["3 kW", "1,90,000", "1,12,000"], ["5 kW", "", "1,90,000"]])
+    c = contract(page)
+    kinds = sorted((f["option_id"], f["name"]) for f in c["facts"] if f["name"] != "stated_capacity")
+    assert kinds == [("3 kW", "base_price"), ("5 kW", "net_cost")]
+
+
+def test_a_row_with_a_doubtful_cell_is_left_out():
+    rows = [["System size (kW)", "Price (Rs)"], ["3 kW", "1,90,000"], ["5 kW", "2,90,000"], ["7 kW", "3,90,000"]]
+    page = Page()
+    page.table(rows, confidence={(3, 2): tc.CONFIDENCE_THRESHOLD - 1})
+    assert [o["option_id"] for o in contract(page)["options"]] == ["3 kW", "7 kW"]
+    page = Page()
+    page.table(rows[:3], confidence={(2, 1): 20.0})  # one row left: not an option table
+    c = contract(page)
+    assert c["options"] == [] and c["flags"]["model_proposed"]["multiple_options"] is None

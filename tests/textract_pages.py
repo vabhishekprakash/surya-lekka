@@ -44,15 +44,16 @@ class Page:
     def unanswered(self, alias):
         return self._add({"BlockType": "QUERY", "Query": {"Text": "question", "Alias": alias}})
 
-    def table(self, rows, header_rows=1, merged=()):
+    def table(self, rows, header_rows=1, merged=(), confidence=None):
         """rows: lists of cell texts. merged: (row, col, row_span, col_span) groups,
-        1-based; the merged text is the covered cells' texts in order."""
+        1-based; the merged text is the covered cells' texts in order. confidence:
+        {(row, col): value} for cells read with less than the usual 90."""
         cell_ids, cells = [], {}
         for r, row in enumerate(rows, 1):
             for c, text in enumerate(row, 1):
                 words = [self._add({"BlockType": "WORD", "Text": w, "Confidence": 99.0}) for w in str(text).split()]
                 block = {"BlockType": "CELL", "RowIndex": r, "ColumnIndex": c, "RowSpan": 1, "ColumnSpan": 1,
-                         "Confidence": 90.0}
+                         "Confidence": (confidence or {}).get((r, c), 90.0)}
                 if words:
                     block["Relationships"] = [{"Type": "CHILD", "Ids": words}]
                 if r <= header_rows:

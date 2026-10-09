@@ -8,7 +8,11 @@ Mapping rules:
   of every LINE the answer's box overlaps on that page; page is the original
   page number. Nothing that isn't on the page is added.
 - An answer below the confidence threshold, one that doesn't parse as its
-  field's type, or one on no LINE of the page, is dropped (not found).
+  field's type, or one whose text isn't in the lines it sits on (ignoring case,
+  spaces, commas, Rs, ₹ and /-), is dropped (not found).
+- A DCR answer counts only as a plain statement: with negation, doubt (subject
+  to, on request, optional, TBC and so on) or both kinds named, in the answer
+  or its line, it is not found and the household confirms it.
 - Every surviving answer is kept, page by page. A value is never chosen
   across pages: different values reach merge_batches as a conflict for the
   user to resolve.
@@ -17,9 +21,10 @@ Mapping rules:
   set: the user confirms those.
 - A table gives options only when two or more of its rows each have a distinct
   system capacity, in a column whose header names capacity, size, system or
-  kW, and an amount in a price column of the same row. Rows naming a component
-  (inverter, panels, structure and so on) are bill-of-materials lines, never
-  options.
+  kW, and an amount in a price column of the same row, both cells read with at
+  least the threshold confidence. Each row's price kind comes from the header
+  of the column it was taken from. Rows naming a component (inverter, panels,
+  structure and so on) are bill-of-materials lines, never options.
 
 The raw reply is returned to the caller under "response" for the spike's own
 files; the worker keeps only the mapped facts.
@@ -60,6 +65,11 @@ GST_EXCLUDED = re.compile(r"\b(?:plus|excluding|exclusive\s+of|excl\.?)\s+gst\b|
 GIVE_IT_UP = re.compile(r"\bgive\s+it\s+up\b", re.I)
 NON_DCR = re.compile(r"\bnon[\s-]*(?:dcr|domestic)\b", re.I)
 DCR = re.compile(r"\bdcr\b|\bdomestic\s+content\b", re.I)
+# A DCR statement with any of these is not a plain statement: the household confirms it.
+DCR_DOUBT = re.compile(r"\b(?:not|no|subject\s+to|if\s+available|on\s+request|optional|tbc|to\s+be\s+confirmed)\b",
+                       re.I)
+# What answer text and line text may differ by and still be the same text.
+_LOOSE = re.compile(r"\brs\b\.?|\binr\b|₹|/-|[\s,]")
 DC_BASIS = re.compile(r"kwp\b|\bdc\b", re.I)
 AC_BASIS = re.compile(r"\bkva\b|\bac\b", re.I)
 CAPACITY_HEADER = re.compile(r"capacity|size|system|\bkw", re.I)
@@ -124,15 +134,17 @@ class _Page:
 
     def evidence(self, answer):
         """The full text of every LINE the answer's box overlaps, top to bottom. Without
-        a box, the lines that contain the answer's text. None when no line qualifies:
-        the answer is then not on the page."""
+        a box, the lines that contain the answer's text. None when the answer's text
+        isn't in those lines (overlap alone isn't enough): it is then not on the page."""
+        wanted = _loose(answer.get("Text", ""))
         box = _box(answer)
         if box:
             found = [_tidy(l["Text"]) for l in self.lines if _box(l) and _overlaps(box, _box(l))]
         else:
-            wanted = _tidy(answer.get("Text", "")).casefold()
-            found = [_tidy(l["Text"]) for l in self.lines if wanted and wanted in _tidy(l["Text"]).casefold()]
-        return "\n".join(found) or None
+            found = [_tidy(l["Text"]) for l in self.lines if wanted and wanted in _loose(l["Text"])]
+        if not wanted or wanted not in _loose("".join(found)):
+            return None
+        return "\n".join(found)
 
     def answers(self):
         """(alias, answer block) for every answer, in reply order."""
@@ -148,17 +160,21 @@ class _Page:
         return _tidy(" ".join(w.get("Text", "") for w in _children(cell, self.by_id) if w.get("BlockType") == "WORD"))
 
     def tables(self):
-        """Each table as (grid {(row, col): text}, header {col: text}). A merged cell's
-        text (its cells' words in order) fills every cell it covers."""
+        """Each table as (grid {(row, col): text}, header {col: text}, confidence
+        {(row, col): cell confidence}). A merged cell's text (its cells' words in order)
+        fills every cell it covers, with the lowest confidence among them."""
         for table in (b for b in self.blocks if b.get("BlockType") == "TABLE"):
             cells = [c for c in _children(table, self.by_id) if c.get("BlockType") == "CELL"]
             grid = {(c["RowIndex"], c["ColumnIndex"]): self.cell_text(c) for c in cells}
+            confidence = {(c["RowIndex"], c["ColumnIndex"]): float(c.get("Confidence") or 0) for c in cells}
             headers = {(c["RowIndex"], c["ColumnIndex"]) for c in cells if "COLUMN_HEADER" in (c.get("EntityTypes") or [])}
             for merged in _children(table, self.by_id, "MERGED_CELL"):
                 parts = sorted(_children(merged, self.by_id), key=lambda c: (c["RowIndex"], c["ColumnIndex"]))
                 text = _tidy(" ".join(self.cell_text(c) for c in parts))
+                lowest = min((float(c.get("Confidence") or 0) for c in parts), default=0.0)
                 for c in parts:
                     grid[(c["RowIndex"], c["ColumnIndex"])] = text
+                    confidence[(c["RowIndex"], c["ColumnIndex"])] = lowest
                     if "COLUMN_HEADER" in (merged.get("EntityTypes") or []):
                         headers.add((c["RowIndex"], c["ColumnIndex"]))
             if not grid:
@@ -170,7 +186,7 @@ class _Page:
             for r, c in sorted(headers):
                 header[c] = _tidy(f"{header.get(c, '')} {grid[(r, c)]}")
             header_rows = {r for r, _ in headers}
-            yield {k: v for k, v in grid.items() if k[0] not in header_rows}, header
+            yield {k: v for k, v in grid.items() if k[0] not in header_rows}, header, confidence
 
 
 # --- parsing answers -----------------------------------------------------------------------
@@ -188,10 +204,17 @@ def _parses(kind, text):
     return True
 
 
+def _loose(text):
+    return _LOOSE.sub("", str(text).casefold())
+
+
 def _dcr_value(text):
-    if NON_DCR.search(text):
-        return "non_dcr"
-    return "dcr" if DCR.search(text) else None
+    """dcr or non_dcr for a plain statement; None for doubt, negation or both kinds."""
+    negative = bool(NON_DCR.search(text))
+    positive = bool(DCR.search(NON_DCR.sub(" ", text)))
+    if (negative and positive) or DCR_DOUBT.search(NON_DCR.sub(" ", text)):
+        return None
+    return "non_dcr" if negative else "dcr" if positive else None
 
 
 def _subsidy_kind(text):
@@ -215,9 +238,10 @@ def _empty_wire():
 
 # --- tables ----------------------------------------------------------------------------------
 
-def _option_rows(grid, header):
-    """[(capacity cell, capacity raw, price cell, row text)] when this table offers
-    options, else []."""
+def _option_rows(grid, header, confidence, threshold=CONFIDENCE_THRESHOLD):
+    """[(capacity cell, capacity raw, price cell, row text, price column)] when this
+    table offers options, else []. A row whose capacity or price cell was read below
+    the threshold is left out."""
     capacity_cols = [c for c, h in header.items() if CAPACITY_HEADER.search(h)]
     price_cols = [c for c, h in header.items() if PRICE_HEADER.search(h) and c not in capacity_cols]
     if not capacity_cols or not price_cols:
@@ -237,10 +261,13 @@ def _option_rows(grid, header):
                 break
         else:
             continue
-        price = next((cells[c] for c in price_cols if cells.get(c) and _parses("amount", cells[c])), None)
-        if price:
-            rows.append((cell, raw, price, text))
-    capacities = [parse_capacity(raw) for _, raw, _, _ in rows]
+        price_col = next((c for c in price_cols if cells.get(c) and _parses("amount", cells[c])), None)
+        if price_col is None:
+            continue
+        if min(confidence.get((r, col), 0), confidence.get((r, price_col), 0)) < threshold:
+            continue
+        rows.append((cell, raw, cells[price_col], text, price_col))
+    capacities = [parse_capacity(raw) for _, raw, _, _, _ in rows]
     keys = {(Decimal(str(c["parsed"])), c["unit"].lower().rstrip("p")) for c in capacities}
     return rows if len(rows) >= 2 and len(keys) == len(rows) else []
 
@@ -302,7 +329,9 @@ def map_page(reply, page_number, threshold=CONFIDENCE_THRESHOLD):
             item = items.setdefault(index, {"option_id": "All", "page": page_number})
             item[key], item[f"{key}_evidence"] = raw, evidence
         elif target == "dcr_declaration":
-            if "dcr_declaration" not in wire:
+            if _dcr_value(f"{raw}\n{evidence}") is None:
+                entry["kept"], entry["why"] = False, "unparsed"
+            elif "dcr_declaration" not in wire:
                 wire["dcr_declaration"] = _flag(_dcr_value(raw), evidence, page_number)
         elif target == "vendor_registration" and GSTIN.fullmatch(re.sub(r"\s+", "", raw).upper()):
             entry["kept"], entry["why"] = False, "gstin"
@@ -321,19 +350,17 @@ def map_page(reply, page_number, threshold=CONFIDENCE_THRESHOLD):
     if give:
         wire["give_it_up"] = _flag("mentioned", give[0], page_number)
 
-    for grid, header in page.tables():
-        rows = _option_rows(grid, header)
+    for grid, header, confidence in page.tables():
+        rows = _option_rows(grid, header, confidence, threshold)
         if not rows:
             continue
-        price_col = next(c for c, h in header.items() if PRICE_HEADER.search(h) and not CAPACITY_HEADER.search(h))
-        kind = _price_kind(header[price_col])
         if wire["multiple_options"]["value"] != "yes":
             wire["multiple_options"] = _flag("yes", rows[0][3], page_number)
-        for cell, raw, price, text in rows:
+        for cell, raw, price, text, price_col in rows:
             wire["options"].append({"option_id": cell, "label": text, "page": page_number})
             wire["capacities"].append({"option_id": cell, "raw": raw, "evidence_text": text, "page": page_number})
-            wire["prices"].append({"option_id": cell, "kind": kind, "raw": price, "evidence_text": text,
-                                   "page": page_number})
+            wire["prices"].append({"option_id": cell, "kind": _price_kind(header[price_col]), "raw": price,
+                                   "evidence_text": text, "page": page_number})
     if gstin:
         wire["_vendor_gstin"] = gstin
     return wire, report
