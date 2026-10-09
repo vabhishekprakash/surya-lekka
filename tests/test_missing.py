@@ -123,3 +123,13 @@ def test_unknown_option_count_blocks_missing_details(quote_v1):
     quote_v1["flags"]["model_proposed"]["multiple_options"] = None
     (r,) = check_missing_details(normalise(quote_v1))
     assert r["status"] == "needs_confirmation" and "one option or several" in r["message"]
+
+
+def test_dcr_wording_never_claims_compliance():
+    """A DCR answer means only that the quote declares DCR panels."""
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parent.parent
+    texts = [p.read_text(encoding="utf-8") for p in (root / "src" / "checks").glob("*.py")]
+    texts += [(root / "web" / name).read_text(encoding="utf-8") for name in ("app.js", "index.html")]
+    assert not any("complian" in t.lower() for t in texts)
