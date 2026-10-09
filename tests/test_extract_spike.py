@@ -354,3 +354,78 @@ def test_access_denied_stops_the_whole_run(sample_dir, capsys, monkeypatch):
     batch = json.loads((run_dir / "global.amazon.nova-2-lite-v1_0" / "S1" / "batch-1.json").read_text("utf-8"))
     assert batch["failure"]["code"] == "AccessDeniedException"
     assert not (run_dir / "apac.amazon.nova-pro-v1_0").exists()
+
+
+# --- page tags in key values and conflicts the reading flagged ------------------------------
+
+def test_page_tags_are_stripped_from_values_and_added_to_pages():
+    key = scoring.parse_answer_key(
+        "[Q01]\n"
+        "total_price: Rs. 1,97,000 [p2] | 3\n"
+        "panel_count: 6 (p1)\n"
+        "vendor_name: Example Solar Pvt Ltd [p1 heading] | 1\n"
+        "capacity_stated: 3.3 kWp [page 1]\n"
+        "panel_make: Example PV (items 1 and 2) [p2 item 3]\n")["docs"]["Q01"]
+    assert key["gross_total"] == {"value": "Rs. 1,97,000", "pages": [2, 3], "key": "total_price", "tags": 1}
+    assert (key["panel_count"]["value"], key["panel_count"]["pages"]) == ("6", [1])
+    assert (key["vendor_name"]["value"], key["vendor_name"]["pages"]) == ("Example Solar Pvt Ltd", [1])
+    assert (key["stated_capacity"]["value"], key["stated_capacity"]["pages"]) == ("3.3 kWp", [1])
+    assert key["module_make_model"]["value"] == "Example PV (items 1 and 2)"  # not a page tag
+    assert "variants" not in key["gross_total"]
+
+
+def test_tagged_values_score_like_plain_ones():
+    quote = sample_quote()
+    for name, value in (("gross_total", "Rs. 1,97,000 [p2]"), ("panel_count", "6 [p1]"),
+                        ("vendor_name", "Example Solar Pvt Ltd [p1 heading]"), ("stated_capacity", "3.3 kWp [p1]"),
+                        ("panel_wattage", "550 [p1]")):
+        key = scoring.parse_answer_key(f"[S1]\n{name}: {value}\n")["docs"]["S1"][name]
+        assert scoring.score_field(quote, name, key)["status"] == "correct", name
+
+
+def test_different_values_on_different_pages_are_variants():
+    entry = scoring.parse_answer_key("[Q01]\npanel_wattage_w: 540-600 WP [p1]; 580wp [p2] | page 1, 2\n")[
+        "docs"]["Q01"]["panel_wattage"]
+    assert entry["value"] == "540-600 WP; 580wp" and entry["pages"] == [1, 2] and entry["tags"] == 2
+    assert entry["variants"] == [{"text": "540-600 WP", "pages": [1]}, {"text": "580wp", "pages": [2]}]
+    same_page = scoring.parse_answer_key("[Q01]\npanel_wattage_w: 540 [p1]; 545 [p1]\n")["docs"]["Q01"]
+    assert "variants" not in same_page["panel_wattage"]  # two panel lines on one page
+
+
+def batch_record(batch, page, wire):
+    full = {"multiple_options": {"value": "not_stated"}, "options": [], "prices": [], "subsidies": [],
+            "capacities": [], "module_groups": [], "inverters": [], "extra_charges": [], **wire}
+    cleaned, errors, _ = validate(full, [page])
+    assert errors == []
+    return {"batch": batch, "pages": [page], "contract": normalise_batch(cleaned, batch)}
+
+
+def two_pages(make):
+    return merge_batches([batch_record(1, 1, make(1)), batch_record(2, 2, make(2))])
+
+
+def test_a_flagged_conflict_matching_the_page_variants_scores_conflict_flagged():
+    watts = {1: "540-600 Wp", 2: "580 Wp"}
+    quote = two_pages(lambda p: {"module_groups": [{"option_id": "All", "wattage": watts[p], "page": p}]})
+    key = scoring.parse_answer_key("[Q1]\npanel_wattage_w: 540-600 WP [p1]; 580wp [p2]\n"
+                                   "capacity_stated: 3 kW [p1]; 3.3 kWp [p2]\n")["docs"]["Q1"]
+    assert scoring.score_field(quote, "panel_wattage", key["panel_wattage"])["status"] == "conflict_flagged"
+    caps = {1: "3 kW", 2: "3.3 kWp"}
+    quote = two_pages(lambda p: {"capacities": [{"option_id": "All", "raw": caps[p], "page": p}]})
+    result = scoring.score_field(quote, "stated_capacity", key["stated_capacity"])
+    assert result == {"status": "conflict_flagged", "conflict": True, "page_ok": None}
+
+
+def test_a_conflict_with_other_values_is_still_missing():
+    watts = {1: "540 Wp", 2: "600 Wp"}
+    quote = two_pages(lambda p: {"module_groups": [{"option_id": "All", "wattage": watts[p], "page": p}]})
+    key = scoring.parse_answer_key("[Q1]\npanel_wattage_w: 540-600 WP [p1]; 580wp [p2]\n")["docs"]["Q1"]
+    assert scoring.score_field(quote, "panel_wattage", key["panel_wattage"])["status"] == "missing"
+    untagged = scoring.parse_answer_key("[Q1]\npanel_wattage_w: 540; 600\n")["docs"]["Q1"]
+    assert scoring.score_field(quote, "panel_wattage", untagged["panel_wattage"])["status"] == "missing"
+
+
+def test_summary_counts_conflict_flagged_apart():
+    s = scoring.summarise({"Q": {"a": {"status": "conflict_flagged", "conflict": True, "page_ok": None},
+                                 "b": {"status": "correct", "conflict": False, "page_ok": None}}})
+    assert s["conflict_flagged"] == 1 and s["correct"] == 1 and s["accuracy"] == 0.5

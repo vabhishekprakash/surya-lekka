@@ -34,7 +34,7 @@ from checks.parse import parse_amount, parse_capacity
 
 from .wire_schema import SUBSIDY_KINDS
 
-STATUSES = ("correct", "wrong", "missing", "falsely_populated", "abstained")
+STATUSES = ("correct", "wrong", "missing", "conflict_flagged", "falsely_populated", "abstained")
 ABSENT = {"", "null", "none", "-", "--", "n/a", "na", "nil", "not found", "not stated", "absent", "not given"}
 YES = {"yes", "y", "true", "dcr", "mentioned", "stated", "more than 1", "more than one", ">1"}
 NO = {"no", "n", "false", "non-dcr", "non_dcr", "not dcr", "1", "one", "single"}
@@ -113,6 +113,23 @@ _HEADER = re.compile(
 _KEY = re.compile(r"^(?P<key>[^:=|]+?)\s*[:=]\s*(?P<rest>.*)$")
 
 
+_PAGE_TAG = re.compile(r"\s*[\[(]\s*(?:p|pg|page)\.?\s*(\d+)(?:\s+[a-z][^\])]*)?[\])]", re.I)
+
+
+def _strip_page_tags(value):
+    """(value without tags such as [p1], (p2) or [p1 heading], their page numbers,
+    variants). variants lists each ;- or +-separated part with its own tagged pages
+    when two or more parts are tagged with different pages, i.e. the quote gives
+    different values on different pages; else None."""
+    pages = {int(p) for p in _PAGE_TAG.findall(value)}
+    parts = [p for p in re.split(r"[+;]", value) if p.strip()]
+    tagged = [(_PAGE_TAG.sub("", p).strip(), sorted({int(n) for n in _PAGE_TAG.findall(p)})) for p in parts]
+    variants = None
+    if len(tagged) >= 2 and all(pp for _, pp in tagged) and len({tuple(pp) for _, pp in tagged}) == len(tagged):
+        variants = [{"text": text, "pages": pp} for text, pp in tagged]
+    return _PAGE_TAG.sub("", value), pages, variants
+
+
 def key_name(key):
     return re.sub(r"[\s\-./]+", "_", key.strip().lower()).strip("_")
 
@@ -145,9 +162,15 @@ def parse_answer_key(text):
             continue
         rest = m.group("rest")
         value, _, page = rest.rpartition("|") if "|" in rest else (rest, "", "")
+        value, tagged, variants = _strip_page_tags(value)
         value = value.strip().strip("\"'").strip()
-        entry = {"value": None if value.lower() in ABSENT else value,
-                 "pages": [int(p) for p in re.findall(r"\d+", page)], "key": m.group("key").strip()}
+        pages = sorted({int(p) for p in re.findall(r"\d+", page)} | tagged)
+        entry = {"value": None if value.lower() in ABSENT else value, "pages": pages, "key": m.group("key").strip()}
+        tags = len(_PAGE_TAG.findall(m.group("rest")))
+        if tags:
+            entry["tags"] = tags
+        if variants:
+            entry["variants"] = variants
         name = key_name(m.group("key"))
         if name in KEPT:
             kept.setdefault(current, {})[name] = entry
@@ -306,12 +329,26 @@ def _split(text):
     return [p.strip() for p in re.split(r"[+;]", text) if p.strip()]
 
 
+def _flagged_variants(truth, fields, kind, field):
+    """True when the key gives different values on different pages and the reading
+    flagged a conflict whose candidates are exactly those values."""
+    variants = truth.get("variants")
+    candidates = [c for f in fields if f.get("conflict") for c in f.get("candidates") or []
+                  if c.get("value") is not None]
+    if not variants or not candidates:
+        return False
+    got = {repr(predicted_key(kind, c["value"], field)) for c in candidates}
+    return got == {repr(truth_key(kind, v["text"], field)) for v in variants}
+
+
 def score_field(quote, key, truth, doc_truth=None):
     where, kind = FIELDS[key]
     if kind == "special":
         return _SPECIAL[key](quote, truth, doc_truth or {})
     fields = [f for f in _fields_for(quote, where) if f is not None]
     field = where[1] if isinstance(where, tuple) and where[0] == "flag" else where
+    if _flagged_variants(truth, fields, kind, field):
+        return _result("conflict_flagged", True)
     notes = None
     if truth["value"] is None:
         parts = []
@@ -395,7 +432,7 @@ def summarise(doc_scores):
             if s["page_ok"] is not None:
                 pages_checked += 1
                 pages_ok += s["page_ok"]
-    stated = counts["correct"] + counts["wrong"] + counts["missing"]
+    stated = counts["correct"] + counts["wrong"] + counts["missing"] + counts["conflict_flagged"]
     not_stated = counts["falsely_populated"] + counts["abstained"]
     return {
         **counts,
