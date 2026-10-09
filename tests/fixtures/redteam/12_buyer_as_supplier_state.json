@@ -1,0 +1,62 @@
+{
+ "name": "12_buyer_as_supplier_state",
+ "issue": "The first (buyer) GSTIN produces supplier state Telangana; supplier registration is Karnataka.",
+ "fix": "Bind GSTIN to an identified supplier block; reject buyer/recipient IDs and mark multiple unbound GSTINs unresolved.",
+ "mode": "default",
+ "sources": [
+  "bom_table",
+  "gstin_state",
+  "lines",
+  "options_table",
+  "queries"
+ ],
+ "confirmations": {
+  "multiple_options": false,
+  "capacity_basis": "dc_kwp",
+  "gst_treatment": "included",
+  "extra_charges_complete": true
+ },
+ "textract_reply": {
+  "DocumentMetadata": {
+   "Pages": 1
+  },
+  "Blocks": [
+   {
+    "BlockType": "PAGE",
+    "Id": "page",
+    "Page": 1
+   },
+   {
+    "BlockType": "LINE",
+    "Text": "Buyer GSTIN: 36AABCU9603R1ZO",
+    "Confidence": 99.0,
+    "Geometry": {
+     "BoundingBox": {
+      "Left": 0.05,
+      "Top": 0.1,
+      "Width": 0.8,
+      "Height": 0.02
+     }
+    },
+    "Id": "b1",
+    "Page": 1
+   },
+   {
+    "BlockType": "LINE",
+    "Text": "Supplier GSTIN: 29AABCU9603R1ZJ",
+    "Confidence": 99.0,
+    "Geometry": {
+     "BoundingBox": {
+      "Left": 0.05,
+      "Top": 0.15000000000000002,
+      "Width": 0.8,
+      "Height": 0.02
+     }
+    },
+    "Id": "b2",
+    "Page": 1
+   }
+  ]
+ },
+ "expense": null
+}

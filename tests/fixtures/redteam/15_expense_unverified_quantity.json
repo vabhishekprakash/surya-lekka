@@ -1,0 +1,101 @@
+{
+ "name": "15_expense_unverified_quantity",
+ "issue": "Quantity 60 with confidence 1 and absent from the OCR line becomes panel count 60.",
+ "fix": "Validate quantity confidence, geometry and textual support separately from ITEM.",
+ "mode": "disabled-source-only",
+ "sources": [
+  "expense"
+ ],
+ "confirmations": {
+  "multiple_options": false,
+  "capacity_basis": "dc_kwp",
+  "gst_treatment": "included",
+  "extra_charges_complete": true
+ },
+ "textract_reply": {
+  "DocumentMetadata": {
+   "Pages": 1
+  },
+  "Blocks": [
+   {
+    "BlockType": "PAGE",
+    "Id": "page",
+    "Page": 1
+   },
+   {
+    "BlockType": "LINE",
+    "Text": "Solar PV module 550 Wp 6 Nos",
+    "Confidence": 99.0,
+    "Geometry": {
+     "BoundingBox": {
+      "Left": 0.05,
+      "Top": 0.1,
+      "Width": 0.8,
+      "Height": 0.02
+     }
+    },
+    "Id": "b1",
+    "Page": 1
+   }
+  ]
+ },
+ "expense": {
+  "DocumentMetadata": {
+   "Pages": 1
+  },
+  "ExpenseDocuments": [
+   {
+    "ExpenseIndex": 1,
+    "SummaryFields": [],
+    "LineItemGroups": [
+     {
+      "LineItems": [
+       {
+        "LineItemExpenseFields": [
+         {
+          "Type": {
+           "Text": "ITEM",
+           "Confidence": 95.0
+          },
+          "PageNumber": 1,
+          "ValueDetection": {
+           "Text": "Solar PV module 550 Wp",
+           "Confidence": 95.0,
+           "Geometry": {
+            "BoundingBox": {
+             "Left": 0.5,
+             "Top": 0.1,
+             "Width": 0.2,
+             "Height": 0.02
+            }
+           }
+          }
+         },
+         {
+          "Type": {
+           "Text": "QUANTITY",
+           "Confidence": 95.0
+          },
+          "PageNumber": 1,
+          "ValueDetection": {
+           "Text": "60",
+           "Confidence": 1,
+           "Geometry": {
+            "BoundingBox": {
+             "Left": 0.5,
+             "Top": 0.1,
+             "Width": 0.2,
+             "Height": 0.02
+            }
+           }
+          }
+         }
+        ]
+       }
+      ]
+     }
+    ]
+   }
+  ]
+ }
+}

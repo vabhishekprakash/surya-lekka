@@ -1,0 +1,77 @@
+{
+ "name": "01_tax_basis_is_tax",
+ "issue": "Taxable base is extracted as GST 100000; correct GST is 18000, causing a false gross mismatch.",
+ "fix": "Treat percent-on-basis clauses as rates and tax bases, not stated tax amounts; require a labelled tax amount.",
+ "mode": "default",
+ "sources": [
+  "bom_table",
+  "gstin_state",
+  "lines",
+  "options_table",
+  "queries"
+ ],
+ "confirmations": {
+  "multiple_options": false,
+  "capacity_basis": "dc_kwp",
+  "gst_treatment": "excluded",
+  "extra_charges_complete": true
+ },
+ "textract_reply": {
+  "DocumentMetadata": {
+   "Pages": 1
+  },
+  "Blocks": [
+   {
+    "BlockType": "PAGE",
+    "Id": "page",
+    "Page": 1
+   },
+   {
+    "BlockType": "LINE",
+    "Text": "Base price Rs 1,00,000",
+    "Confidence": 99.0,
+    "Geometry": {
+     "BoundingBox": {
+      "Left": 0.05,
+      "Top": 0.1,
+      "Width": 0.8,
+      "Height": 0.02
+     }
+    },
+    "Id": "b1",
+    "Page": 1
+   },
+   {
+    "BlockType": "LINE",
+    "Text": "GST @ 18% on Rs 1,00,000",
+    "Confidence": 99.0,
+    "Geometry": {
+     "BoundingBox": {
+      "Left": 0.05,
+      "Top": 0.15000000000000002,
+      "Width": 0.8,
+      "Height": 0.02
+     }
+    },
+    "Id": "b2",
+    "Page": 1
+   },
+   {
+    "BlockType": "LINE",
+    "Text": "Grand total Rs 1,18,000",
+    "Confidence": 99.0,
+    "Geometry": {
+     "BoundingBox": {
+      "Left": 0.05,
+      "Top": 0.2,
+      "Width": 0.8,
+      "Height": 0.02
+     }
+    },
+    "Id": "b3",
+    "Page": 1
+   }
+  ]
+ },
+ "expense": null
+}

@@ -1,0 +1,79 @@
+{
+ "name": "04_negative_query_survives",
+ "issue": "Query value survives even though the supporting line explicitly negates the subsidy.",
+ "fix": "A query must pass the same semantic negation and role checks as line candidates; invalid evidence cannot win by being the only source.",
+ "mode": "default",
+ "sources": [
+  "bom_table",
+  "gstin_state",
+  "lines",
+  "options_table",
+  "queries"
+ ],
+ "confirmations": {
+  "multiple_options": false,
+  "capacity_basis": "dc_kwp",
+  "gst_treatment": "included",
+  "extra_charges_complete": true
+ },
+ "textract_reply": {
+  "DocumentMetadata": {
+   "Pages": 1
+  },
+  "Blocks": [
+   {
+    "BlockType": "PAGE",
+    "Id": "page",
+    "Page": 1
+   },
+   {
+    "BlockType": "LINE",
+    "Text": "Subsidy not applicable Rs 78,000",
+    "Confidence": 99.0,
+    "Geometry": {
+     "BoundingBox": {
+      "Left": 0.05,
+      "Top": 0.1,
+      "Width": 0.8,
+      "Height": 0.02
+     }
+    },
+    "Id": "b1",
+    "Page": 1
+   },
+   {
+    "BlockType": "QUERY_RESULT",
+    "Text": "78,000",
+    "Confidence": 95.0,
+    "Geometry": {
+     "BoundingBox": {
+      "Left": 0.5,
+      "Top": 0.1,
+      "Width": 0.2,
+      "Height": 0.02
+     }
+    },
+    "Id": "b2",
+    "Page": 1
+   },
+   {
+    "BlockType": "QUERY",
+    "Query": {
+     "Text": "question",
+     "Alias": "SUBSIDY_AMOUNT"
+    },
+    "Relationships": [
+     {
+      "Type": "ANSWER",
+      "Ids": [
+       "b2"
+      ]
+     }
+    ],
+    "Id": "b3",
+    "Page": 1
+   }
+  ]
+ },
+ "expense": null
+}

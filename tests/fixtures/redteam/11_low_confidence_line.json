@@ -1,0 +1,47 @@
+{
+ "name": "11_low_confidence_line",
+ "issue": "A LINE read with confidence 1 becomes gross_total 999999.",
+ "fix": "Apply confidence gates to LINE and associated WORD candidates as well as QUERY_RESULT.",
+ "mode": "default",
+ "sources": [
+  "bom_table",
+  "gstin_state",
+  "lines",
+  "options_table",
+  "queries"
+ ],
+ "confirmations": {
+  "multiple_options": false,
+  "capacity_basis": "dc_kwp",
+  "gst_treatment": "included",
+  "extra_charges_complete": true
+ },
+ "textract_reply": {
+  "DocumentMetadata": {
+   "Pages": 1
+  },
+  "Blocks": [
+   {
+    "BlockType": "PAGE",
+    "Id": "page",
+    "Page": 1
+   },
+   {
+    "BlockType": "LINE",
+    "Text": "Grand total Rs 9,99,999",
+    "Confidence": 1,
+    "Geometry": {
+     "BoundingBox": {
+      "Left": 0.05,
+      "Top": 0.1,
+      "Width": 0.8,
+      "Height": 0.02
+     }
+    },
+    "Id": "b1",
+    "Page": 1
+   }
+  ]
+ },
+ "expense": null
+}

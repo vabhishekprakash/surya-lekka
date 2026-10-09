@@ -1,0 +1,129 @@
+{
+ "name": "13_forms_discards_negation",
+ "issue": "FORMS reconstruction removes the negative words from the actual supporting line.",
+ "fix": "Run semantic guards on complete OCR evidence, not only concatenated key and value.",
+ "mode": "disabled-source-only",
+ "sources": [
+  "forms"
+ ],
+ "confirmations": {
+  "multiple_options": false,
+  "capacity_basis": "dc_kwp",
+  "gst_treatment": "included",
+  "extra_charges_complete": true
+ },
+ "textract_reply": {
+  "DocumentMetadata": {
+   "Pages": 1
+  },
+  "Blocks": [
+   {
+    "BlockType": "PAGE",
+    "Id": "page",
+    "Page": 1
+   },
+   {
+    "BlockType": "LINE",
+    "Text": "Grand Total: not applicable Rs 1,00,000",
+    "Confidence": 99.0,
+    "Geometry": {
+     "BoundingBox": {
+      "Left": 0.05,
+      "Top": 0.1,
+      "Width": 0.8,
+      "Height": 0.02
+     }
+    },
+    "Id": "b1",
+    "Page": 1
+   },
+   {
+    "BlockType": "WORD",
+    "Text": "Rs",
+    "Confidence": 99.0,
+    "Id": "b2",
+    "Page": 1
+   },
+   {
+    "BlockType": "WORD",
+    "Text": "1,00,000",
+    "Confidence": 99.0,
+    "Id": "b3",
+    "Page": 1
+   },
+   {
+    "BlockType": "KEY_VALUE_SET",
+    "EntityTypes": [
+     "VALUE"
+    ],
+    "Confidence": 95.0,
+    "Geometry": {
+     "BoundingBox": {
+      "Left": 0.5,
+      "Top": 0.1,
+      "Width": 0.2,
+      "Height": 0.02
+     }
+    },
+    "Relationships": [
+     {
+      "Type": "CHILD",
+      "Ids": [
+       "b2",
+       "b3"
+      ]
+     }
+    ],
+    "Id": "b4",
+    "Page": 1
+   },
+   {
+    "BlockType": "WORD",
+    "Text": "Grand",
+    "Confidence": 99.0,
+    "Id": "b5",
+    "Page": 1
+   },
+   {
+    "BlockType": "WORD",
+    "Text": "Total:",
+    "Confidence": 99.0,
+    "Id": "b6",
+    "Page": 1
+   },
+   {
+    "BlockType": "KEY_VALUE_SET",
+    "EntityTypes": [
+     "KEY"
+    ],
+    "Confidence": 95.0,
+    "Geometry": {
+     "BoundingBox": {
+      "Left": 0.05,
+      "Top": 0.1,
+      "Width": 0.4,
+      "Height": 0.02
+     }
+    },
+    "Relationships": [
+     {
+      "Type": "VALUE",
+      "Ids": [
+       "b4"
+      ]
+     },
+     {
+      "Type": "CHILD",
+      "Ids": [
+       "b5",
+       "b6"
+      ]
+     }
+    ],
+    "Id": "b7",
+    "Page": 1
+   }
+  ]
+ },
+ "expense": null
+}

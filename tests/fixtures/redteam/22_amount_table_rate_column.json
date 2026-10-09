@@ -1,0 +1,221 @@
+{
+ "name": "22_amount_table_rate_column",
+ "issue": "control",
+ "fix": "",
+ "mode": "disabled-source-only",
+ "sources": [
+  "amount_table"
+ ],
+ "confirmations": {
+  "multiple_options": false,
+  "capacity_basis": "dc_kwp",
+  "gst_treatment": "included",
+  "extra_charges_complete": true
+ },
+ "textract_reply": {
+  "DocumentMetadata": {
+   "Pages": 1
+  },
+  "Blocks": [
+   {
+    "BlockType": "PAGE",
+    "Id": "page",
+    "Page": 1
+   },
+   {
+    "BlockType": "WORD",
+    "Text": "Particulars",
+    "Confidence": 99.0,
+    "Id": "b1",
+    "Page": 1
+   },
+   {
+    "BlockType": "CELL",
+    "RowIndex": 1,
+    "ColumnIndex": 1,
+    "RowSpan": 1,
+    "ColumnSpan": 1,
+    "Confidence": 90.0,
+    "Relationships": [
+     {
+      "Type": "CHILD",
+      "Ids": [
+       "b1"
+      ]
+     }
+    ],
+    "EntityTypes": [
+     "COLUMN_HEADER"
+    ],
+    "Id": "b2",
+    "Page": 1
+   },
+   {
+    "BlockType": "WORD",
+    "Text": "GST",
+    "Confidence": 99.0,
+    "Id": "b3",
+    "Page": 1
+   },
+   {
+    "BlockType": "WORD",
+    "Text": "rate",
+    "Confidence": 99.0,
+    "Id": "b4",
+    "Page": 1
+   },
+   {
+    "BlockType": "CELL",
+    "RowIndex": 1,
+    "ColumnIndex": 2,
+    "RowSpan": 1,
+    "ColumnSpan": 1,
+    "Confidence": 90.0,
+    "Relationships": [
+     {
+      "Type": "CHILD",
+      "Ids": [
+       "b3",
+       "b4"
+      ]
+     }
+    ],
+    "EntityTypes": [
+     "COLUMN_HEADER"
+    ],
+    "Id": "b5",
+    "Page": 1
+   },
+   {
+    "BlockType": "WORD",
+    "Text": "Amount",
+    "Confidence": 99.0,
+    "Id": "b6",
+    "Page": 1
+   },
+   {
+    "BlockType": "WORD",
+    "Text": "(Rs)",
+    "Confidence": 99.0,
+    "Id": "b7",
+    "Page": 1
+   },
+   {
+    "BlockType": "CELL",
+    "RowIndex": 1,
+    "ColumnIndex": 3,
+    "RowSpan": 1,
+    "ColumnSpan": 1,
+    "Confidence": 90.0,
+    "Relationships": [
+     {
+      "Type": "CHILD",
+      "Ids": [
+       "b6",
+       "b7"
+      ]
+     }
+    ],
+    "EntityTypes": [
+     "COLUMN_HEADER"
+    ],
+    "Id": "b8",
+    "Page": 1
+   },
+   {
+    "BlockType": "WORD",
+    "Text": "GST",
+    "Confidence": 99.0,
+    "Id": "b9",
+    "Page": 1
+   },
+   {
+    "BlockType": "CELL",
+    "RowIndex": 2,
+    "ColumnIndex": 1,
+    "RowSpan": 1,
+    "ColumnSpan": 1,
+    "Confidence": 90.0,
+    "Relationships": [
+     {
+      "Type": "CHILD",
+      "Ids": [
+       "b9"
+      ]
+     }
+    ],
+    "Id": "b10",
+    "Page": 1
+   },
+   {
+    "BlockType": "WORD",
+    "Text": "18%",
+    "Confidence": 99.0,
+    "Id": "b11",
+    "Page": 1
+   },
+   {
+    "BlockType": "CELL",
+    "RowIndex": 2,
+    "ColumnIndex": 2,
+    "RowSpan": 1,
+    "ColumnSpan": 1,
+    "Confidence": 90.0,
+    "Relationships": [
+     {
+      "Type": "CHILD",
+      "Ids": [
+       "b11"
+      ]
+     }
+    ],
+    "Id": "b12",
+    "Page": 1
+   },
+   {
+    "BlockType": "WORD",
+    "Text": "18000",
+    "Confidence": 99.0,
+    "Id": "b13",
+    "Page": 1
+   },
+   {
+    "BlockType": "CELL",
+    "RowIndex": 2,
+    "ColumnIndex": 3,
+    "RowSpan": 1,
+    "ColumnSpan": 1,
+    "Confidence": 90.0,
+    "Relationships": [
+     {
+      "Type": "CHILD",
+      "Ids": [
+       "b13"
+      ]
+     }
+    ],
+    "Id": "b14",
+    "Page": 1
+   },
+   {
+    "BlockType": "TABLE",
+    "Relationships": [
+     {
+      "Type": "CHILD",
+      "Ids": [
+       "b2",
+       "b5",
+       "b8",
+       "b10",
+       "b12",
+       "b14"
+      ]
+     }
+    ],
+    "Id": "b15",
+    "Page": 1
+   }
+  ]
+ },
+ "expense": null
+}

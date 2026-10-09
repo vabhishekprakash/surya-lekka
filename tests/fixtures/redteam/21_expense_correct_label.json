@@ -1,0 +1,78 @@
+{
+ "name": "21_expense_correct_label",
+ "issue": "control",
+ "fix": "",
+ "mode": "disabled-source-only",
+ "sources": [
+  "expense"
+ ],
+ "confirmations": {
+  "multiple_options": false,
+  "capacity_basis": "dc_kwp",
+  "gst_treatment": "included",
+  "extra_charges_complete": true
+ },
+ "textract_reply": {
+  "DocumentMetadata": {
+   "Pages": 1
+  },
+  "Blocks": [
+   {
+    "BlockType": "PAGE",
+    "Id": "page",
+    "Page": 1
+   },
+   {
+    "BlockType": "LINE",
+    "Text": "Subsidy Rs 78,000",
+    "Confidence": 99.0,
+    "Geometry": {
+     "BoundingBox": {
+      "Left": 0.05,
+      "Top": 0.1,
+      "Width": 0.8,
+      "Height": 0.02
+     }
+    },
+    "Id": "b1",
+    "Page": 1
+   }
+  ]
+ },
+ "expense": {
+  "DocumentMetadata": {
+   "Pages": 1
+  },
+  "ExpenseDocuments": [
+   {
+    "ExpenseIndex": 1,
+    "SummaryFields": [
+     {
+      "Type": {
+       "Text": "TOTAL",
+       "Confidence": 95.0
+      },
+      "PageNumber": 1,
+      "LabelDetection": {
+       "Text": "Subsidy",
+       "Confidence": 95.0
+      },
+      "ValueDetection": {
+       "Text": "78,000",
+       "Confidence": 95.0,
+       "Geometry": {
+        "BoundingBox": {
+         "Left": 0.5,
+         "Top": 0.1,
+         "Width": 0.2,
+         "Height": 0.02
+        }
+       }
+      }
+     }
+    ],
+    "LineItemGroups": []
+   }
+  ]
+ }
+}

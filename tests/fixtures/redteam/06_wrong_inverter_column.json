@@ -1,0 +1,312 @@
+{
+ "name": "06_wrong_inverter_column",
+ "issue": "Maximum PV input 6 kW becomes inverter output rating, although Rated output is 3 kW.",
+ "fix": "Require an output-rating column for inverter rating; retain separate input capacity and output rating roles.",
+ "mode": "default",
+ "sources": [
+  "bom_table",
+  "gstin_state",
+  "lines",
+  "options_table",
+  "queries"
+ ],
+ "confirmations": {
+  "multiple_options": false,
+  "capacity_basis": "dc_kwp",
+  "gst_treatment": "included",
+  "extra_charges_complete": true
+ },
+ "textract_reply": {
+  "DocumentMetadata": {
+   "Pages": 1
+  },
+  "Blocks": [
+   {
+    "BlockType": "PAGE",
+    "Id": "page",
+    "Page": 1
+   },
+   {
+    "BlockType": "WORD",
+    "Text": "Description",
+    "Confidence": 99.0,
+    "Id": "b1",
+    "Page": 1
+   },
+   {
+    "BlockType": "CELL",
+    "RowIndex": 1,
+    "ColumnIndex": 1,
+    "RowSpan": 1,
+    "ColumnSpan": 1,
+    "Confidence": 90.0,
+    "Relationships": [
+     {
+      "Type": "CHILD",
+      "Ids": [
+       "b1"
+      ]
+     }
+    ],
+    "EntityTypes": [
+     "COLUMN_HEADER"
+    ],
+    "Id": "b2",
+    "Page": 1
+   },
+   {
+    "BlockType": "WORD",
+    "Text": "Qty",
+    "Confidence": 99.0,
+    "Id": "b3",
+    "Page": 1
+   },
+   {
+    "BlockType": "CELL",
+    "RowIndex": 1,
+    "ColumnIndex": 2,
+    "RowSpan": 1,
+    "ColumnSpan": 1,
+    "Confidence": 90.0,
+    "Relationships": [
+     {
+      "Type": "CHILD",
+      "Ids": [
+       "b3"
+      ]
+     }
+    ],
+    "EntityTypes": [
+     "COLUMN_HEADER"
+    ],
+    "Id": "b4",
+    "Page": 1
+   },
+   {
+    "BlockType": "WORD",
+    "Text": "Maximum",
+    "Confidence": 99.0,
+    "Id": "b5",
+    "Page": 1
+   },
+   {
+    "BlockType": "WORD",
+    "Text": "PV",
+    "Confidence": 99.0,
+    "Id": "b6",
+    "Page": 1
+   },
+   {
+    "BlockType": "WORD",
+    "Text": "input",
+    "Confidence": 99.0,
+    "Id": "b7",
+    "Page": 1
+   },
+   {
+    "BlockType": "WORD",
+    "Text": "capacity",
+    "Confidence": 99.0,
+    "Id": "b8",
+    "Page": 1
+   },
+   {
+    "BlockType": "CELL",
+    "RowIndex": 1,
+    "ColumnIndex": 3,
+    "RowSpan": 1,
+    "ColumnSpan": 1,
+    "Confidence": 90.0,
+    "Relationships": [
+     {
+      "Type": "CHILD",
+      "Ids": [
+       "b5",
+       "b6",
+       "b7",
+       "b8"
+      ]
+     }
+    ],
+    "EntityTypes": [
+     "COLUMN_HEADER"
+    ],
+    "Id": "b9",
+    "Page": 1
+   },
+   {
+    "BlockType": "WORD",
+    "Text": "Rated",
+    "Confidence": 99.0,
+    "Id": "b10",
+    "Page": 1
+   },
+   {
+    "BlockType": "WORD",
+    "Text": "output",
+    "Confidence": 99.0,
+    "Id": "b11",
+    "Page": 1
+   },
+   {
+    "BlockType": "CELL",
+    "RowIndex": 1,
+    "ColumnIndex": 4,
+    "RowSpan": 1,
+    "ColumnSpan": 1,
+    "Confidence": 90.0,
+    "Relationships": [
+     {
+      "Type": "CHILD",
+      "Ids": [
+       "b10",
+       "b11"
+      ]
+     }
+    ],
+    "EntityTypes": [
+     "COLUMN_HEADER"
+    ],
+    "Id": "b12",
+    "Page": 1
+   },
+   {
+    "BlockType": "WORD",
+    "Text": "Inverter",
+    "Confidence": 99.0,
+    "Id": "b13",
+    "Page": 1
+   },
+   {
+    "BlockType": "CELL",
+    "RowIndex": 2,
+    "ColumnIndex": 1,
+    "RowSpan": 1,
+    "ColumnSpan": 1,
+    "Confidence": 90.0,
+    "Relationships": [
+     {
+      "Type": "CHILD",
+      "Ids": [
+       "b13"
+      ]
+     }
+    ],
+    "Id": "b14",
+    "Page": 1
+   },
+   {
+    "BlockType": "WORD",
+    "Text": "1",
+    "Confidence": 99.0,
+    "Id": "b15",
+    "Page": 1
+   },
+   {
+    "BlockType": "CELL",
+    "RowIndex": 2,
+    "ColumnIndex": 2,
+    "RowSpan": 1,
+    "ColumnSpan": 1,
+    "Confidence": 90.0,
+    "Relationships": [
+     {
+      "Type": "CHILD",
+      "Ids": [
+       "b15"
+      ]
+     }
+    ],
+    "Id": "b16",
+    "Page": 1
+   },
+   {
+    "BlockType": "WORD",
+    "Text": "6",
+    "Confidence": 99.0,
+    "Id": "b17",
+    "Page": 1
+   },
+   {
+    "BlockType": "WORD",
+    "Text": "kW",
+    "Confidence": 99.0,
+    "Id": "b18",
+    "Page": 1
+   },
+   {
+    "BlockType": "CELL",
+    "RowIndex": 2,
+    "ColumnIndex": 3,
+    "RowSpan": 1,
+    "ColumnSpan": 1,
+    "Confidence": 90.0,
+    "Relationships": [
+     {
+      "Type": "CHILD",
+      "Ids": [
+       "b17",
+       "b18"
+      ]
+     }
+    ],
+    "Id": "b19",
+    "Page": 1
+   },
+   {
+    "BlockType": "WORD",
+    "Text": "3",
+    "Confidence": 99.0,
+    "Id": "b20",
+    "Page": 1
+   },
+   {
+    "BlockType": "WORD",
+    "Text": "kW",
+    "Confidence": 99.0,
+    "Id": "b21",
+    "Page": 1
+   },
+   {
+    "BlockType": "CELL",
+    "RowIndex": 2,
+    "ColumnIndex": 4,
+    "RowSpan": 1,
+    "ColumnSpan": 1,
+    "Confidence": 90.0,
+    "Relationships": [
+     {
+      "Type": "CHILD",
+      "Ids": [
+       "b20",
+       "b21"
+      ]
+     }
+    ],
+    "Id": "b22",
+    "Page": 1
+   },
+   {
+    "BlockType": "TABLE",
+    "Relationships": [
+     {
+      "Type": "CHILD",
+      "Ids": [
+       "b2",
+       "b4",
+       "b9",
+       "b12",
+       "b14",
+       "b16",
+       "b19",
+       "b22"
+      ]
+     }
+    ],
+    "Id": "b23",
+    "Page": 1
+   }
+  ]
+ },
+ "expense": null
+}

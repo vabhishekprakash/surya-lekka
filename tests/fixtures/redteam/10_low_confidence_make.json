@@ -1,0 +1,280 @@
+{
+ "name": "10_low_confidence_make",
+ "issue": "A make read with confidence 1 becomes an accepted make_model.",
+ "fix": "Check confidence of every consumed cell and WORD, including make and header cells.",
+ "mode": "default",
+ "sources": [
+  "bom_table",
+  "gstin_state",
+  "lines",
+  "options_table",
+  "queries"
+ ],
+ "confirmations": {
+  "multiple_options": false,
+  "capacity_basis": "dc_kwp",
+  "gst_treatment": "included",
+  "extra_charges_complete": true
+ },
+ "textract_reply": {
+  "DocumentMetadata": {
+   "Pages": 1
+  },
+  "Blocks": [
+   {
+    "BlockType": "PAGE",
+    "Id": "page",
+    "Page": 1
+   },
+   {
+    "BlockType": "WORD",
+    "Text": "Description",
+    "Confidence": 99.0,
+    "Id": "b1",
+    "Page": 1
+   },
+   {
+    "BlockType": "CELL",
+    "RowIndex": 1,
+    "ColumnIndex": 1,
+    "RowSpan": 1,
+    "ColumnSpan": 1,
+    "Confidence": 90.0,
+    "Relationships": [
+     {
+      "Type": "CHILD",
+      "Ids": [
+       "b1"
+      ]
+     }
+    ],
+    "EntityTypes": [
+     "COLUMN_HEADER"
+    ],
+    "Id": "b2",
+    "Page": 1
+   },
+   {
+    "BlockType": "WORD",
+    "Text": "Qty",
+    "Confidence": 99.0,
+    "Id": "b3",
+    "Page": 1
+   },
+   {
+    "BlockType": "CELL",
+    "RowIndex": 1,
+    "ColumnIndex": 2,
+    "RowSpan": 1,
+    "ColumnSpan": 1,
+    "Confidence": 90.0,
+    "Relationships": [
+     {
+      "Type": "CHILD",
+      "Ids": [
+       "b3"
+      ]
+     }
+    ],
+    "EntityTypes": [
+     "COLUMN_HEADER"
+    ],
+    "Id": "b4",
+    "Page": 1
+   },
+   {
+    "BlockType": "WORD",
+    "Text": "Wattage",
+    "Confidence": 99.0,
+    "Id": "b5",
+    "Page": 1
+   },
+   {
+    "BlockType": "CELL",
+    "RowIndex": 1,
+    "ColumnIndex": 3,
+    "RowSpan": 1,
+    "ColumnSpan": 1,
+    "Confidence": 90.0,
+    "Relationships": [
+     {
+      "Type": "CHILD",
+      "Ids": [
+       "b5"
+      ]
+     }
+    ],
+    "EntityTypes": [
+     "COLUMN_HEADER"
+    ],
+    "Id": "b6",
+    "Page": 1
+   },
+   {
+    "BlockType": "WORD",
+    "Text": "Make",
+    "Confidence": 99.0,
+    "Id": "b7",
+    "Page": 1
+   },
+   {
+    "BlockType": "CELL",
+    "RowIndex": 1,
+    "ColumnIndex": 4,
+    "RowSpan": 1,
+    "ColumnSpan": 1,
+    "Confidence": 90.0,
+    "Relationships": [
+     {
+      "Type": "CHILD",
+      "Ids": [
+       "b7"
+      ]
+     }
+    ],
+    "EntityTypes": [
+     "COLUMN_HEADER"
+    ],
+    "Id": "b8",
+    "Page": 1
+   },
+   {
+    "BlockType": "WORD",
+    "Text": "Solar",
+    "Confidence": 99.0,
+    "Id": "b9",
+    "Page": 1
+   },
+   {
+    "BlockType": "WORD",
+    "Text": "module",
+    "Confidence": 99.0,
+    "Id": "b10",
+    "Page": 1
+   },
+   {
+    "BlockType": "CELL",
+    "RowIndex": 2,
+    "ColumnIndex": 1,
+    "RowSpan": 1,
+    "ColumnSpan": 1,
+    "Confidence": 90.0,
+    "Relationships": [
+     {
+      "Type": "CHILD",
+      "Ids": [
+       "b9",
+       "b10"
+      ]
+     }
+    ],
+    "Id": "b11",
+    "Page": 1
+   },
+   {
+    "BlockType": "WORD",
+    "Text": "6",
+    "Confidence": 99.0,
+    "Id": "b12",
+    "Page": 1
+   },
+   {
+    "BlockType": "CELL",
+    "RowIndex": 2,
+    "ColumnIndex": 2,
+    "RowSpan": 1,
+    "ColumnSpan": 1,
+    "Confidence": 90.0,
+    "Relationships": [
+     {
+      "Type": "CHILD",
+      "Ids": [
+       "b12"
+      ]
+     }
+    ],
+    "Id": "b13",
+    "Page": 1
+   },
+   {
+    "BlockType": "WORD",
+    "Text": "550",
+    "Confidence": 99.0,
+    "Id": "b14",
+    "Page": 1
+   },
+   {
+    "BlockType": "WORD",
+    "Text": "Wp",
+    "Confidence": 99.0,
+    "Id": "b15",
+    "Page": 1
+   },
+   {
+    "BlockType": "CELL",
+    "RowIndex": 2,
+    "ColumnIndex": 3,
+    "RowSpan": 1,
+    "ColumnSpan": 1,
+    "Confidence": 90.0,
+    "Relationships": [
+     {
+      "Type": "CHILD",
+      "Ids": [
+       "b14",
+       "b15"
+      ]
+     }
+    ],
+    "Id": "b16",
+    "Page": 1
+   },
+   {
+    "BlockType": "WORD",
+    "Text": "WRONGCO",
+    "Confidence": 99.0,
+    "Id": "b17",
+    "Page": 1
+   },
+   {
+    "BlockType": "CELL",
+    "RowIndex": 2,
+    "ColumnIndex": 4,
+    "RowSpan": 1,
+    "ColumnSpan": 1,
+    "Confidence": 1,
+    "Relationships": [
+     {
+      "Type": "CHILD",
+      "Ids": [
+       "b17"
+      ]
+     }
+    ],
+    "Id": "b18",
+    "Page": 1
+   },
+   {
+    "BlockType": "TABLE",
+    "Relationships": [
+     {
+      "Type": "CHILD",
+      "Ids": [
+       "b2",
+       "b4",
+       "b6",
+       "b8",
+       "b11",
+       "b13",
+       "b16",
+       "b18"
+      ]
+     }
+    ],
+    "Id": "b19",
+    "Page": 1
+   }
+  ]
+ },
+ "expense": null
+}
