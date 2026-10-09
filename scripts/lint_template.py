@@ -24,8 +24,17 @@ class _NoManagedPolicies:
 
 
 def translate(template_path):
+    import boto3
     from cfnlint.decode import decode
-    from samtranslator.translator.transform import transform
+    from samtranslator.parser.parser import Parser
+    from samtranslator.translator.translator import Translator
+    from samtranslator.utils.py27hash_fix import to_py27_compatible_template, undo_mark_unicode_str_in_template
+
+    # The translator takes the partition and AWS::Region from the local AWS
+    # configuration. Without one (as in CI), it uses the default deploy Region.
+    session = boto3.session.Session()
+    if not session.region_name:
+        session = boto3.session.Session(region_name="ap-south-1")
 
     template, matches = decode(str(template_path))
     if matches:
@@ -37,7 +46,11 @@ def translate(template_path):
     for props in functions:
         if isinstance(props.get("CodeUri"), str) and not props["CodeUri"].startswith("s3://"):
             props["CodeUri"] = "s3://placeholder-bucket/code.zip"
-    return transform(template, {}, _NoManagedPolicies())
+    # What samtranslator's transform() does, with the session passed in.
+    to_py27_compatible_template(template, {})
+    translated = Translator(None, Parser(), boto_session=session).translate(
+        template, parameter_values={}, get_managed_policy_map=_NoManagedPolicies().load)
+    return undo_mark_unicode_str_in_template(translated)
 
 
 def cfn_lint(path):

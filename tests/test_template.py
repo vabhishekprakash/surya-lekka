@@ -99,6 +99,18 @@ def test_lints_clean_offline():
     assert lint["main"]([str(ROOT / "template.yaml")]) == 0
 
 
+def test_lint_needs_no_aws_configuration(tmp_path):
+    import os
+    import subprocess
+    import sys
+
+    env = {k: v for k, v in os.environ.items() if not k.startswith("AWS_")}
+    env.update(AWS_CONFIG_FILE=str(tmp_path / "none"), AWS_SHARED_CREDENTIALS_FILE=str(tmp_path / "none"))
+    run = subprocess.run([sys.executable, str(ROOT / "scripts" / "lint_template.py"), str(ROOT / "template.yaml")],
+                         capture_output=True, text=True, env=env, cwd=tmp_path)
+    assert run.returncode == 0, run.stdout + run.stderr
+
+
 def test_bucket_is_private_encrypted_and_expires_uploads():
     props = RES["UploadBucket"]["Properties"]
     assert all(props["PublicAccessBlockConfiguration"].values()) and len(props["PublicAccessBlockConfiguration"]) == 4
