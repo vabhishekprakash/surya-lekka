@@ -6,6 +6,7 @@ content, evidence text or job tokens. log() refuses any other field.
 """
 
 import base64
+import functools
 import hashlib
 import hmac
 import json
@@ -124,6 +125,22 @@ def response(status, body):
 
 def error_response(e):
     return response(e.status, {"error": e.code, "message": e.message})
+
+
+def guarded(action):
+    """Turn any unexpected error in a handler into a plain 500. Only the action
+    and a fixed reason are logged: exception text could quote the document."""
+    def wrap(handler):
+        @functools.wraps(handler)
+        def guarded_handler(event, context):
+            try:
+                return handler(event, context)
+            except Exception:
+                log(f"{action}_error", reason="internal_error", http_status=500)
+                return response(500, {"error": "internal_error",
+                                      "message": "Something went wrong on our side. Please try again."})
+        return guarded_handler
+    return wrap
 
 
 def body_json(event):

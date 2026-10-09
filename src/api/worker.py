@@ -75,6 +75,12 @@ class OutOfTime(Exception):
     pass
 
 
+class WorkerError(Exception):
+    """Raised in place of an unexpected error outside a job's own error handling,
+    so Lambda retries the event (and then sends it to the failure queue) without
+    the original message, which could quote the document."""
+
+
 def model_id():
     return os.environ.get("MODEL_ID", DEFAULT_MODEL)
 
@@ -93,7 +99,11 @@ def handler(event, context):
         if not match:
             log("ignored_object")
             continue
-        outcomes.append(process_job(record["s3"]["bucket"]["name"], match.group(1), context))
+        try:
+            outcomes.append(process_job(record["s3"]["bucket"]["name"], match.group(1), context))
+        except Exception:
+            log("worker_error", job_id=match.group(1), reason="internal_error")
+            raise WorkerError("internal_error") from None
     return {"outcomes": outcomes}
 
 

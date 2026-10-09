@@ -25,6 +25,7 @@ from .common import (
     check_kill_switch,
     conditional_update,
     error_response,
+    guarded,
     log,
     manifest_key,
     new_job,
@@ -51,6 +52,7 @@ def _presigned_post(key, content_type, max_bytes):
     return {"url": post["url"], "fields": post["fields"]}
 
 
+@guarded("create")
 def create_job(event, context):
     """POST /jobs {"page_count": n}"""
     try:
@@ -105,6 +107,7 @@ def _view(item):
     return view
 
 
+@guarded("read")
 def get_job(event, context):
     """GET /jobs/{id}?t=token"""
     try:
@@ -117,6 +120,7 @@ def get_job(event, context):
     return response(200, view)
 
 
+@guarded("recheck")
 def recheck(event, context):
     """POST /jobs/{id}/checks?t=token {"corrections": {...}, "answers": {...}}
 
@@ -158,6 +162,7 @@ def recheck(event, context):
     return response(200, {**checked, "corrected_fields": stored["corrected_fields"]})
 
 
+@guarded("retry")
 def retry_job(event, context):
     """POST /jobs/{id}/retry?t=token: run a failed or stuck job again. The manifest
     is uploaded again, which starts the worker; batches the earlier run saved are
@@ -196,6 +201,7 @@ def sample_ids():
     return [s.strip() for s in os.environ.get("SAMPLE_IDS", "S1,S2,S3").split(",") if s.strip()]
 
 
+@guarded("sample")
 def create_sample_job(event, context):
     """POST /samples/{sample_id}: a done job holding the sample's saved reading
     (samples/<id>/reading.json in the bucket). No model call, so no cap applies.
