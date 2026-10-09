@@ -1,3 +1,4 @@
+import json
 import re
 from datetime import date
 from pathlib import Path
@@ -63,7 +64,7 @@ def test_results_team_and_limits_say_only_what_is_known():
     assert section("Team").strip().endswith("TEAM: to be filled in by the authors")
     limits = section("Limits")
     assert "Lambda concurrency on our account is 10." in limits
-    assert "AI reading is switched off until Bedrock access is granted." in limits
+    assert "Amazon Nova reading is switched off until Bedrock access is granted." in limits
 
 
 def test_deploy_commands_and_architecture_image():
@@ -79,3 +80,18 @@ def test_plain_text_rules():
     assert not re.search(r"Claude|ChatGPT|Copilot|Anthropic|generated (by|with)|AI[- ]assist", README, re.I)
     assert "**" not in README
     assert "illustrative" in section("Press release")  # the household quote is not presented as real
+
+
+def test_textract_engine_privacy_cost_and_limits():
+    privacy = section("Privacy and safety")
+    for kind in ("textractOptedOut", "textract"):
+        line = json.loads(re.search(rf'^\s*{kind}: (".*"),$', APP, re.M).group(1))
+        assert line.replace("{where}", "AWS's Mumbai region (India)") in privacy
+    assert "describe-effective-policy" in privacy
+    assert "Read by Amazon Textract" in README
+    deploy = section("Deploy")
+    assert "-ReadingEngine textract" in deploy and "$0.020 per page" in deploy
+    assert "300 pages" in deploy and "$6.00" in deploy
+    limits = section("Limits")
+    assert "English" in limits and "15 queries" in limits and "15 pixels" in limits
+    assert "set on the AWS account by hand" in README and "template creates" not in README

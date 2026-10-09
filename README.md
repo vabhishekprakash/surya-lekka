@@ -12,7 +12,7 @@ Read the quote, check the numbers and the subsidy rule, and know what to ask the
 
 A rooftop solar quote packs a lot into a page or two: how many panels and of what wattage, the system size, the price with GST and extra charges, and the subsidy the vendor expects the household to get. Under PM Surya Ghar, the central subsidy depends on the DC capacity of the panels, the household's state, and when they applied on the National Portal, and it needs DCR panels made from Indian cells. Checking all of that by hand means finding each figure on the quote, knowing which rule applies, and redoing the sums.
 
-With Surya Lekka, a household uploads the quote as a PDF or as photos of its pages. Amazon Nova on Amazon Bedrock reads a fixed set of fields and copies the exact text each value came from, or says "not found". The household confirms or corrects every value and answers a few questions, such as their state and when they applied. Plain, tested Python code then runs the checks. Each finding shows the line from the quote, the rule it was checked against and the rule's date. The details the quote leaves out become a short, polite message to copy or send to the vendor on WhatsApp. Anyone who would rather not upload anything can type the numbers in instead.
+With Surya Lekka, a household uploads the quote as a PDF or as photos of its pages. Amazon Textract reads each page, answering a fixed set of questions and reading its tables, and the app keeps the exact line each value came from, or says "not found". (Amazon Nova on Amazon Bedrock can read the quote instead once the account has Bedrock access.) The household confirms or corrects every value and answers a few questions, such as their state and when they applied. Plain, tested Python code then runs the checks. Each finding shows the line from the quote, the rule it was checked against and the rule's date. The details the quote leaves out become a short, polite message to copy or send to the vendor on WhatsApp. Anyone who would rather not upload anything can type the numbers in instead.
 
 > "I had the quote on my phone and the vendor wanted an answer. It showed me the panel count didn't add up to the system size and gave me the questions to send back."
 >
@@ -30,7 +30,7 @@ It never recommends a system size, predicts savings or payback, ranks vendors, a
 
 ### What happens to my quote?
 
-The page turns your quote into page images on your own device and only those images are uploaded. Your pages are processed in AWS's Mumbai region (India) and deleted after reading. If reading fails, they're removed automatically, usually within two days. Logs hold job ids, timings and reason codes, never the text of your quote. See [Privacy and safety](#privacy-and-safety) for the details, including what changes when the model is reached through a cross-Region inference profile.
+The page turns your quote into page images on your own device and only those images are uploaded. Your pages are processed in AWS's Mumbai region (India) and deleted after reading. If reading fails, they're removed automatically, usually within two days. Logs hold job ids, timings and reason codes, never the text of your quote. See [Privacy and safety](#privacy-and-safety) for the details, including the notice shown when Amazon Textract reads the pages and what changes when Nova is reached through a cross-Region inference profile.
 
 ### Why not just use a subsidy calculator?
 
@@ -42,12 +42,16 @@ A calculator needs you to find each number, know which figure is the DC panel ca
 
 1. In the browser, pdf.js turns each page of a PDF into a JPEG (at most 20 pages, each under 3,750,000 bytes and 8,000 pixels a side). Photos are scaled down to fit the same limits. Nothing leaves the device at this step.
 2. The page asks the API for a job. It gets back a secret job token and presigned POSTs, and uploads the page images straight to a private S3 bucket, then a small manifest.
-3. The manifest's S3 event starts the worker Lambda. It claims the job with a conditional write, so a duplicate event does nothing, and sends the pages to the model in batches of at most five images. The model has to answer through a fixed JSON schema: each field gets a value and the exact text it came from, or "not found". The worker saves each batch as it arrives, so a retry only reads the rest.
+3. The manifest's S3 event starts the worker Lambda. It claims the job with a conditional write, so a duplicate event does nothing, and reads the pages with the stack's reading engine:
+   - Amazon Textract (`ReadingEngine=textract`): one AnalyzeDocument call per page with the page bytes, asking for tables and 15 fixed questions (`src/extract/textract_queries.py`). Each answer keeps its own text, the full lines it sits on and its page. An answer below the confidence threshold (50 out of 100, chosen on our development quotes), one that doesn't parse as its field's type, or one on no line of the page is dropped. Every remaining answer is kept page by page, so two pages that disagree reach the household as a conflict to resolve. A table gives several options only when two or more of its rows each have a different system size and a price.
+   - Amazon Nova (`ReadingEngine=nova`): batches of at most five images, answered through a fixed JSON schema in which each field gets a value and the exact text it came from, or "not found".
+
+   The worker saves each page or batch as it arrives, so a retry only reads the rest.
 4. The worker merges the batches, runs the checks, stores the result in DynamoDB and deletes the uploaded pages.
 5. The review screen shows every value next to its source text and a thumbnail of the user's own page. The user corrects anything wrong and answers the questions the rules need. The checks run again on the corrected values, and each correction is stored as the user's.
 6. The results screen groups the findings by outcome and offers the vendor questions with Copy and Send on WhatsApp buttons.
 
-There are two other ways in. The three samples are made-up quotes with saved readings, so trying one never calls the model. "Type the numbers instead" sends the figures the user types straight to the checks, with nothing stored. Every result carries a label saying where its values came from: "Read by Amazon Nova", "Sample (saved reading)" or "Entered by you".
+There are two other ways in. The three samples are made-up quotes with saved readings, so trying one never calls the model. "Type the numbers instead" sends the figures the user types straight to the checks, with nothing stored. Every result carries a label saying where its values came from: "Read by Amazon Textract", "Read by Amazon Nova", "Sample (saved reading)" or "Entered by you".
 
 The stack is defined in `template.yaml` (AWS SAM): an HTTP API on API Gateway, seven Lambda functions on Python 3.12, a private S3 bucket for uploads, DynamoDB for jobs, an SQS queue for worker events that failed, CloudWatch logs kept for 7 days, X-Ray tracing, and the web app in a second private bucket behind CloudFront.
 
@@ -109,13 +113,14 @@ Sources:
 ## Privacy and safety
 
 - The browser renders the quote into page images on the device. Only those images are uploaded, through presigned POSTs that accept one JPEG of limited size per page.
-- The privacy notice in the web app comes from the Region the stack is deployed in. For Mumbai it reads: "Your pages are processed in AWS's Mumbai region (India) and deleted after reading. If reading fails, they're removed automatically, usually within two days." For Sydney it names "AWS's Sydney region (Australia)". When the model is reached through a cross-Region inference profile (`global.` or `apac.`), pages may be read in other AWS Regions, and the notice says so instead.
+- The privacy notice in the web app comes from the Region the stack is deployed in and the reading engine. For Mumbai it reads: "Your pages are processed in AWS's Mumbai region (India) and deleted after reading. If reading fails, they're removed automatically, usually within two days." For Sydney it names "AWS's Sydney region (Australia)". When Nova is reached through a cross-Region inference profile (`global.` or `apac.`), pages may be read in other AWS Regions, and the notice says so instead.
+- With Amazon Textract, AWS may store and use the pages to improve its AI services, and may store some of that content in another Region, unless the account opts out through an AWS Organizations AI services opt-out policy. `deploy.ps1` reads the account's effective policy with `aws organizations describe-effective-policy --policy-type AISERVICES_OPT_OUT_POLICY`. Only when that policy opts Textract out, by name or through `default`, does the page say: "Your pages are read by Amazon Textract in AWS's Mumbai region (India) and deleted from our storage after reading. This AWS account has opted out of AWS using them to improve its services. If reading fails, they're removed automatically, usually within two days." If the policy doesn't confirm it, or the call is denied, the page says: "Your pages are read by Amazon Textract in AWS's Mumbai region (India) and deleted from our storage after reading. AWS may keep and use them to improve its AI services and may store some of that content in another AWS region. If reading fails, they're removed automatically, usually within two days."
 - The worker deletes a job's pages after a successful reading, or after a failure that can't be retried. It retries objects S3 reports as not deleted and logs only counts. A lifecycle rule removes anything left under `uploads/` after a day, and job records in DynamoDB expire after 24 hours.
-- Logs hold job ids, timings, statuses, token counts and reason codes. The logging helper refuses any other field. Tests check that error paths never log document text, evidence or job tokens.
+- Logs hold job ids, timings, statuses, token counts or pages read, a cost estimate and reason codes. The logging helper refuses any other field. Tests check that error paths never log document text, evidence or job tokens. The worker never logs or stores Textract's raw reply, only the facts mapped from it.
 - Each job has a random secret token. Only its SHA-256 hash is stored, and every read or change needs the token.
-- Abuse limits: a kill switch, a daily cap on new checks, a per-address daily cap (the address is stored only as a keyed hash), and API throttling of 5 requests a second with bursts of 10. Requests are validated before they take a slot.
+- Abuse and cost limits: a kill switch, a daily cap on new checks, a daily cap on pages (counted from each check's declared page count when it is created, live samples included), a per-address daily cap (the address is stored only as a keyed hash), and API throttling of 5 requests a second with bursts of 10. Requests are validated before they take a slot. Budget alerts are set on the AWS account by hand; the template has none.
 - Both buckets block public access and refuse plain HTTP. Only the CloudFront distribution can read the site bucket, through origin access control. The API and the upload bucket accept requests from one origin: the CloudFront domain, or with hosting off the local address set in `SiteOrigin`.
-- Each Lambda function has its own role with only the actions it needs. The worker's Bedrock permission exists only while reading is on, and names the exact model or inference profile and the Regions that profile lists.
+- Each Lambda function has its own role with only the actions it needs. The worker's Bedrock permission exists only while Nova reads, and names the exact model or inference profile and the Regions that profile lists. Its `textract:AnalyzeDocument` permission exists only while Textract reads. That action has no resource-level permissions, so the statement uses `"*"`. The worker sends page bytes, so Textract needs no access to the bucket.
 - The web app places every piece of quote text with `textContent`, never as HTML. pdf.js is pinned to one version on cdnjs and checked against its SRI hash before it runs.
 - X-Ray traces Lambda invocations only. The code has no X-Ray SDK, so no request or document data goes into traces.
 
@@ -165,7 +170,8 @@ The script prints the AWS account and Region first and stops before changing any
 The stack deploys in `ap-south-1` (Mumbai) or `ap-southeast-2` (Sydney). The template refuses any other Region. Options:
 
 - `-HostingEnabled false` leaves out CloudFront and the site bucket (see below).
-- `-ReadingEngine nova -ModelId <id>` turns reading on. The default is `none`. The model ID can be an inference profile such as `global.amazon.nova-2-lite-v1:0` or `apac.amazon.nova-pro-v1:0`, or a model in the stack's own Region such as `amazon.nova-pro-v1:0`, for accounts that can't use cross-Region inference. For a profile, the script reads the Regions it routes to with `aws bedrock get-inference-profile` and grants the worker those and no others.
+- `-ReadingEngine textract` turns reading on with Amazon Textract in the stack's Region. Each page costs about $0.020 per page (tables and queries, Mumbai pricing). `DailyPageCap` (default 300 pages per UTC day, across all checks, live samples included) limits first reads to about $6.00 a day. A page that was read and saved is never read again; only if saving its reading fails can a retry read it again, at most four times in all (the first run, Lambda's one retry and two retries from the page).
+- `-ReadingEngine nova -ModelId <id>` turns reading on with Amazon Nova. The default is `none`. The model ID can be an inference profile such as `global.amazon.nova-2-lite-v1:0` or `apac.amazon.nova-pro-v1:0`, or a model in the stack's own Region such as `amazon.nova-pro-v1:0`, for accounts that can't use cross-Region inference. For a profile, the script reads the Regions it routes to with `aws bedrock get-inference-profile` and grants the worker those and no others.
 - `-StackName` sets the stack name, which also starts the upload bucket's name.
 
 ### Without CloudFront
@@ -199,17 +205,18 @@ pytest
 python scripts/lint_template.py template.yaml
 ```
 
-The lint runs cfn-lint on the SAM template, then on the plain CloudFormation the SAM translator produces from it, all offline. The template tests evaluate the conditions for each setting, with hosting on and off and with reading off, through a regional profile, a global profile or an in-region model, and check the exact permissions and that nothing refers to a resource that isn't created. The deploy and smoke test scripts are tested end to end on Windows with `aws` and `sam` replaced by stand-ins that only record their arguments.
+The lint runs cfn-lint on the SAM template, then on the plain CloudFormation the SAM translator produces from it, all offline. The template tests evaluate the conditions for each setting, with hosting on and off and with reading off, by Textract, or by Nova through a regional profile, a global profile or an in-region model, and check the exact permissions and that nothing refers to a resource that isn't created. The deploy and smoke test scripts are tested end to end on Windows with `aws` and `sam` replaced by stand-ins that only record their arguments.
 
 GitHub Actions runs the tests and the lint on every push (`.github/workflows/tests.yml`). One redaction server test fails now and then. If it is the only failure, CI runs it once more instead of skipping it.
 
 ## Limits
 
 - Lambda concurrency on our account is 10.
-- AI reading is switched off until Bedrock access is granted. Until then, the samples and typed-in numbers work, and uploads get a message asking the household to type the numbers in.
+- Amazon Nova reading is switched off until Bedrock access is granted. Amazon Textract reads the quotes in the meantime. With `ReadingEngine=none`, the samples and typed-in numbers work, and uploads get a message asking the household to type the numbers in.
+- Amazon Textract's limits: at most 15 queries per page, and queries in English only. Text smaller than about 15 pixels tall on the page image may be missed, and each page image must be under 10 MB and 10,000 pixels a side. Textract has no question for the vendor's state or for charges outside the total, so those always come from the household.
 - Only the central subsidy for an individual household is checked. State top-ups are not checked, and applications received before 13 Feb 2024 follow earlier rules that aren't covered.
 - Eligibility is never verified: not DCR panels, not the vendor's registration, not the inspection.
-- The model can misread a quote, so every value is shown with its source text for the household to confirm or correct.
+- The reading can be wrong, so every value is shown with its source text for the household to confirm or correct.
 - At most 20 pages per quote are read.
 - With hosting off, the web app has to be served from `http://127.0.0.1:8000` to reach the API.
 
