@@ -3,8 +3,9 @@
     python samples/generate.py [--out DIR]
     python samples/generate.py --saved-readings
 
-Each page carries a "SAMPLE - NOT A REAL QUOTATION" watermark and a real
-text layer. The vendor, address, phone and figures are made up. Needs
+Each page carries a small footer, "Made-up sample quote for testing", at the
+bottom, away from the header (a large watermark was once read as the vendor's
+name), and a real text layer. The vendor, address, phone and figures are made up. Needs
 PyMuPDF (see requirements-redact.txt). The PDFs are not committed.
 """
 
@@ -13,7 +14,7 @@ import json
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-WATERMARK = "SAMPLE - NOT A REAL QUOTATION"
+FOOTER = "Made-up sample quote for testing"
 
 
 def render(sample, out_path):
@@ -22,16 +23,12 @@ def render(sample, out_path):
     doc = pymupdf.open()
     for number in sorted(sample["pages"], key=int):
         page = doc.new_page(width=595, height=842)
-        centre = pymupdf.Point(70, 600)
-        page.insert_text(centre, WATERMARK, fontsize=38, fontname="helv", color=(0.82, 0.82, 0.82),
-                         morph=(centre, pymupdf.Matrix(-35)))
-        page.insert_text((50, 40), WATERMARK, fontsize=9, fontname="helv", color=(0.6, 0, 0))
         y = 80
         for line in sample["pages"][number]:
             page.insert_text((50, y), line, fontsize=11, fontname="helv")
             y += 22
-        page.insert_text((50, 815), f"{WATERMARK} | page {number}", fontsize=8, fontname="helv",
-                         color=(0.6, 0, 0))
+        page.insert_text((50, 815), f"{FOOTER} | page {number}", fontsize=8, fontname="helv",
+                         color=(0.45, 0.45, 0.45))
     doc.set_metadata({"title": f"Synthetic sample {sample['sample_id']}", "author": "", "producer": ""})
     doc.save(out_path, garbage=3, deflate=True)
     doc.close()

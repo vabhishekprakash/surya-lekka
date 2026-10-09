@@ -8,7 +8,7 @@ from checks.evidence import verify_evidence
 
 ROOT = Path(__file__).resolve().parent.parent
 SAMPLES = sorted((ROOT / "samples" / "expected").glob("S*.json"))
-WATERMARK = "SAMPLE - NOT A REAL QUOTATION"
+FOOTER = "Made-up sample quote for testing"
 
 
 def load(path):
@@ -61,7 +61,10 @@ def test_sample_pdf_text_layer(path, tmp_path):
     with pymupdf.open(out) as doc:
         texts = {i + 1: page.get_text() for i, page in enumerate(doc)}
         assert len(doc) == len(sample["pages"])
-    assert all(WATERMARK in t for t in texts.values())
+        for page in doc:  # one small footer at the bottom, away from the header; no watermark
+            footer = [b for b in page.get_text("blocks") if FOOTER in b[4]]
+            assert len(footer) == 1 and footer[0][1] > 0.9 * page.rect.height
+    assert all(FOOTER in t and "NOT A REAL" not in t for t in texts.values())
     for f in evidence_fields(sample["quote"]):
         assert verify_evidence(f, texts) == "text_matched", f["evidence_text"]
 

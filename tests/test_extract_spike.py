@@ -565,10 +565,13 @@ def test_replay_maps_saved_replies_again_without_aws(sample_dir, capsys, live_te
     out = capsys.readouterr().out
     assert "Replay" in out and "(threshold 0)" in out and live_textract.calls == 4
     (replayed,) = set((sample_dir / "out" / "textract").iterdir()) - {live}
-    first = json.loads((live / "S1" / "batch-1.json").read_text(encoding="utf-8"))
-    again = json.loads((replayed / "S1" / "batch-1.json").read_text(encoding="utf-8"))
-    assert again["response"] == first["response"]
-    assert sum(e["kept"] for e in again["confidence"]) > sum(e["kept"] for e in first["confidence"])
+    def batches(run):
+        return [json.loads(f.read_text(encoding="utf-8")) for f in sorted(run.glob("S[12]/batch-*.json"))]
+    first, again = batches(live), batches(replayed)
+    assert [b["response"] for b in again] == [b["response"] for b in first]
+    def kept(records):
+        return sum(e["kept"] for b in records for e in b["confidence"])
+    assert kept(again) > kept(first)
 
 
 # --- label forms the hand-written keys use ------------------------------------------------------

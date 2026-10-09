@@ -1,6 +1,6 @@
 # Synthetic sample quotes
 
-Three made-up rooftop solar quotes for testing the checks. The vendor (Example Solar Pvt Ltd), its address, phone number and every figure are invented. Each page carries the watermark "SAMPLE - NOT A REAL QUOTATION".
+Three made-up rooftop solar quotes for testing the checks. The vendor (Example Solar Pvt Ltd), its address, phone number and every figure are invented. Each page carries a small footer, "Made-up sample quote for testing", at the bottom.
 
 | Sample | What it tests |
 |---|---|
