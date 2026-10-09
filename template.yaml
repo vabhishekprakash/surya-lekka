@@ -34,6 +34,12 @@ Parameters:
       Reserved concurrency for the worker. 0 leaves it off. New accounts often have a total limit of 10 and
       AWS keeps at least 10 unreserved, so reserving any would fail the deploy there.
 
+Rules:
+  BedrockRegion:
+    Assertions:
+      - Assert: !Equals [!Ref "AWS::Region", ap-south-1]
+        AssertDescription: The worker's Bedrock permissions name ap-south-1, so the stack must be deployed there.
+
 Conditions:
   UseReservedConcurrency: !Not [!Equals [!Ref ReservedConcurrency, 0]]
 
@@ -221,32 +227,44 @@ Resources:
         MaximumEventAgeInSeconds: 3600
       Policies:
         - Statement:
-            - Sid: InvokeThroughInferenceProfiles
+            # Global profile for Nova 2 Lite, called from ap-south-1.
+            - Sid: NovaLiteGlobalProfile
               Effect: Allow
               Action: bedrock:InvokeModel
-              Resource:
-                - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/global.amazon.nova-2-lite-v1:0"
-                - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/apac.amazon.nova-pro-v1:0"
-            - Sid: FoundationModelsBehindTheProfiles
+              Resource: !Sub "arn:${AWS::Partition}:bedrock:ap-south-1:${AWS::AccountId}:inference-profile/global.amazon.nova-2-lite-v1:0"
+            - Sid: NovaLiteInSourceRegion
               Effect: Allow
               Action: bedrock:InvokeModel
-              Resource:
-                - !Sub "arn:${AWS::Partition}:bedrock:*::foundation-model/amazon.nova-2-lite-v1:0"
-                - !Sub "arn:${AWS::Partition}:bedrock:*::foundation-model/amazon.nova-pro-v1:0"
+              Resource: !Sub "arn:${AWS::Partition}:bedrock:ap-south-1::foundation-model/amazon.nova-2-lite-v1:0"
               Condition:
-                StringLike:
-                  bedrock:InferenceProfileArn:
-                    - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/global.amazon.nova-2-lite-v1:0"
-                    - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/apac.amazon.nova-pro-v1:0"
-            - Sid: GlobalProfileRouting
+                StringEquals:
+                  bedrock:InferenceProfileArn: !Sub "arn:${AWS::Partition}:bedrock:ap-south-1:${AWS::AccountId}:inference-profile/global.amazon.nova-2-lite-v1:0"
+            - Sid: NovaLiteGlobalRouting
               Effect: Allow
               Action: bedrock:InvokeModel
               Resource: !Sub "arn:${AWS::Partition}:bedrock:::foundation-model/amazon.nova-2-lite-v1:0"
               Condition:
                 StringEquals:
                   aws:RequestedRegion: unspecified
-                StringLike:
-                  bedrock:InferenceProfileArn: !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/global.amazon.nova-2-lite-v1:0"
+                  bedrock:InferenceProfileArn: !Sub "arn:${AWS::Partition}:bedrock:ap-south-1:${AWS::AccountId}:inference-profile/global.amazon.nova-2-lite-v1:0"
+            # APAC profile for Nova Pro: the profile in ap-south-1 and the model in each Region it routes to.
+            - Sid: NovaProApacProfile
+              Effect: Allow
+              Action: bedrock:InvokeModel
+              Resource: !Sub "arn:${AWS::Partition}:bedrock:ap-south-1:${AWS::AccountId}:inference-profile/apac.amazon.nova-pro-v1:0"
+            - Sid: NovaProApacRegions
+              Effect: Allow
+              Action: bedrock:InvokeModel
+              Resource:
+                - !Sub "arn:${AWS::Partition}:bedrock:ap-south-1::foundation-model/amazon.nova-pro-v1:0"
+                - !Sub "arn:${AWS::Partition}:bedrock:ap-southeast-1::foundation-model/amazon.nova-pro-v1:0"
+                - !Sub "arn:${AWS::Partition}:bedrock:ap-southeast-2::foundation-model/amazon.nova-pro-v1:0"
+                - !Sub "arn:${AWS::Partition}:bedrock:ap-northeast-1::foundation-model/amazon.nova-pro-v1:0"
+                - !Sub "arn:${AWS::Partition}:bedrock:ap-northeast-2::foundation-model/amazon.nova-pro-v1:0"
+                - !Sub "arn:${AWS::Partition}:bedrock:ap-northeast-3::foundation-model/amazon.nova-pro-v1:0"
+              Condition:
+                StringEquals:
+                  bedrock:InferenceProfileArn: !Sub "arn:${AWS::Partition}:bedrock:ap-south-1:${AWS::AccountId}:inference-profile/apac.amazon.nova-pro-v1:0"
             - Sid: ReadAndDeleteUploads
               Effect: Allow
               Action: [s3:GetObject, s3:DeleteObject]

@@ -11,7 +11,6 @@ from cfnlint.decode import decode
 ROOT = Path(__file__).resolve().parent.parent
 TEMPLATE, _ = decode(str(ROOT / "template.yaml"))
 RES = TEMPLATE["Resources"]
-PROFILES = ("global.amazon.nova-2-lite-v1:0", "apac.amazon.nova-pro-v1:0")
 
 
 def statements(name):
@@ -72,13 +71,46 @@ def test_reserved_concurrency_is_optional_and_off_by_default():
         "Fn::If": ["UseReservedConcurrency", {"Ref": "ReservedConcurrency"}, {"Ref": "AWS::NoValue"}]}
 
 
+def sub(value):
+    """The string inside a Fn::Sub, or the plain string."""
+    return value["Fn::Sub"] if isinstance(value, dict) else value
+
+
+def as_list(value):
+    return value if isinstance(value, list) else [value]
+
+
+GLOBAL_PROFILE = "arn:${AWS::Partition}:bedrock:ap-south-1:${AWS::AccountId}:inference-profile/global.amazon.nova-2-lite-v1:0"
+APAC_PROFILE = "arn:${AWS::Partition}:bedrock:ap-south-1:${AWS::AccountId}:inference-profile/apac.amazon.nova-pro-v1:0"
+APAC_REGIONS = ("ap-south-1", "ap-southeast-1", "ap-southeast-2", "ap-northeast-1", "ap-northeast-2", "ap-northeast-3")
+
+
+def test_worker_bedrock_permissions_are_exact():
+    bedrock = [s for s in statements("WorkerFunction") if any(a.startswith("bedrock:") for a in actions(s))]
+    assert all(actions(s) == {"bedrock:InvokeModel"} and s["Effect"] == "Allow" for s in bedrock)
+    granted = {(sub(r), text(s.get("Condition"))) for s in bedrock for r in as_list(s["Resource"])}
+    lite_via = text({"StringEquals": {"bedrock:InferenceProfileArn": {"Fn::Sub": GLOBAL_PROFILE}}})
+    pro_via = text({"StringEquals": {"bedrock:InferenceProfileArn": {"Fn::Sub": APAC_PROFILE}}})
+    global_any = text({"StringEquals": {"aws:RequestedRegion": "unspecified",
+                                        "bedrock:InferenceProfileArn": {"Fn::Sub": GLOBAL_PROFILE}}})
+    assert granted == {
+        (GLOBAL_PROFILE, "None"),
+        ("arn:${AWS::Partition}:bedrock:ap-south-1::foundation-model/amazon.nova-2-lite-v1:0", lite_via),
+        ("arn:${AWS::Partition}:bedrock:::foundation-model/amazon.nova-2-lite-v1:0", global_any),
+        (APAC_PROFILE, "None"),
+        *{(f"arn:${{AWS::Partition}}:bedrock:{r}::foundation-model/amazon.nova-pro-v1:0", pro_via)
+          for r in APAC_REGIONS},
+    }
+    assert not any("*" in r for r, _ in granted)
+
+
+def test_stack_is_pinned_to_the_region_the_permissions_name():
+    (assertion,) = TEMPLATE["Rules"]["BedrockRegion"]["Assertions"]
+    assert assertion["Assert"] == {"Fn::Equals": [{"Ref": "AWS::Region"}, "ap-south-1"]}
+
+
 def test_worker_permissions():
     worker = statements("WorkerFunction")
-    bedrock = [s for s in worker if actions(s) == {"bedrock:InvokeModel"}]
-    resources = text([s["Resource"] for s in bedrock])
-    for profile in PROFILES:
-        assert f"inference-profile/{profile}" in resources
-        assert f"foundation-model/{profile.split('.', 1)[1]}" in resources
     s3 = [s for s in worker if any(a.startswith("s3:") for a in actions(s))]
     assert [actions(s) for s in s3] == [{"s3:GetObject", "s3:DeleteObject"}]
     assert text(s3[0]["Resource"]).endswith("/uploads/*'}")
