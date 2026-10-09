@@ -264,6 +264,12 @@ function fieldLabel(name) {
   return FIELD_LABELS[key] || key.replace(/_/g, " ");
 }
 
+// A price, subsidy or charge amount, whose value shows as ₹ with Indian grouping.
+function isAmountField(field) {
+  const name = String(field || "");
+  return name.endsWith(".amount") || AMOUNTS.some(([amount]) => amount === name);
+}
+
 function valueText(value, raw) {
   if (raw !== undefined && raw !== null && raw !== "") return String(raw);
   if (value === true) return "Yes";
@@ -1080,7 +1086,9 @@ function evidenceItem(e) {
   if (e.kind === "user_corrected") {
     const was = e.original_value !== undefined && e.original_value !== null && state.mode !== "manual"
       ? `; the reading was ${valueText(e.original_value)}` : "";
-    return el("li", { text: `${label}: ${valueText(e.value, e.raw)} (entered by you${was})` });
+    const shown = isAmountField(e.field) && e.value !== null && e.value !== "" && Number.isFinite(Number(e.value))
+      ? formatInr(e.value) : valueText(e.value, e.raw);
+    return el("li", { text: `${label}: ${shown} (entered by you${was})` });
   }
   if (e.kind === "user_confirmed") {
     return el("li", { text: `${label}: ${valueText(e.value)} (your answer)` });

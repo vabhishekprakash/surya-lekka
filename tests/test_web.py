@@ -172,3 +172,9 @@ def test_the_suppliers_gst_state_is_shown_as_information_only():
     assert "q.supplier_gst_state" in review
     assert "registered for GST in" in review and "not where your house is" in review
     assert "supplier_gst_state" not in APP[APP.index("function renderQuestions("):APP.index("// ---------------------------------------------------------------- manual entry")]
+
+
+def test_amounts_the_household_enters_show_in_rupees():
+    branch = APP[APP.index('if (e.kind === "user_corrected") {'):APP.index('if (e.kind === "user_confirmed") {')]
+    assert "isAmountField(e.field)" in branch and "formatInr(e.value)" in branch
+    assert "function isAmountField(" in APP
