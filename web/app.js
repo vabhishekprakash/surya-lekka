@@ -1318,8 +1318,11 @@ function init() {
   renderQuestions($("[data-questions=manual]"), "manual");
   addCharge();
   const start = location.hash.slice(1);
+  // A direct link such as #sample=S4 opens a sample that the home page doesn't list.
+  const linked = /^sample=(S\d{1,2})$/.exec(start);
   go(["upload", "manual"].includes(start) ? start : "home", false);
   history.replaceState({ view: state.view }, "", `#${state.view}`);
+  if (linked) startSample(linked[1]);
 }
 
 init();

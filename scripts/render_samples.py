@@ -38,6 +38,14 @@ def render_samples(out_dir):
             (folder / "manifest.json").write_text(json.dumps({"pages": len(result.pages)}), encoding="utf-8")
             (folder / "reading.json").write_bytes((ROOT / "samples" / "cached" / f"{sid}.json").read_bytes())
             written[sid] = len(result.pages)
+    for sid, spec in generate["HIDDEN"].items():  # a hidden sample shows its listed sample's pages
+        source, folder = Path(out_dir) / spec["from"], Path(out_dir) / sid
+        folder.mkdir(parents=True, exist_ok=True)
+        for page in sorted(source.glob("page-*.jpg")):
+            (folder / page.name).write_bytes(page.read_bytes())
+        (folder / "manifest.json").write_bytes((source / "manifest.json").read_bytes())
+        (folder / "reading.json").write_bytes((ROOT / "samples" / "cached" / f"{sid}.json").read_bytes())
+        written[sid] = written[spec["from"]]
     return written
 
 

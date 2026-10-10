@@ -213,7 +213,8 @@ def retry_job(event, context):
 
 
 def sample_ids():
-    return [s.strip() for s in os.environ.get("SAMPLE_IDS", "S1,S2,S3").split(",") if s.strip()]
+    # S4 is a hidden tester sample, reached only by a direct link.
+    return [s.strip() for s in os.environ.get("SAMPLE_IDS", "S1,S2,S3,S4").split(",") if s.strip()]
 
 
 @guarded("sample")

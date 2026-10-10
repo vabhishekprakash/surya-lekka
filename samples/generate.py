@@ -63,6 +63,36 @@ def write_saved_readings(directory=HERE / "cached"):
     return paths
 
 
+# Hidden tester samples, opened only by a direct link (#sample=S4). Each is a listed sample with
+# one saved value deliberately read wrong; the value keeps its true source line.
+HIDDEN = {
+    "S4": {"from": "S2", "note": "panel wattage saved as 550 W where the page prints 500 W",
+           "group": 0, "key": "wattage", "value": {"raw": "550 W", "parsed": "550", "unit": "W", "parse_status": "ok"}},
+}
+
+
+def hidden_reading(sid):
+    spec = HIDDEN[sid]
+    base = json.loads((HERE / "cached" / f"{spec['from']}.json").read_text(encoding="utf-8"))
+    base["sample_id"] = sid
+    base["_reading"] = (f"Hidden tester sample {sid}: the saved reading of synthetic sample {spec['from']} with one "
+                        f"value deliberately wrong ({spec['note']}). Every value is made up.")
+    field = base["quote"]["module_groups"][spec["group"]][spec["key"]]
+    field["value"] = dict(spec["value"])
+    for candidate in field.get("candidates") or []:
+        candidate["value"] = dict(spec["value"])
+    return base
+
+
+def write_hidden_readings(directory=HERE / "cached"):
+    paths = []
+    for sid in HIDDEN:
+        path = Path(directory) / f"{sid}.json"
+        path.write_text(json.dumps(hidden_reading(sid), indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
+        paths.append(path)
+    return paths
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", default=str(HERE))
@@ -70,7 +100,7 @@ def main(argv=None):
                     help="write samples/cached/<id>.json instead of the PDFs")
     args = ap.parse_args(argv)
     if args.saved_readings:
-        for path in write_saved_readings():
+        for path in write_saved_readings() + write_hidden_readings():
             print(f"wrote {path}")
         return
     out = Path(args.out)
