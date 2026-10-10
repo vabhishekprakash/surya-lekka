@@ -1,0 +1,70 @@
+// Made-up quotes with known findings, written like the hand-made labels. Each block is run
+// through the safety harness's labelled path; eval/positive_controls.json holds the findings
+// worked out by hand.
+
+[P1]
+// Everything adds up: 6 x 550 W = 3.3 kWp; 30,000 x 2 + 18,000 x 1 = 78,000;
+// 1,50,000 + 18,000 = 1,68,000; 1,68,000 - 78,000 = 90,000.
+stated_capacity: 3.3 kWp
+capacity_basis: DC
+panel_count: 6
+panel_wattage: 550 Wp
+base_price: Rs 1,50,000
+gst_amount: Rs 18,000
+gst_treatment: extra
+gross_total: Rs 1,68,000
+subsidy_central: Rs 78,000
+net_cost: Rs 90,000
+net_cost_subsidy_basis: central
+multiple_options: no
+extra_charges_complete: yes
+
+[P2]
+// Nothing adds up: panels make 3.3 kWp, not 4; the rule gives 78,000, not 90,000;
+// 1,50,000 + 18,000 = 1,68,000, not 1,70,000; 1,70,000 - 90,000 = 80,000, not 95,000.
+stated_capacity: 4 kWp
+capacity_basis: DC
+panel_count: 6
+panel_wattage: 550 Wp
+base_price: Rs 1,50,000
+gst_amount: Rs 18,000
+gst_treatment: extra
+gross_total: Rs 1,70,000
+subsidy_central: Rs 90,000
+net_cost: Rs 95,000
+net_cost_subsidy_basis: central
+multiple_options: no
+extra_charges_complete: yes
+
+[P3]
+// GST included, 2 kWp: 4 x 500 W = 2 kWp; 30,000 x 2 = 60,000; total is the base price;
+// 1,20,000 - 60,000 = 60,000.
+stated_capacity: 2 kWp
+capacity_basis: DC
+panel_count: 4
+panel_wattage: 500 Watts
+base_price: Rs 1,20,000
+gst_treatment: included
+gross_total: Rs 1,20,000
+subsidy_central: Rs 60,000
+net_cost: Rs 60,000
+net_cost_subsidy_basis: central
+multiple_options: no
+extra_charges_complete: yes
+
+[P4]
+// P1 with the special-category subsidy: 33,000 x 2 + 19,800 x 1 = 85,800. It matches in Assam
+// (S-B) and is higher than the general rule (78,000) in Telangana (S-A).
+stated_capacity: 3.3 kWp
+capacity_basis: DC
+panel_count: 6
+panel_wattage: 550 Wp
+base_price: Rs 1,50,000
+gst_amount: Rs 18,000
+gst_treatment: extra
+gross_total: Rs 1,68,000
+subsidy_central: Rs 85,800
+net_cost: Rs 82,200
+net_cost_subsidy_basis: central
+multiple_options: no
+extra_charges_complete: yes

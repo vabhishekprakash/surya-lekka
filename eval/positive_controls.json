@@ -1,0 +1,7 @@
+{
+  "P1": {"S-A": {"C1_capacity": "consistent", "C2_central_subsidy": "consistent", "C3_gross_total": "consistent", "C3_net_cost": "consistent"}},
+  "P2": {"S-A": {"C1_capacity": "inconsistent", "C2_central_subsidy": "inconsistent", "C3_gross_total": "inconsistent", "C3_net_cost": "inconsistent"}},
+  "P3": {"S-A": {"C1_capacity": "consistent", "C2_central_subsidy": "consistent", "C3_gross_total": "consistent", "C3_net_cost": "consistent"}},
+  "P4": {"S-A": {"C2_central_subsidy": "inconsistent", "C3_net_cost": "consistent"},
+         "S-B": {"C2_central_subsidy": "consistent", "C3_net_cost": "consistent"}}
+}
