@@ -1,5 +1,7 @@
 # Surya Lekka
 
+Video: (link) · Blog: (link)
+
 Surya Lekka checks a household's rooftop solar quote before they sign. It reads the quote, shows the line each number came from, checks the sums and the central subsidy against the government rule, and lists what to ask the vendor.
 
 Site: https://main.d2sqhcgne0nq26.amplifyapp.com/ (AWS Amplify Hosting). Mirror: https://vabhishekprakash.github.io/surya-lekka/ (GitHub Pages).
@@ -194,6 +196,7 @@ The stack deploys in `ap-south-1` (Mumbai) or `ap-southeast-2` (Sydney). The tem
 - `-ReadingEngine textract` turns reading on with Amazon Textract in the stack's Region. Each page costs about $0.020 per page (tables and queries, Mumbai pricing). `DailyPageCap` (default 300 pages per UTC day, across all checks, live samples included) limits first reads to about $6.00 a day. A page that was read and saved is never read again; only if saving its reading fails can a retry read it again, at most four times in all (the first run, Lambda's one retry and two retries from the page).
 - `-ReadingEngine nova -ModelId <id>` turns reading on with Amazon Nova. The default is `none`. The model ID can be an inference profile such as `global.amazon.nova-2-lite-v1:0` or `apac.amazon.nova-pro-v1:0`, or a model in the stack's own Region such as `amazon.nova-pro-v1:0`, for accounts that can't use cross-Region inference. For a profile, the script reads the Regions it routes to with `aws bedrock get-inference-profile` and grants the worker those and no others.
 - `-DailyJobCap`, `-IpDailyJobCap` and `-DailyPageCap` (defaults 200, 10 and 300) are passed on every deploy and printed at the end, so a cap changed for one deploy never lingers.
+- `-SampleDailyCap` and `-IpSampleDailyCap` (defaults 1000 and 50) cap saved samples, and `-TypedDailyCap` and `-IpTypedDailyCap` (defaults 5000 and 200) cap typed-in checks, overall and per address a day. They are passed and printed the same way. 0 refuses every request of that kind.
 - `-Amplify -AmplifyAppId <id>` also publishes the built `web/` folder to an existing Amplify Hosting app as a manual deployment (zip upload, no Git connection), waits for it, and lets the API accept that address as a second origin. A deploy without `-Amplify` removes that origin again.
 - `-StackName` sets the stack name, which also starts the upload bucket's name.
 
@@ -251,7 +254,7 @@ GitHub Actions runs the tests and the lint on every push (`.github/workflows/tes
 - Only the central subsidy for an individual household is checked. State top-ups are not checked, and applications received before 13 Feb 2024 follow earlier rules that aren't covered.
 - Eligibility is never verified: not DCR panels, not the vendor's registration, not the inspection.
 - The reading can be wrong. On our 8 development quotes Amazon Textract, with our mapping, read 36 of 82 printed values correctly, 9 wrong and 1 that isn't on the quote; all 10 were marked "Check this", but that list of risky readings was built from those same quotes. On the 9 held-out quotes it read 27 of 92 correctly, 4 wrong and 3 that aren't on the quote, and marked 4 of those 7 (see Results). Every value is shown with its source text, highlighted on its page, for the household to confirm or correct.
-- The interface language doesn't change what is read: Amazon Textract's questions work on English quotes only. A Telugu draft of the messages (`web/i18n/te.json`, drafted once with Amazon Translate by `scripts/translate_messages.py`) waits for a reviewer and isn't shown yet.
+- The results screen and the vendor message can be shown in Telugu. Amazon Translate drafted it; Claude Opus 5.5 reviewed it, and a second independent Claude check back-translated it. No professional translator has reviewed it. Other screens are in English. Hindi isn't offered. The language doesn't change what is read: Amazon Textract's questions work on English quotes only.
 - At most 20 pages per quote are read.
 - With hosting off, the web app has to be served from the `SiteOrigin` address (`http://127.0.0.1:8000` by default) or the `SecondSiteOrigin` address to reach the API.
 

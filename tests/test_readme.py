@@ -85,8 +85,10 @@ def test_plain_text_rules():
     assert "—" not in README and "–" not in README
     # AI tools are named in "How this was built" (an event rule) and nowhere else.
     built = section("How this was built")
+    # ...and in the agreed sentence on who reviewed the Telugu (Limits)
+    telugu = ("Claude Opus 5.5 reviewed it, and a second independent Claude check back-translated it.")
     assert not re.search(r"Claude|ChatGPT|Copilot|Anthropic|GPT-|generated (by|with)|AI[- ]assist",
-                         README.replace(built, ""), re.I)
+                         README.replace(built, "").replace(telugu, ""), re.I)
     assert "**" not in README
     assert "illustrative" in section("Press release")  # the household quote is not presented as real
 
@@ -187,3 +189,10 @@ def test_typed_checks_and_traces_are_described_as_they_are():
     for line in privacy.splitlines():
         if "X-Ray" in line or "trace" in line:
             assert "never" not in line, line  # trace claims are only those a test backs
+
+
+def test_the_telugu_limit_is_stated_as_agreed():
+    assert ("The results screen and the vendor message can be shown in Telugu. Amazon Translate drafted it; Claude "
+            "Opus 5.5 reviewed it, and a second independent Claude check back-translated it. No professional "
+            "translator has reviewed it. Other screens are in English.") in section("Limits")
+    assert "Hindi isn't offered." in section("Limits")
