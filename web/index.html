@@ -19,7 +19,7 @@
 
   <main id="main" tabindex="-1">
     <section id="view-home" data-view="home">
-      <h1>Check your rooftop solar quote before you sign</h1>
+      <h1 tabindex="-1">Check your rooftop solar quote before you sign</h1>
       <p class="lead">Surya Lekka checks that the numbers on a rooftop solar quote add up, compares the central
         subsidy it shows with the government rule, and lists what to ask the vendor.</p>
 
@@ -54,11 +54,13 @@
         <input id="file-input" type="file" accept="application/pdf,image/jpeg,image/png,image/webp,image/heic,image/heif" multiple>
       </label>
       <p class="hint">Your pages are turned into images on this device first. Only those images are sent for reading. Keep this page open while that happens.</p>
+      <p id="privacy-upload" class="hint"></p>
       <p id="upload-status" class="status" role="status" aria-live="polite"></p>
       <ul id="upload-notes" class="notes"></ul>
       <div id="page-previews" class="previews"></div>
       <div class="actions">
         <button type="button" id="send-pages" class="button" hidden>Read this quote</button>
+        <button type="button" id="retry-upload" class="button" hidden>Try the upload again</button>
         <button type="button" class="button link" data-go="home">Back</button>
       </div>
     </section>

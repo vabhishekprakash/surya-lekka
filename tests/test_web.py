@@ -243,3 +243,44 @@ def test_uploads_send_the_page_plan_with_original_numbers_and_left_out_pages():
     for reason in ('plan.omit("over_limit")', 'plan.omit("too_large")', 'plan.omit("unreadable")'):
         assert reason in pdf
     assert "state.pages.find((p) => p.page === pageNumber)" in APP  # page images by their own number
+
+
+def test_requests_time_out_with_a_clear_message():
+    assert "const API_TIMEOUT_MS = 20000;" in APP and "const UPLOAD_TIMEOUT_MS = 60000;" in APP
+    assert "controller.abort()" in APP and 'new ApiError(0, "timeout", TIMED_OUT)' in APP
+    assert 'showProblem("The checker didn\'t answer in time", error.message)' in APP
+
+
+def test_answers_to_replaced_requests_are_ignored():
+    for name in ("async function submitReview(", "async function submitManual(", "async function startSample(",
+                 "async function confirmOperands("):
+        body = APP[APP.index(name):APP.index("\n}\n", APP.index(name))]
+        assert "nextRequest()" in body and "stillCurrent(seq)" in body, name
+
+
+def test_a_failed_upload_can_be_tried_again_for_the_same_check():
+    assert 'id="retry-upload"' in INDEX and "Try the upload again" in INDEX
+    rest = APP[APP.index("async function uploadRest()"):APP.index("function uploadFailed(")]
+    assert "if (done.has(target.page)) continue;" in rest and "done.add(target.page)" in rest
+    assert "state.upload.until" in APP  # only while the check's upload links last
+
+
+def test_focus_moves_to_every_new_screens_heading_and_confirming_keeps_the_place():
+    assert '<h1 tabindex="-1">' in INDEX
+    show = APP[APP.index("function show(view)"):APP.index("function canShow(")]
+    assert "heading.focus" in show and 'view !== "home"' not in show
+    results = APP[APP.index("function openResults("):APP.index("// With Textract, the opt-out")]
+    assert "keepPlace" in results and "return;" in results
+    assert "openResults(result, { keepPlace: true, focusCheck: check })" in APP
+
+
+def test_an_error_about_a_field_is_linked_to_that_field():
+    assert 'named.setAttribute("aria-invalid", "true")' in APP
+    assert 'named.setAttribute("aria-describedby", status.id)' in APP
+    assert APP.count("markInvalid(") >= 3
+
+
+def test_the_privacy_note_sits_beside_the_upload_button():
+    upload = INDEX[INDEX.index('id="view-upload"'):INDEX.index('id="view-wait"')]
+    assert 'id="privacy-upload"' in upload
+    assert '$("#privacy-upload").textContent = privacy' in APP

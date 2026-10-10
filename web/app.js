@@ -193,7 +193,20 @@ const state = {
   pageImages: [],
   boxIndex: new Map(),
   challenge: null,
+  seq: 0,          // the latest request whose answer may still change the screen
+  upload: null,    // { job, done: Set of upload slots sent, until: ms } while a check's pages go up
 };
+
+// Each request that changes the screen takes a new number; an answer that arrives after a newer
+// request was made is ignored, so a slow old answer never replaces a newer one.
+function nextRequest() {
+  state.seq += 1;
+  return state.seq;
+}
+
+function stillCurrent(seq) {
+  return seq === state.seq;
+}
 
 // ---------------------------------------------------------------- helpers
 
@@ -224,6 +237,24 @@ class ApiError extends Error {
   }
 }
 
+const API_TIMEOUT_MS = 20000;
+const UPLOAD_TIMEOUT_MS = 60000;
+const TIMED_OUT = "The checker took too long to answer. Please try again in a moment.";
+
+// fetch that gives up after ms, so a stalled request ends in a clear message instead of a spinner.
+async function fetchWithin(url, init, ms) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), ms);
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } catch (error) {
+    if (controller.signal.aborted) throw new ApiError(0, "timeout", TIMED_OUT);
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function api(method, path, body) {
   const init = { method };
   if (body !== undefined) {
@@ -232,8 +263,9 @@ async function api(method, path, body) {
   }
   let res;
   try {
-    res = await fetch(API_BASE + path, init);
-  } catch {
+    res = await fetchWithin(API_BASE + path, init, API_TIMEOUT_MS);
+  } catch (error) {
+    if (error instanceof ApiError) throw error;
     throw new ApiError(0, "network", "The checker couldn't be reached. Check your connection and try again.");
   }
   let data = null;
@@ -299,7 +331,8 @@ function show(view) {
   for (const label of $$("[data-mode-label]")) label.textContent = MODE_LABELS[state.mode] || "";
   window.scrollTo(0, 0);
   const heading = $(`[data-view="${view}"] h1, [data-view="${view}"] h2`);
-  if (heading && view !== "home") heading.focus({ preventScroll: true });
+  if (heading && state.started) heading.focus({ preventScroll: true });
+  state.started = true;  // the first screen on load keeps the browser's own focus
 }
 
 function canShow(view) {
@@ -337,6 +370,8 @@ function showApiError(error) {
     showProblem("New checks are paused", error.message);  // samples and typed checks pause too
   } else if (error.code === "network") {
     showProblem("The checker couldn't be reached", error.message);
+  } else if (error.code === "timeout") {
+    showProblem("The checker didn't answer in time", error.message);
   } else if (error.status === 404 && error.code === "not_found") {
     showProblem("This check is no longer available", "Please start again.");
   } else {
@@ -350,10 +385,13 @@ async function startSample(sampleId) {
   const buttons = $$("[data-sample]");
   buttons.forEach((b) => { b.disabled = true; });
   resetUpload();  // a sample has no page images of its own
+  const seq = nextRequest();
   try {
     const job = await api("POST", `/samples/${encodeURIComponent(sampleId)}`);
+    if (!stillCurrent(seq)) return;
     newJob(job, job.mode);
     const view = await api("GET", jobPath());
+    if (!stillCurrent(seq)) return;
     if (view.status === "done") openReview(view);
     else startWaiting();
   } catch (error) {
@@ -421,6 +459,8 @@ function resetUpload() {
   $("#upload-notes").replaceChildren();
   $("#page-previews").replaceChildren();
   $("#send-pages").hidden = true;
+  $("#retry-upload").hidden = true;
+  state.upload = null;
 }
 
 function uploadStatus(text, isError = false) {
@@ -569,8 +609,9 @@ async function postForm(target, blob) {
   form.append("file", blob);
   let res;
   try {
-    res = await fetch(target.url, { method: "POST", body: form });
-  } catch {
+    res = await fetchWithin(target.url, { method: "POST", body: form }, UPLOAD_TIMEOUT_MS);
+  } catch (error) {
+    if (error instanceof ApiError) throw new ApiError(0, "network", "A page took too long to upload. Please try again.");
     throw new ApiError(0, "network", "A page didn't upload. Check your connection and try again.");
   }
   if (!res.ok) throw new ApiError(res.status, "upload_failed", "A page didn't upload. Please try again.");
@@ -584,16 +625,51 @@ async function sendPages() {
     uploadStatus("Starting the check");
     const job = await api("POST", "/jobs", state.plan.request());
     newJob(job, job.mode || "nova");
-    for (const target of job.uploads) {  // upload slot n holds the nth page kept
-      uploadStatus(`Uploading page ${pages[target.page - 1].page} (${target.page} of ${pages.length})`);
-      await postForm(target, pages[target.page - 1].blob);
-    }
-    const manifest = new Blob([JSON.stringify(job.manifest_body)], { type: "application/json" });
-    await postForm(job.manifest, manifest);
-    startWaiting();
+    state.upload = { job, done: new Set(), until: Date.now() + (job.expires_in || 0) * 1000 };
+    await uploadRest();
   } catch (error) {
-    if (error.code === "upload_failed" || error.code === "network") uploadStatus(error.message, true);
-    else showApiError(error);
+    uploadFailed(error);
+  } finally {
+    button.disabled = false;
+  }
+}
+
+// Sends the pages (and then the manifest) not yet sent for this check, so a failed upload can
+// be tried again for the same check while its upload links last.
+async function uploadRest() {
+  const { job, done } = state.upload;
+  const pages = state.pages;
+  for (const target of job.uploads) {  // upload slot n holds the nth page kept
+    if (done.has(target.page)) continue;
+    uploadStatus(`Uploading page ${pages[target.page - 1].page} (${target.page} of ${pages.length})`);
+    await postForm(target, pages[target.page - 1].blob);
+    done.add(target.page);
+  }
+  const manifest = new Blob([JSON.stringify(job.manifest_body)], { type: "application/json" });
+  await postForm(job.manifest, manifest);
+  state.upload = null;
+  $("#retry-upload").hidden = true;
+  startWaiting();
+}
+
+function uploadFailed(error) {
+  if (error.code === "upload_failed" || error.code === "network") {
+    const canRetry = state.upload && Date.now() < state.upload.until - 5000;
+    uploadStatus(canRetry ? `${error.message} Pages already sent are kept.`
+      : `${error.message} The upload links have expired, so please send the pages again.`, true);
+    $("#retry-upload").hidden = !canRetry;
+  } else {
+    showApiError(error);
+  }
+}
+
+async function retryUpload() {
+  const button = $("#retry-upload");
+  button.disabled = true;
+  try {
+    await uploadRest();
+  } catch (error) {
+    uploadFailed(error);
   } finally {
     button.disabled = false;
   }
@@ -1093,13 +1169,17 @@ async function submitReview(event) {
     state.confirmedOperands = new Set();
     const body = { ...collectReview(), confirmed_operands: [] };
     state.lastRequest = { path: jobPath("/checks"), body };
+    const seq = nextRequest();
+    clearInvalid($("#review-form"));
     const result = await api("POST", state.lastRequest.path, body);
+    if (!stillCurrent(seq)) return;
     status.textContent = "";
     openResults(result);
   } catch (error) {
     if (error.status === 400) {
       status.textContent = `${error.message} Please check the values you changed.`;
       status.classList.add("error");
+      markInvalid($("#review-form"), error.message, status);
     } else {
       status.textContent = "";
       showApiError(error);
@@ -1203,7 +1283,10 @@ async function submitManual(event) {
     state.confirmedOperands = new Set();
     const body = { ...collectManual(), challenge: state.challenge, confirmed_operands: [] };
     state.lastRequest = { path: "/checks", body };
+    const seq = nextRequest();
+    clearInvalid($("#manual-form"));
     const result = await api("POST", "/checks", body);
+    if (!stillCurrent(seq)) return;
     status.textContent = "";
     state.mode = "manual";
     state.job = null;
@@ -1216,12 +1299,32 @@ async function submitManual(event) {
     if (error.status === 400) {
       status.textContent = error.message;
       status.classList.add("error");
+      markInvalid($("#manual-form"), error.message, status);
     } else {
       status.textContent = "";
       showApiError(error);
     }
   } finally {
     button.disabled = false;
+  }
+}
+
+// An error about one field is announced and linked to that field, so a screen reader reads it there.
+function markInvalid(form, message, status) {
+  const named = $$("input[name], input[data-path], select[name]", form).find((input) => {
+    const name = input.name || input.dataset.path;
+    return name && (message.startsWith(`${name} `) || message.includes(` ${name} `) || message.includes(`${name}:`));
+  });
+  if (!named) return;
+  named.setAttribute("aria-invalid", "true");
+  named.setAttribute("aria-describedby", status.id);
+  named.focus();
+}
+
+function clearInvalid(form) {
+  for (const input of $$("[aria-invalid]", form)) {
+    input.removeAttribute("aria-invalid");
+    input.removeAttribute("aria-describedby");
   }
 }
 
@@ -1291,8 +1394,12 @@ async function confirmOperands(token, button) {
   const body = { ...state.lastRequest.body, confirmed_operands: [...state.confirmedOperands] };
   if (state.lastRequest.path === "/checks") body.challenge = state.challenge;
   state.lastRequest = { ...state.lastRequest, body };
+  const seq = nextRequest();
+  const check = button.closest("article") && button.closest("article").dataset.check;
   try {
-    openResults(await api("POST", state.lastRequest.path, body));
+    const result = await api("POST", state.lastRequest.path, body);
+    if (!stillCurrent(seq)) return;
+    openResults(result, { keepPlace: true, focusCheck: check });
   } catch (error) {
     state.confirmedOperands.delete(token);
     button.disabled = false;
@@ -1319,7 +1426,7 @@ function findingCard(f) {
       text: `Rule: ${RULES[f.rule_id]}. It applies to applications on the National Portal from ${formatDate(f.rule_date)}.` })
     : f.rule_id ? el("p", { class: "rule", text: `Rule: ${f.rule_id}${f.rule_date ? `, dated ${formatDate(f.rule_date)}` : ""}.` })
       : null;
-  return el("article", { class: `finding status-${f.status}` },
+  return el("article", { class: `finding status-${f.status}`, "data-check": `${f.check_id}|${f.item || ""}` },
     el("h4", {}, title, " ", el("span", { class: `badge status-${f.status}`, text: STATUS_WORDS[f.status][0] })),
     el("p", { text: f.message }),
     operandQuestion(f) || (evidence.length ? el("ul", {}, evidence) : null),
@@ -1356,7 +1463,7 @@ function renderVendor(result) {
     el("div", { class: "actions" }, copy, whatsapp, copyStatus));
 }
 
-function openResults(result) {
+function openResults(result, { keepPlace = false, focusCheck = null } = {}) {
   state.result = result;
   if (result.challenge) state.challenge = result.challenge;  // typed-in numbers: tokens are signed for it
   state.entryChecks = result.entry_checks || [];
@@ -1379,6 +1486,15 @@ function openResults(result) {
       el("h3", { text: STATUS_WORDS[status][1] }),
       findings.filter((f) => f.status === status).map(findingCard))));
   renderVendor(result);
+  if (keepPlace && state.view === "results") {
+    // After "Yes" the screen stays where it was; focus moves to the same check's updated card.
+    const card = focusCheck && $(`article[data-check="${CSS.escape(focusCheck)}"] h4`);
+    if (card) {
+      card.setAttribute("tabindex", "-1");
+      card.focus({ preventScroll: false });
+    }
+    return;
+  }
   go("results");
 }
 
@@ -1394,7 +1510,9 @@ function privacyLine(region, crossRegion, engine, optOut) {
 }
 
 function init() {
-  $("#privacy-line").textContent = privacyLine(String(CONFIG.REGION || ""), CONFIG.CROSS_REGION === true, String(CONFIG.ENGINE || ""), CONFIG.AI_OPT_OUT === true);
+  const privacy = privacyLine(String(CONFIG.REGION || ""), CONFIG.CROSS_REGION === true, String(CONFIG.ENGINE || ""), CONFIG.AI_OPT_OUT === true);
+  $("#privacy-line").textContent = privacy;
+  $("#privacy-upload").textContent = privacy;  // the same notice, beside the upload button
   document.addEventListener("click", (event) => {
     const target = event.target.closest("[data-go]");
     if (!target) return;
@@ -1407,6 +1525,7 @@ function init() {
     if (files.length) prepareFiles(files);
   });
   $("#send-pages").addEventListener("click", sendPages);
+  $("#retry-upload").addEventListener("click", retryUpload);
   $("#problem-retry").addEventListener("click", retryJob);
   $("#review-form").addEventListener("submit", submitReview);
   $("#manual-form").addEventListener("submit", submitManual);
