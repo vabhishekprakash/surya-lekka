@@ -226,3 +226,48 @@ def test_telugu_never_drops_vendor_questions_english_has(tmp_path):
                          encoding="utf-8", timeout=60)
     assert run.returncode == 0, run.stderr
     assert json.loads(run.stdout) == {"no_lines": "MissingText", "short": "MissingText", "complete": "ok"}
+
+
+def test_a_changed_value_reads_the_app_read_then_you_changed_it_with_units():
+    code = r"""
+import * as R from './web/results.js'; import pack from './web/te.js';
+const el = (tag, attrs = {}, ...kids) => ({ text: attrs.text || '', kids: kids.flat().filter((k) => k != null), addEventListener() {} });
+const flat = (n) => typeof n === 'string' ? n : [n.text, ...n.kids.map(flat)].join('');
+const f = { check_id: 'C1_capacity', status: 'needs_confirmation', message: 'Are these the numbers on your quote?',
+  message_key: 'confirm.operands', message_parts: {}, notes: [], notes_parts: [], evidence: [], confirm_token: 't',
+  operands_confirmed: false, operands: [{ field: 'module_groups[0].wattage_w', value: '500', raw: '500',
+  source: 'you typed this' }] };
+const out = {};
+for (const [name, lang] of [['en', R.ENGLISH], ['te', R.language(pack)]]) {
+  const ctx = { el, lang, mode: 'saved', option: '', entryChecks: 0, onConfirm() {}, onFix() {}, copyText() {},
+    readingField: () => ({ value: { raw: '550 W' }, evidence_text: 'Solar modules: 550 W', page: 1 }),
+    quoteButton: (p, t) => el('q', { text: t }), pageButton: () => null };
+  out[name] = flat(R.findingCard(f, ctx));
+}
+console.log(JSON.stringify(out));
+"""
+    run = subprocess.run([NODE, "--input-type=module", "-e", code], capture_output=True, text=True, cwd=ROOT,
+                         encoding="utf-8", timeout=60)
+    assert run.returncode == 0, run.stderr
+    out = json.loads(run.stdout)
+    assert "Panel wattage: The app read 550 W; you changed it to 500 W. Page 1: " in out["en"]
+    assert "(you typed this). Read from the quote" not in out["en"]
+    assert "యాప్ చదివినప్పుడు 550 W అని వచ్చింది; మీరు దాన్ని 500 W గా మార్చారు." in out["te"]
+
+
+def test_native_review_status_words_are_distinct_and_in_place():
+    pack = json.loads((ROOT / "web" / "i18n" / "te.json").read_text(encoding="utf-8"))
+    ui, strings = pack["ui"], pack["strings"]
+    badges = {s: ui[f"status.{s}.badge"] for s in ("consistent", "inconsistent", "needs_confirmation", "missing",
+                                                   "out_of_scope")}
+    assert badges == {"consistent": "సరిపోయింది", "inconsistent": "తేడా ఉంది", "needs_confirmation": "మీరు సరిచూడాలి",
+                      "missing": "కనిపించలేదు", "out_of_scope": "ఈ యాప్ చూడదు"}
+    assert len(set(badges.values())) == 5
+    text = "\n".join(list(ui.values()) + [v for k, v in strings.items() if not k.startswith("question.")])
+    for gone in ("రివ్యూ స్క్రీన్", "రీడింగ్", "National Portal", "క్రాస్-రీజియన్", "ఆప్ట్ అవుట్", "ప్రాసెస్ కాలేదు",
+                 "రాతపూర్వకంగా", "అసాధారణ", "నాడు గానీ", "} నాడు", " మరియు "):
+        assert gone not in text, gone
+    assert "నిర్ధారించండి" not in text  # household-facing wording asks them to check once and tell
+    assert "నిర్ధారించగలరా" in strings["question.panel_details"]  # the vendor message keeps it
+    assert ui["results.edit"] in strings["C3.charge_inside"]  # names the button by its exact label
+    assert strings["join.and"] == " ఇంకా "

@@ -1,8 +1,11 @@
 """Build the Telugu pack the results screen loads (web/te.js) from web/i18n/te.json.
 
     python scripts/build_telugu.py                     # te.json -> te.js
-    python scripts/build_telugu.py --apply REVIEWED.csv --draft DRAFT.csv --new NEW.csv
+    python scripts/build_telugu.py --apply REVIEWED.csv --draft DRAFT.csv --new NEW.csv [--changes CHANGES.csv]
                                                        # check, then write te.json from the review
+
+--changes applies later edits (key, kind, English, before, after), such as a native speaker's
+wording, on top of the review; each "after" passes the same checks.
 
 --apply checks the reviewed CSV (UTF-8, every key and English line the same as the app's current
 strings, the drafts unchanged) and every Telugu line, reviewed or new: the same {placeholders},
@@ -77,7 +80,7 @@ def read_csv(path):
     return list(csv.DictReader(raw.decode("utf-8-sig").splitlines()))
 
 
-def apply(reviewed_path, draft_path, new_path):
+def apply(reviewed_path, draft_path, new_path, changes_path=None):
     en = english()
     reviewed, draft, new = read_csv(reviewed_path), read_csv(draft_path), read_csv(new_path)
     found = []
@@ -110,6 +113,16 @@ def apply(reviewed_path, draft_path, new_path):
             found.append(f"{key}: English differs from the current string")
         found += problems(key, r["English"], r["Telugu"])
         (strings if kind == "vocab" else ui)[key] = r["Telugu"]
+    changed = 0
+    for r in read_csv(changes_path) if changes_path else []:
+        key, kind = r["key"], r["kind"]
+        table = en["strings"] if kind == "vocab" else en["ui"]
+        if key not in table or r["English"] != table[key]:
+            found.append(f"{key}: not a current {kind} key, or its English changed")
+            continue
+        found += problems(key, r["English"], r["after"])
+        (strings if kind == "vocab" else ui)[key] = r["after"]
+        changed += 1
     missing_ui = sorted(set(en["ui"]) - set(ui))
     missing_vocab = sorted(k for k in set(en["strings"]) - set(strings) if not PUNCTUATION.match(en["strings"][k])
                            or re.search(r"[A-Za-z]", PLACEHOLDER.sub("", en["strings"][k])))
@@ -121,13 +134,14 @@ def apply(reviewed_path, draft_path, new_path):
         return 1
     pack = {
         "_status": "reviewed: Amazon Translate draft corrected by a reviewer, checked by an independent back-translation",
-        "_source": "scripts/build_telugu.py --apply (te_review_reviewed.csv and te_results_screen.csv)",
+        "_source": "scripts/build_telugu.py --apply (te_review_reviewed.csv, te_results_screen.csv"
+                   + (", te_native_review.csv)" if changes_path else ")"),
         "language": "te", "strings": dict(sorted(strings.items())), "ui": dict(sorted(ui.items())),
     }
     TE_JSON.write_text(json.dumps(pack, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
     written = sum(v.count(ZWNJ) for v in strings.values())
     print(f"te.json: {len(strings)} message strings ({len(reviewed)} reviewed, {len(strings) - len(reviewed)} new), "
-          f"{len(ui)} screen strings; U+200C kept {written} of {kept_zwnj + sum(r['Telugu'].count(ZWNJ) for r in new if r['kind'] == 'vocab')}")
+          f"{len(ui)} screen strings, {changed} later changes; U+200C kept {written} of {kept_zwnj + sum(r['Telugu'].count(ZWNJ) for r in new if r['kind'] == 'vocab')}")
     return build()
 
 
@@ -154,9 +168,10 @@ def main(argv=None):
     p.add_argument("--apply", metavar="REVIEWED_CSV")
     p.add_argument("--draft")
     p.add_argument("--new")
+    p.add_argument("--changes")
     args = p.parse_args(argv)
     if args.apply:
-        return apply(args.apply, args.draft, args.new)
+        return apply(args.apply, args.draft, args.new, args.changes)
     return build()
 
 
