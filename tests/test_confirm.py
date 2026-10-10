@@ -117,17 +117,34 @@ def option_answers(option):
     return {**ANSWERS, "gst_treatment": "included", "multiple_options": True, "selected_option": option}
 
 
-def test_an_option_switch_after_confirming_clears_the_confirmation():
+def bound(quote, revision, **inputs):
+    """run_checks as the API runs it: tokens signed for one job and its review revision."""
+    return run_checks(copy.deepcopy(quote), {"corrections": {}, **inputs},
+                      binding={"key": b"test key", "job": "job-1", "revision": revision})
+
+
+def test_every_option_switch_clears_the_confirmation_even_back_to_the_first():
     quote = option_quote()
     A, B = sorted(quote["option_fields"])  # the option ids this table gives
-    a = run(quote, confirmations=option_answers(A))
-    a_tokens = tokens(a)
-    assert by_id(run(quote, confirmations=option_answers(A), confirmed_operands=a_tokens))[
+    a_tokens = tokens(bound(quote, 1, confirmations=option_answers(A)))
+    assert by_id(bound(quote, 1, confirmations=option_answers(A), confirmed_operands=a_tokens))[
         ("C3_gross_total", None)]["status"] == "consistent"
-    b = by_id(run(quote, confirmations=option_answers(B), confirmed_operands=a_tokens))
+    # The API moves the revision on with every change of answers, the option included.
+    b = by_id(bound(quote, 2, confirmations=option_answers(B), confirmed_operands=a_tokens))
     assert b[("C3_gross_total", None)]["status"] == "needs_confirmation"
-    back = by_id(run(quote, confirmations=option_answers(A), confirmed_operands=a_tokens))
-    assert back[("C3_gross_total", None)]["status"] == "consistent"  # A's own numbers, unchanged
+    back = by_id(bound(quote, 3, confirmations=option_answers(A), confirmed_operands=a_tokens))
+    assert back[("C3_gross_total", None)]["status"] == "needs_confirmation"  # A to B to A asks again
+
+
+def test_tokens_bind_to_the_job_and_the_key():
+    quote, corrections = typed_quote()
+    signed = run_checks(quote, {"corrections": corrections, "confirmations": ANSWERS},
+                        binding={"key": b"k", "job": "job-1", "revision": 0})
+    for binding in ({"key": b"k", "job": "job-2", "revision": 0}, {"key": b"other", "job": "job-1", "revision": 0},
+                    {"key": b"k", "job": "job-1", "revision": 1}, None):
+        result = run_checks(quote, {"corrections": corrections, "confirmations": ANSWERS,
+                                    "confirmed_operands": tokens(signed)}, binding=binding)
+        assert not [f for f in result["findings"] if f["status"] in DEFINITIVE], binding
 
 
 def test_a_value_tick_does_not_follow_an_option_switch():

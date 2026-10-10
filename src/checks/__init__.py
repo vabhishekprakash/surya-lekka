@@ -41,12 +41,13 @@ def _annotate(findings, page_texts):
                 e["evidence_status"] = verify_evidence(e, page_texts)
 
 
-def run_checks(quote, user_inputs=None, page_texts=None, rules=None):
+def run_checks(quote, user_inputs=None, page_texts=None, rules=None, binding=None):
     """Run every check on a contract v1 quote after applying the user's inputs.
 
     Deterministic: the same quote and inputs always give the same result, and
     running again on result["quote"] with the same inputs changes nothing.
-    page_texts (optional) adds an evidence_status to each quoted evidence entry.
+    page_texts (optional) adds an evidence_status to each quoted evidence entry. binding
+    (optional, from the API) signs every token for one job and review revision, or one challenge.
     """
     original = copy.deepcopy(quote)
     verified = confirm.tokens((user_inputs or {}).get("verified"))
@@ -54,8 +55,9 @@ def run_checks(quote, user_inputs=None, page_texts=None, rules=None):
     effective, corrected = apply_user_inputs(quote, user_inputs)
     selected = ((effective.get("flags") or {}).get("user_confirmed") or {}).get("selected_option")
     option = effective_option(effective)
-    to_check = check_this.mark(effective, selected, option, verified=verified)
-    entries = guards.check(effective, selected, option, verified=verified)
+    sign_values, sign_operands = confirm.signers(binding)
+    to_check = check_this.mark(effective, selected, option, verified=verified, sign=sign_values)
+    entries = guards.check(effective, selected, option, verified=verified, sign=sign_values)
     view = normalise(effective)
     findings = [
         check_capacity(view),
@@ -65,7 +67,7 @@ def run_checks(quote, user_inputs=None, page_texts=None, rules=None):
         *check_missing_details(view),
     ]
     _ask_for_typed_numbers(findings, view)
-    confirm.hold_until_confirmed(findings, view, option, confirmed)
+    confirm.hold_until_confirmed(findings, view, option, confirmed, sign=sign_operands)
     _add_keys(findings)
     if page_texts is not None:
         _annotate(findings, page_texts)

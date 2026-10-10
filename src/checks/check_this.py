@@ -87,7 +87,7 @@ def _paths(quote, selected, own_option):
             yield f"flags.{name}", None, field
 
 
-def mark(quote, selected, own_option, config=None, verified=()):
+def mark(quote, selected, own_option, config=None, verified=(), sign=None):
     """Mark each value that needs checking with "check_this": [reasons], in place, and
     return [{"path", "option_id", "reasons", "value", "token"}] sorted by option and path. A
     value whose token (its option, field and value) the household verified needs nothing more;
@@ -95,7 +95,7 @@ def mark(quote, selected, own_option, config=None, verified=()):
     out, verified = [], set(verified)
     for path, option_id, field in _paths(quote, selected, own_option):
         found = reasons(field, config)
-        token = value_token(path, own_option, field) if field else None
+        token = value_token(path, own_option, field, sign) if field else None
         if found and "conflict" not in found and token in verified:
             field["verified"] = True
             found = []

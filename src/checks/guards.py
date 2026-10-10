@@ -76,14 +76,14 @@ def _times(a, b):
     return next((t for t in DATA["scale_ratios"] if abs(ratio / t - 1) <= tolerance), None)
 
 
-def check(quote, selected, own_option, verified=()):
+def check(quote, selected, own_option, verified=(), sign=None):
     """[{"path", "reason", "params", "message", "token"}] for typed numbers to confirm, sorted by
     path; each such field gets "entry_check" in place. A typed number whose token (its option,
     field and value) the household confirmed is used as typed."""
     fields = {path: field for path, _, field in _paths(quote, selected, own_option) if field}
     verified = set(verified)
     typed = {p for p, f in fields.items() if f.get("provenance") == TYPED
-             and value_token(p, own_option, f) not in verified}
+             and value_token(p, own_option, f, sign) not in verified}
     values = {p: v for p, f in fields.items() if (v := _value(p, f)) is not None}
     out = {}
     for path in sorted(typed):
@@ -122,7 +122,7 @@ def check(quote, selected, own_option, verified=()):
                     out[m] = {"path": m, "reason": "scale", "params": {"times": times}}
     for path, entry in out.items():
         entry["message"] = message(entry)
-        entry["token"] = value_token(path, own_option, fields[path])
+        entry["token"] = value_token(path, own_option, fields[path], sign)
         fields[path]["entry_check"] = entry["reason"]
     return [out[p] for p in sorted(out)]
 

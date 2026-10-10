@@ -9,9 +9,15 @@ confirmation no longer applies. A correction is never a confirmation by itself.
 
 The same tokens bind a value the household ticked ("check this") or a typed number it
 confirmed to the option, field and value it saw.
+
+Behind the API, tokens are HMAC-SHA256 with a per-stack secret over a scope as well: the job
+and its review revision (or, for typed-in numbers, a signed challenge), so the server accepts
+only tokens it issued for that job and its current revision. Without a key (local runs, tests)
+they are a plain SHA-256 of the same payload.
 """
 
 import hashlib
+import hmac
 import json
 
 from .common import NEEDS_CONFIRMATION, jsonable
@@ -21,15 +27,39 @@ QUESTION = "Are these the numbers on your quote?"
 _DETAIL_FIELDS = ("dcr_declaration", "vendor_registration", "gst_treatment")
 
 
-def _token(payload):
+def _plain(payload):
     text = json.dumps(payload, sort_keys=True, ensure_ascii=False, default=str)
     return hashlib.sha256(text.encode("utf-8")).hexdigest()[:24]
 
 
-def value_token(path, option, field):
+def signer(key=None, scope=None):
+    """A token function. With a key, HMAC-SHA256 over the scope (job and revision, or a
+    challenge) and the payload; without one, a plain SHA-256 of the payload."""
+    if not key:
+        return _plain
+
+    def sign(payload):
+        text = json.dumps({"scope": scope or {}, "payload": payload}, sort_keys=True, ensure_ascii=False, default=str)
+        return hmac.new(key, text.encode("utf-8"), hashlib.sha256).hexdigest()
+    return sign
+
+
+def signers(binding=None):
+    """(sign values, sign operand sets) for run_checks' binding: {"key", "job", "revision"} or
+    {"key", "challenge"}. A ticked value is bound to the job or challenge, its option, field and
+    value; an operand set also to the review revision, so any change of answers, values or
+    option asks again."""
+    if not binding:
+        return _plain, _plain
+    base = {k: binding[k] for k in ("job", "challenge") if binding.get(k) is not None}
+    return (signer(binding["key"], base),
+            signer(binding["key"], {**base, "revision": binding.get("revision")}))
+
+
+def value_token(path, option, field, sign=None):
     """Token for one value as the household sees it, in the option being checked."""
-    return _token({"path": path, "option": option, "value": jsonable((field or {}).get("value")),
-                   "provenance": (field or {}).get("provenance") or "read"})
+    return (sign or _plain)({"path": path, "option": option, "value": jsonable((field or {}).get("value")),
+                             "provenance": (field or {}).get("provenance") or "read"})
 
 
 def _operand(e):
@@ -63,7 +93,7 @@ def operands(finding, view):
     return [_operand(e) for e in evidence if e.get("kind") in ("quoted", "user_corrected")]
 
 
-def hold_until_confirmed(findings, view, option, confirmed):
+def hold_until_confirmed(findings, view, option, confirmed, sign=None):
     """Hold each definitive finding at "needs confirmation" unless the household confirmed its
     exact operand set; in place. Every definitive finding gets "operands" and "confirm_token"."""
     confirmed = set(confirmed or ())
@@ -71,7 +101,7 @@ def hold_until_confirmed(findings, view, option, confirmed):
         if f["status"] not in DEFINITIVE:
             continue
         ops = operands(f, view)
-        token = _token({"check": f["check_id"], "item": f.get("item"), "option": option, "operands": ops})
+        token = (sign or _plain)({"check": f["check_id"], "item": f.get("item"), "option": option, "operands": ops})
         f["operands"], f["confirm_token"] = ops, token
         if token in confirmed:
             f["operands_confirmed"] = True
