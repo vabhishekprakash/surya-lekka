@@ -283,7 +283,7 @@ def _option_rows(grid, header, confidence, threshold=CONFIDENCE_THRESHOLD, heade
     for r in sorted({r for r, _ in grid}):
         cells = {c: t for (rr, c), t in grid.items() if rr == r}
         text = " | ".join(t for _, t in sorted(cells.items()) if t)
-        if COMPONENT.search(text):
+        if COMPONENT.search(text) or src.out_of_scope(text):
             continue
         for col in capacity_cols:
             cell = cells.get(col, "")
@@ -417,8 +417,11 @@ def _items(table_items, loose, keys, page_number, conflicts, list_name):
             for raw, evidence in values:
                 if not any(key in it and _value_key(_field_of(key), it[key][0][0]) == _value_key(_field_of(key), raw)
                            for it in items):
+                    # It disagrees with each row that has the key; it never fills a row that lacks
+                    # it when there are several rows to choose from.
                     for it in items:
-                        it.setdefault(key, []).append((raw, evidence))
+                        if key in it or len(items) == 1:
+                            it.setdefault(key, []).append((raw, evidence))
     else:
         indexed = {}
         for key, values in loose.items():
@@ -482,7 +485,7 @@ def map_page(reply, page_number, threshold=CONFIDENCE_THRESHOLD, sources=None, e
             if any(page.line_confidence(l) < threshold for l in lines):
                 entry["why"] = "low_confidence"
                 continue
-            if src.denied(evidence):  # "Subsidy not applicable", "not included", "optional"
+            if src.out_of_scope(evidence):  # "Subsidy not applicable", "not supplied", "optional"
                 entry["why"] = "negated"
                 continue
             if kind == "amount" and not _amount_on_its_line(raw, evidence, alias):
@@ -601,6 +604,13 @@ def map_page(reply, page_number, threshold=CONFIDENCE_THRESHOLD, sources=None, e
             if len(headings) >= 2:  # option sections on the page: a row without its option binds to none
                 g = [x for x in g if x.get("option_id")]
                 i = [x for x in i if x.get("option_id")]
+            quarantined = [x for x in g + i if x.get("option_unreadable")]
+            if quarantined:  # an option column whose cell can't be read: the row binds to nothing
+                g = [x for x in g if not x.get("option_unreadable")]
+                i = [x for x in i if not x.get("option_unreadable")]
+                kept = [("yes", (g + i)[0]["evidence"])] if g + i else []
+                conflicts.append(("flag", "multiple_options",
+                                  kept + [("not_stated", x["evidence"]) for x in quarantined]))
             for row in g + i:
                 option = row.get("option_id")
                 if option and not any(o["option_id"] == option for o in wire["options"]):
@@ -697,6 +707,9 @@ def to_contract(wire, batch):
         if conflict[0] == "item":
             _, list_name, index, key, candidates = conflict
             out[list_name][index][key] = _conflict_field(key, candidates, page, batch)
+        elif conflict[0] == "flag":
+            _, name, candidates = conflict
+            out["flags"]["model_proposed"][name] = _conflict_field(name, candidates, page, batch)
         else:
             _, name, candidates = conflict
             out[name] = _conflict_field(name, candidates, page, batch)

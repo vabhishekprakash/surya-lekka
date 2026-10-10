@@ -42,20 +42,24 @@ _GST = re.compile(r"\b(?:gst|cgst|sgst|igst)\b", re.I)
 _BASE = re.compile(r"\bbasic\b|\bbase\s+(?:price|value|cost|amount)\b|\bsub[\s-]?total\b|\bbefore\s+gst\b"
                    r"|\btaxable\s+(?:value|amount)\b|\bexcl(?:uding|usive\s+of|\.)?\s+gst\b", re.I)
 _TOTAL = re.compile(r"\bgrand\s+total\b|\btotal\b|\bpayable\b", re.I)
-_NEGATION = re.compile(r"\bnot\s+(?:included|applicable|available|considered|in\s+(?:our\s+)?scope)\b"
-                       r"|\bno\s+subsidy\b|\bwithout\s+(?:the\s+)?subsidy\b|\bexcluding\s+(?!gst\b)\w"
-                       r"|\bexclusive\s+of\s+(?!gst\b)\w|\bnil\b|\bexcluded\b|\boptional\b"
-                       r"|\bby\s+(?:the\s+)?(?:customer|client|owner|buyer|consumer)\b", re.I)
+_PARTY = r"(?:customer|client|owner|buyer|consumer|purchaser)(?:'?s)?"
+_SCOPE = re.compile(r"\bnot\s+(?:included|applicable|available|considered|supplied|provided|offered|part\s+of"
+                    r"|in\s+(?:our\s+)?scope)\b"
+                    r"|\bno\s+subsidy\b|\bwithout\s+(?:the\s+)?subsidy\b|\bexcluding\s+(?!gst\b)\w"
+                    r"|\bexclusive\s+of\s+(?!gst\b)\w|\bnil\b|\bexcluded\b|\boptional\b"
+                    rf"|\bby\s+(?:the\s+)?{_PARTY}\b|\b{_PARTY}\s+scope\b|\bscope\s+of\s+(?:the\s+)?{_PARTY}\b",
+                    re.I)
 # "Total before subsidy" is a total: relations to the subsidy are read before the subsidy keyword.
 _BEFORE_SUBSIDY = re.compile(r"\b(?:before|without|excluding|exclusive\s+of|prior\s+to)\s+(?:the\s+)?"
                              r"(?:central\s+|state\s+|govt\.?\s+|government\s+)?(?:subsidy|cfa)\b", re.I)
 _PRICE_WORD = re.compile(r"\btotal\b|\bcost\b|\bprice\b|\bamount\b|\bpayable\b|\bvalue\b", re.I)
 
 
-def denied(text):
-    """True when a line or row denies or limits what it names: not included, excluded,
-    optional, by the customer, no subsidy."""
-    return bool(_NEGATION.search(_BEFORE_SUBSIDY.sub(" ", " ".join(str(text).split()))))
+def out_of_scope(text):
+    """True when a line, row or answer's line denies or limits what it names: not supplied,
+    not provided, not included, excluded, optional, not in scope, by the customer, customer
+    scope, no subsidy. Every source asks this one function."""
+    return bool(_SCOPE.search(_BEFORE_SUBSIDY.sub(" ", " ".join(str(text).split()))))
 
 
 _TOTAL_REFERENCE = re.compile(r"\(?\b(?:included|includes|including|inside|outside|part|not\s+part|added)\s+"
@@ -67,8 +71,10 @@ def role(text):
     """The one price role a label or line names: base_price, gst_amount, gross_total,
     net_cost or subsidy. None when it names none, more than one, or a negation."""
     t = _TOTAL_REFERENCE.sub(" ", " ".join(str(text).split()))  # "(included in Grand Total)" is another line's
-    if denied(t):
+    if out_of_scope(t):
         return None
+    if _BEFORE_SUBSIDY.search(t) and _NET.search(t):
+        return None  # "Net cost before subsidy": two roles for one amount
     if _NET.search(t):
         return "net_cost"
     if _BEFORE_SUBSIDY.search(t):
@@ -186,7 +192,7 @@ def line_candidates(text, evidence, occurrence, source):
     """Candidates from one line (or a FORMS pair read as a line). A line that denies or
     limits what it names gives nothing."""
     out = []
-    if denied(text):
+    if out_of_scope(text):
         return out
     price_role = role(text)
     if price_role:
@@ -202,7 +208,7 @@ def line_candidates(text, evidence, occurrence, source):
         if watts:
             out.append(candidate("panel_wattage", watts, evidence, occurrence, True, source))
     elif (_CAPACITY_LABEL.search(text) and not _INVERTER.search(text) and not _PANEL.search(text)
-          and not _NEGATION.search(text)):
+          and not out_of_scope(text)):
         cap = one_measure(text, ("kw", "kwp", "w", "wp"))
         if cap:
             out.append(candidate("stated_capacity", cap, evidence, occurrence, True, source))
@@ -267,7 +273,7 @@ def bom_candidates(grid, header, confidence, threshold, table_no, row_merged=fro
         cells = {c: t for (rr, c), t in grid.items() if rr == r}
         desc = " ".join(cells.get(c, "") for c in cols["desc"])
         row_text = " | ".join(t for _, t in sorted(cells.items()) if t)
-        if denied(row_text):
+        if out_of_scope(row_text):
             continue
 
         def sure(col_list):
@@ -285,6 +291,7 @@ def bom_candidates(grid, header, confidence, threshold, table_no, row_merged=fro
             continue
         rating, make = sure(cols["rating"]), sure(cols["make"]).strip() or None
         option = sure(cols["option"]).strip() or None
+        unreadable = bool(cols["option"]) and option is None  # empty or below the threshold
         occurrence = ("table", table_no, r)
         if _PANEL.search(desc) and not _INVERTER.search(desc):
             qty = sure([qty_col])
@@ -296,14 +303,14 @@ def bom_candidates(grid, header, confidence, threshold, table_no, row_merged=fro
             watts = one_measure(rating, ("w", "wp")) or one_measure(desc, ("w", "wp"))
             if count or watts:
                 groups.append({"count": count, "wattage": watts, "make_model": make, "evidence": row_text,
-                               "occurrence": occurrence, "option_id": option})
+                               "occurrence": occurrence, "option_id": option, "option_unreadable": unreadable})
         elif _INVERTER.search(desc) and not _PANEL.search(desc):
             kw = one_measure(rating, ("kw", "kva", "w"))
             if not kw and not _INPUT.search(desc):
                 kw = one_measure(desc, ("kw", "kva", "w"))
             if kw or make:
                 inverters.append({"rating": kw, "make_model": make, "evidence": row_text, "occurrence": occurrence,
-                                  "option_id": option})
+                                  "option_id": option, "option_unreadable": unreadable})
     return groups, inverters
 
 
@@ -396,21 +403,47 @@ def state_name(code):
 _SUPPLIER = re.compile(r"\bsupplier\b|\bvendor\b|\bseller\b|\bour\b", re.I)
 _BUYER = re.compile(r"\bbuyer\b|\bcustomer\b|\bclient\b|\brecipient\b|\bconsignee\b|\bbill(?:ed)?\s+to\b"
                     r"|\bship(?:ped)?\s+to\b|\bpurchaser\b|\bconsumer\b", re.I)
-LETTERHEAD_TOP = 0.2  # the top fifth of the page, where the supplier's own details are printed
+# A line that opens a section: "Supplier", "From", "Our details" or "Buyer", "Bill to", "To,".
+_SUPPLIER_HEADING = re.compile(r"^\s*(?:supplier|vendor|seller|from|our)\b", re.I)
+_BUYER_HEADING = re.compile(r"^\s*(?:buyer|customer|client|recipient|consignee|purchaser|consumer|bill(?:ed)?\s+to"
+                            r"|ship(?:ped)?\s+to|to\s*[,:]?\s*$)", re.I)
+SAME_ROW = 0.02  # headings this close in height sit side by side: which block a line is in is unclear
+
+
+def _sections(lines):
+    """Each line with the section it sits in: "letterhead" before the first heading, then
+    "supplier" or "buyer" after a heading of that kind, or "unclear" after two headings of
+    different kinds side by side. A page with no heading at all is unclear throughout: page
+    position alone never decides."""
+    section, last, out = "letterhead", None, []
+    for line in lines:
+        text = " ".join(line["Text"].split())
+        short = len(text.split()) <= 4
+        kind = None
+        if short:
+            kind = "buyer" if _BUYER_HEADING.match(text) else "supplier" if _SUPPLIER_HEADING.match(text) else None
+        if kind:
+            top = (line.get("Geometry") or {}).get("BoundingBox", {}).get("Top")
+            beside = (last is not None and last[0] != kind and None not in (top, last[1])
+                      and abs(top - last[1]) < SAME_ROW)
+            section, last = ("unclear" if beside else kind), (kind, top)
+        out.append((line, text, section))
+    if all(s == "letterhead" for _, _, s in out):
+        return [(line, text, "unclear") for line, text, _ in out]
+    return out
 
 
 def gstin_state(page, threshold=0):
     """(state, line text) from a valid GSTIN the page attributes to the supplier: on a line
-    that says supplier, vendor, seller or our, or in the letterhead at the top of the page.
-    A buyer's or customer's GSTIN is ignored, and two supplier GSTINs from different states
-    give none."""
+    that says supplier, vendor, seller or our, in a section headed Supplier, From or Our, or
+    in the letterhead (the block before the page's first section heading). A GSTIN on a buyer
+    line or in a Buyer, Customer, Bill to, Ship to or To block is the buyer's. Unclear blocks,
+    and two supplier GSTINs from different states, give none."""
     found = {}
-    for line in page.lines:
-        text = " ".join(line["Text"].split())
+    for line, text, section in _sections(page.lines):
         if page.line_confidence(line) < threshold or _BUYER.search(text):
             continue
-        top = (line.get("Geometry") or {}).get("BoundingBox", {}).get("Top", 1)
-        if not (_SUPPLIER.search(text) or top < LETTERHEAD_TOP):
+        if not (_SUPPLIER.search(text) or section in ("supplier", "letterhead")):
             continue
         for m in _GSTIN.finditer(text.upper().replace(" ", "")):
             gstin = m.group(1)

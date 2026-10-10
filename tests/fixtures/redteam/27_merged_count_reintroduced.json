@@ -1,0 +1,374 @@
+{
+ "name": "27_merged_count_reintroduced",
+ "issue": "Global six-panel count cannot be copied to both mixed-wattage rows; no 6-vs-3 mismatch.",
+ "fix": "Keep shared/global counts separate from row counts; never broadcast a loose count into multiple rows.",
+ "mode": "default",
+ "sources": [
+  "bom_table",
+  "gstin_state",
+  "lines",
+  "options_table",
+  "queries"
+ ],
+ "expense": null,
+ "confirmations": {
+  "multiple_options": false,
+  "capacity_basis": "dc_kwp",
+  "gst_treatment": "included",
+  "extra_charges_complete": true
+ },
+ "textract_reply": {
+  "DocumentMetadata": {
+   "Pages": 1
+  },
+  "Blocks": [
+   {
+    "BlockType": "PAGE",
+    "Id": "page",
+    "Page": 1
+   },
+   {
+    "BlockType": "LINE",
+    "Text": "System capacity 3 kWp",
+    "Confidence": 99.0,
+    "Geometry": {
+     "BoundingBox": {
+      "Left": 0.05,
+      "Top": 0.05,
+      "Width": 0.8,
+      "Height": 0.02
+     }
+    },
+    "Id": "b1",
+    "Page": 1
+   },
+   {
+    "BlockType": "LINE",
+    "Text": "Solar panels: 6 Nos",
+    "Confidence": 99.0,
+    "Geometry": {
+     "BoundingBox": {
+      "Left": 0.05,
+      "Top": 0.1,
+      "Width": 0.8,
+      "Height": 0.02
+     }
+    },
+    "Id": "b2",
+    "Page": 1
+   },
+   {
+    "BlockType": "WORD",
+    "Text": "Description",
+    "Confidence": 99.0,
+    "Id": "b3",
+    "Page": 1
+   },
+   {
+    "BlockType": "CELL",
+    "RowIndex": 1,
+    "ColumnIndex": 1,
+    "RowSpan": 1,
+    "ColumnSpan": 1,
+    "Confidence": 90.0,
+    "Relationships": [
+     {
+      "Type": "CHILD",
+      "Ids": [
+       "b3"
+      ]
+     }
+    ],
+    "EntityTypes": [
+     "COLUMN_HEADER"
+    ],
+    "Id": "b4",
+    "Page": 1
+   },
+   {
+    "BlockType": "WORD",
+    "Text": "Qty",
+    "Confidence": 99.0,
+    "Id": "b5",
+    "Page": 1
+   },
+   {
+    "BlockType": "CELL",
+    "RowIndex": 1,
+    "ColumnIndex": 2,
+    "RowSpan": 1,
+    "ColumnSpan": 1,
+    "Confidence": 90.0,
+    "Relationships": [
+     {
+      "Type": "CHILD",
+      "Ids": [
+       "b5"
+      ]
+     }
+    ],
+    "EntityTypes": [
+     "COLUMN_HEADER"
+    ],
+    "Id": "b6",
+    "Page": 1
+   },
+   {
+    "BlockType": "WORD",
+    "Text": "Wattage",
+    "Confidence": 99.0,
+    "Id": "b7",
+    "Page": 1
+   },
+   {
+    "BlockType": "CELL",
+    "RowIndex": 1,
+    "ColumnIndex": 3,
+    "RowSpan": 1,
+    "ColumnSpan": 1,
+    "Confidence": 90.0,
+    "Relationships": [
+     {
+      "Type": "CHILD",
+      "Ids": [
+       "b7"
+      ]
+     }
+    ],
+    "EntityTypes": [
+     "COLUMN_HEADER"
+    ],
+    "Id": "b8",
+    "Page": 1
+   },
+   {
+    "BlockType": "WORD",
+    "Text": "Solar",
+    "Confidence": 99.0,
+    "Id": "b9",
+    "Page": 1
+   },
+   {
+    "BlockType": "WORD",
+    "Text": "module",
+    "Confidence": 99.0,
+    "Id": "b10",
+    "Page": 1
+   },
+   {
+    "BlockType": "WORD",
+    "Text": "A",
+    "Confidence": 99.0,
+    "Id": "b11",
+    "Page": 1
+   },
+   {
+    "BlockType": "CELL",
+    "RowIndex": 2,
+    "ColumnIndex": 1,
+    "RowSpan": 1,
+    "ColumnSpan": 1,
+    "Confidence": 90.0,
+    "Relationships": [
+     {
+      "Type": "CHILD",
+      "Ids": [
+       "b9",
+       "b10",
+       "b11"
+      ]
+     }
+    ],
+    "Id": "b12",
+    "Page": 1
+   },
+   {
+    "BlockType": "WORD",
+    "Text": "6",
+    "Confidence": 99.0,
+    "Id": "b13",
+    "Page": 1
+   },
+   {
+    "BlockType": "CELL",
+    "RowIndex": 2,
+    "ColumnIndex": 2,
+    "RowSpan": 1,
+    "ColumnSpan": 1,
+    "Confidence": 90.0,
+    "Relationships": [
+     {
+      "Type": "CHILD",
+      "Ids": [
+       "b13"
+      ]
+     }
+    ],
+    "Id": "b14",
+    "Page": 1
+   },
+   {
+    "BlockType": "WORD",
+    "Text": "550",
+    "Confidence": 99.0,
+    "Id": "b15",
+    "Page": 1
+   },
+   {
+    "BlockType": "WORD",
+    "Text": "Wp",
+    "Confidence": 99.0,
+    "Id": "b16",
+    "Page": 1
+   },
+   {
+    "BlockType": "CELL",
+    "RowIndex": 2,
+    "ColumnIndex": 3,
+    "RowSpan": 1,
+    "ColumnSpan": 1,
+    "Confidence": 90.0,
+    "Relationships": [
+     {
+      "Type": "CHILD",
+      "Ids": [
+       "b15",
+       "b16"
+      ]
+     }
+    ],
+    "Id": "b17",
+    "Page": 1
+   },
+   {
+    "BlockType": "WORD",
+    "Text": "Solar",
+    "Confidence": 99.0,
+    "Id": "b18",
+    "Page": 1
+   },
+   {
+    "BlockType": "WORD",
+    "Text": "module",
+    "Confidence": 99.0,
+    "Id": "b19",
+    "Page": 1
+   },
+   {
+    "BlockType": "WORD",
+    "Text": "B",
+    "Confidence": 99.0,
+    "Id": "b20",
+    "Page": 1
+   },
+   {
+    "BlockType": "CELL",
+    "RowIndex": 3,
+    "ColumnIndex": 1,
+    "RowSpan": 1,
+    "ColumnSpan": 1,
+    "Confidence": 90.0,
+    "Relationships": [
+     {
+      "Type": "CHILD",
+      "Ids": [
+       "b18",
+       "b19",
+       "b20"
+      ]
+     }
+    ],
+    "Id": "b21",
+    "Page": 1
+   },
+   {
+    "BlockType": "CELL",
+    "RowIndex": 3,
+    "ColumnIndex": 2,
+    "RowSpan": 1,
+    "ColumnSpan": 1,
+    "Confidence": 90.0,
+    "Id": "b22",
+    "Page": 1
+   },
+   {
+    "BlockType": "WORD",
+    "Text": "450",
+    "Confidence": 99.0,
+    "Id": "b23",
+    "Page": 1
+   },
+   {
+    "BlockType": "WORD",
+    "Text": "Wp",
+    "Confidence": 99.0,
+    "Id": "b24",
+    "Page": 1
+   },
+   {
+    "BlockType": "CELL",
+    "RowIndex": 3,
+    "ColumnIndex": 3,
+    "RowSpan": 1,
+    "ColumnSpan": 1,
+    "Confidence": 90.0,
+    "Relationships": [
+     {
+      "Type": "CHILD",
+      "Ids": [
+       "b23",
+       "b24"
+      ]
+     }
+    ],
+    "Id": "b25",
+    "Page": 1
+   },
+   {
+    "BlockType": "MERGED_CELL",
+    "RowIndex": 2,
+    "ColumnIndex": 2,
+    "RowSpan": 2,
+    "ColumnSpan": 1,
+    "Relationships": [
+     {
+      "Type": "CHILD",
+      "Ids": [
+       "b14",
+       "b22"
+      ]
+     }
+    ],
+    "Id": "b26",
+    "Page": 1
+   },
+   {
+    "BlockType": "TABLE",
+    "Relationships": [
+     {
+      "Type": "CHILD",
+      "Ids": [
+       "b4",
+       "b6",
+       "b8",
+       "b12",
+       "b14",
+       "b17",
+       "b21",
+       "b22",
+       "b25"
+      ]
+     },
+     {
+      "Type": "MERGED_CELL",
+      "Ids": [
+       "b26"
+      ]
+     }
+    ],
+    "Id": "b27",
+    "Page": 1
+   }
+  ]
+ }
+}

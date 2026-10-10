@@ -180,6 +180,7 @@ def test_amounts_are_never_worked_out_from_a_total_or_a_difference():
 
 def test_gstin_gives_only_the_suppliers_gst_registration_state():
     page = Page()
+    page.line("Supplier", 0.05)
     page.line("GSTIN: 36AABCU9603R1ZO", 0.1)
     c = contract(page)
     state = c["supplier_gst_state"]
@@ -303,6 +304,7 @@ def test_a_count_of_one_from_a_table_or_line_is_a_set_not_a_panel_count():
 
 def test_the_gstin_state_is_kept_apart_from_the_vendors_address_state():
     page = Page()
+    page.line("Supplier", 0.05)
     page.line("GSTIN: 36AABCU9603R1ZO", 0.1)
     c = contract(page)
     assert c["vendor_state"] is None

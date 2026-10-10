@@ -1,0 +1,47 @@
+{
+ "name": "24_not_supplied",
+ "issue": "Do not assert a supplied module count/wattage from explicitly not-supplied text.",
+ "fix": "Cover not supplied/provided and scope statements consistently; retain unresolved scope instead of positive components.",
+ "mode": "default",
+ "sources": [
+  "bom_table",
+  "gstin_state",
+  "lines",
+  "options_table",
+  "queries"
+ ],
+ "expense": null,
+ "confirmations": {
+  "multiple_options": false,
+  "capacity_basis": "dc_kwp",
+  "gst_treatment": "included",
+  "extra_charges_complete": true
+ },
+ "textract_reply": {
+  "DocumentMetadata": {
+   "Pages": 1
+  },
+  "Blocks": [
+   {
+    "BlockType": "PAGE",
+    "Id": "page",
+    "Page": 1
+   },
+   {
+    "BlockType": "LINE",
+    "Text": "Solar panels are not supplied: 6 Nos 550 Wp",
+    "Confidence": 99.0,
+    "Geometry": {
+     "BoundingBox": {
+      "Left": 0.05,
+      "Top": 0.05,
+      "Width": 0.8,
+      "Height": 0.02
+     }
+    },
+    "Id": "b1",
+    "Page": 1
+   }
+  ]
+ }
+}

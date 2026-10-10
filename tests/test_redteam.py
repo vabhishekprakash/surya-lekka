@@ -1,4 +1,5 @@
-"""The outside red-team's synthetic reproducers against 3a5fd4b, one test per fixture number.
+"""The outside red-team's synthetic reproducers (01-23 against 3a5fd4b, 24-28 against 43b59c0),
+one test per fixture number.
 
 A pass means no wrong value and no false "doesn't match": leaving a value unresolved, with
 its finding at "needs confirmation", is a pass. Cases 13 to 15 exercise FORMS and
@@ -72,6 +73,18 @@ def check(n, c, q, r):
         assert facts(c, "gst_amount")[0]["field"]["value"]["parsed"] == "18000"
     elif n == 23:
         assert all(g["option_id"] is not None for g in c["module_groups"])
+    elif n == 24:
+        assert not any(certain(g.get("count")) or certain(g.get("wattage")) for g in c["module_groups"])
+    elif n == 25:
+        assert not facts(c, "net_cost")
+    elif n == 26:
+        assert c["supplier_gst_state"] is None
+    elif n == 27:
+        assert not any(certain(g.get("count")) for g in c["module_groups"])
+    elif n == 28:
+        assert all(g["option_id"] in ("A", "B") for g in c["module_groups"])
+        assert [g["wattage"]["value"]["parsed"] for g in q["module_groups"] if g["option_id"] == "A"] == ["550"]
+        assert (q["flags"]["model_proposed"]["multiple_options"] or {}).get("conflict")
 
 
 @pytest.mark.parametrize("path", FIXTURES, ids=lambda p: p.stem)
