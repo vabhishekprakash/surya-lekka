@@ -100,9 +100,11 @@ _AMOUNT_TOKEN = re.compile(
     rf"(?<![\w/.,])(?:{_CUR}\s*)?(?:\d+(?:\.\d+)?\s*(?:lakhs?|lacs?)\b"
     rf"|\d{{1,3}}(?:,\d{{2}})*,\d{{3}}(?:\.\d{{1,2}})?|\d+(?:\.\d{{1,2}})?)(?:\s*/-)?(?![\w%/])", re.I)
 _UNIT_AFTER = re.compile(r"^\s*(?:kwp|kw|kva|wp|w|nos?|pcs|panels?|modules?|years?|yrs?|kg|mm|sq)\b", re.I)
-_PERCENT_AFTER = re.compile(r"^\s*(?:%|per\s*cent\b|percent\b)", re.I)
-# "GST @ 18% on Rs 1,00,000": the amount after a rate is the base the tax is worked out on.
-_TAX_BASE_BEFORE = re.compile(r"%\s*(?:on|of)\b[^%\d]{0,30}$", re.I)
+_RATE_WORD = r"(?:%|\bper\s*cent\b|\bpercent\b|\bpc\b)"
+_PERCENT_AFTER = re.compile(rf"^\s*{_RATE_WORD}", re.I)
+# "GST @ 18% on Rs 1,00,000", "18 percent of Rs 1,00,000": the amount after a rate is the base the
+# tax is worked out on, never the tax.
+_TAX_BASE_BEFORE = re.compile(rf"{_RATE_WORD}\s*(?:on|of)\b[^%\d]{{0,30}}$", re.I)
 _CAP_TOKEN = re.compile(r"(?<![\w.])(\d+(?:\.\d+)?)\s*(kwp|kw|kva|wp|w)\b", re.I)
 _ALTERNATIVE = re.compile(r"\d\s*(?:kwp|kw|wp|w)?\s*(?:-|–|to|or|/)\s*\d", re.I)
 _DATE = re.compile(r"\b\d{1,2}[/.-]\d{1,2}[/.-]\d{2,4}\b|\b\d{1,2}(?:st|nd|rd|th)?[\s-]+[A-Za-z]{3,9}[\s,-]+\d{4}\b")

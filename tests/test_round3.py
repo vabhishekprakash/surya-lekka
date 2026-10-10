@@ -176,3 +176,24 @@ def test_rows_with_readable_options_bind_to_them():
     c = contract(page)
     assert sorted(g["option_id"] for g in c["module_groups"]) == ["A", "B"]
     assert c["flags"]["model_proposed"]["multiple_options"]["value"] is True
+
+
+# --- round 4, case 29: percentages in words and tax bases ----------------------------------------
+
+@pytest.mark.parametrize("line", ["GST 18 percent on Rs 1,00,000", "GST 18 per cent on Rs 1,00,000",
+                                  "GST 18 pc on Rs 1,00,000", "GST @ 18 percent of Rs. 1,00,000",
+                                  "GST 18% on Rs 1,00,000", "IGST 18 Percent On ₹1,00,000"])
+def test_an_amount_after_a_rate_and_on_or_of_is_the_tax_base(line):
+    assert src.amounts_in(line) == []
+    page = Page()
+    page.line(line, 0.3)
+    assert "gst_amount" not in price_facts(contract(page))
+
+
+@pytest.mark.parametrize("text", ["18 percent", "18 per cent", "18 pc", "18 Percent", "18 PC"])
+def test_a_percentage_in_words_is_never_rupees(text):
+    assert src.amounts_in(f"GST {text}") == [] and src.amounts_in(f"Rs {text}") == []
+
+
+def test_an_amount_with_no_rate_before_it_is_still_read():
+    assert [a for a, _ in src.amounts_in("GST on Rs 18,000")] == ["Rs 18,000"]

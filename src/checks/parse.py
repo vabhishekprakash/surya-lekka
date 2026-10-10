@@ -62,9 +62,9 @@ def parse_amount(raw):
     return _amount_result(raw, None, UNPARSEABLE)
 
 
-UNITS = {"kw": "kW", "kwp": "kWp", "kva": "kVA", "w": "W", "wp": "Wp"}
+UNITS = {"kw": "kW", "kwp": "kWp", "kva": "kVA", "w": "W", "wp": "Wp", "watt": "W", "watts": "W"}
 _NUMBER = r"(\d+(?:\.\d+)?)"
-_UNIT = r"(kwp|kva|kw|wp|w)"
+_UNIT = r"(kwp|kva|kw|wp|watts|watt|w)"
 _SINGLE = re.compile(rf"^{_NUMBER}\s*{_UNIT}$", re.I)
 _RANGE = re.compile(rf"^{_NUMBER}\s*{_UNIT}?\s*(?:-|–|—|to)\s*{_NUMBER}\s*{_UNIT}$", re.I)
 
@@ -78,7 +78,8 @@ def parse_capacity(raw):
 
     Returns {"raw", "parsed", "unit", "parse_status"}. parsed is a Decimal, or
     {"min": Decimal, "max": Decimal} for a range (never a midpoint). Units:
-    kW, kWp, kVA, W, Wp. A number without a unit is ambiguous.
+    kW, kWp, kVA, W, Wp, and "Watt" or "Watts" (any case) as W. A number without a unit is
+    ambiguous.
     """
     if raw is None or not _clean(raw):
         return _capacity_result(raw, None, None, EMPTY)
@@ -87,7 +88,7 @@ def parse_capacity(raw):
         return _capacity_result(raw, Decimal(m.group(1)), UNITS[m.group(2).lower()], OK)
     if m := _RANGE.match(text):
         lo, first_unit, hi, unit = m.groups()
-        if first_unit and first_unit.lower() != unit.lower():
+        if first_unit and UNITS[first_unit.lower()] != UNITS[unit.lower()]:
             return _capacity_result(raw, None, None, AMBIGUOUS)
         lo, hi = Decimal(lo), Decimal(hi)
         if lo > hi:

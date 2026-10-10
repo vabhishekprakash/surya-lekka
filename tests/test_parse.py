@@ -88,3 +88,17 @@ def test_capacity_ambiguous(raw):
 def test_capacity_empty_and_unparseable():
     assert parse_capacity(None)["parse_status"] == "empty"
     assert parse_capacity("as per site")["parse_status"] == "unparseable"
+
+
+@pytest.mark.parametrize("raw,value", [("550 Watts", "550"), ("550 watt", "550"), ("550WATTS", "550"),
+                                       ("540-550 Watts", {"min": "540", "max": "550"}), ("3000 Watt", "3000")])
+def test_watts_and_watt_are_the_unit_w(raw, value):
+    r = parse_capacity(raw)
+    assert r["parse_status"] == "ok" and r["unit"] == "W"
+    got = r["parsed"]
+    assert ({k: str(v) for k, v in got.items()} if isinstance(got, dict) else str(got)) == value
+
+
+@pytest.mark.parametrize("raw", ["550 Wattage", "550 kilowatts", "550 Watts each x 6"])
+def test_other_watt_words_stay_unread(raw):
+    assert parse_capacity(raw)["parse_status"] != "ok"
