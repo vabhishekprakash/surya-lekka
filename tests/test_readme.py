@@ -69,7 +69,8 @@ def test_results_team_and_limits_say_only_what_is_known():
     assert "placeholder" in section("Team")
     limits = section("Limits")
     assert "Lambda concurrency on our account is 10." in limits
-    assert "Amazon Nova reading is switched off until Bedrock access is granted." in limits
+    assert "Amazon Nova reading is built but switched off while Bedrock access isn't granted." in limits
+    assert "Nova" not in section("Press release")
 
 
 def test_deploy_commands_and_architecture_image():
@@ -136,11 +137,13 @@ def test_confirm_before_finding_is_said_plainly_and_accuracy_is_what_was_measure
 
 
 def test_how_this_was_built_lists_each_ai_tool_and_its_role():
-    rows = dict(re.findall(r"^\| ([^|]+?) \| ([^|]+?) \|$", section("How this was built"), re.M)[1:])
-    assert rows == {"Claude Code": "Wrote the code under our direction.", "Claude chat": "Planning and prompts.",
-                    "Claude in Chrome": "AWS console and spreadsheet tasks.",
-                    "GPT-6 Astra": "External reviews and adversarial test cases.",
-                    "ChatGPT agent": "Finding public quotes."}
+    built = section("How this was built")
+    rows = dict(re.findall(r"^\| ([^|]+?) \| ([^|]+?) \|$", built, re.M)[1:])
+    assert list(rows) == ["Claude Code, running Claude Opus 5.5",
+                          "Claude Opus 5.5, in the Claude app and in Claude in Chrome", "ChatGPT, model Luna 5.6"]
+    assert rows["Claude Code, running Claude Opus 5.5"] == ("Wrote the code under our direction. We reviewed, ran and "
+                                                           "tested it.")
+    assert "Amazon Translate drafted the Telugu once (never at runtime)" in built
 
 
 def test_credits_cover_every_pinned_dependency_and_pdfjs():
@@ -167,11 +170,12 @@ def test_the_test_sample_s4_is_described_as_deliberately_wrong():
     assert "#sample=S4" in README and "deliberately wrong reading" in README
 
 
-def test_the_labelled_data_finding_uses_the_agreed_wording():
-    assert ("In our hand-labelled data for these 17 quotes, a DCR declaration, a vendor registration number and "
-            "net-meter charges were each unrecorded in 16. These are information gaps to clarify, not evidence of "
-            "non-DCR panels, unregistered vendors or unavailable net metering. This small collection does not "
-            "establish market prevalence.") in section("Results")
+def test_no_missing_detail_count_is_published_from_the_labels():
+    results = section("Results")
+    # the labels record DCR wording in a field the evaluation didn't read, and have no field for the others
+    assert "We publish no count of quotes missing a DCR declaration" in results
+    assert "unrecorded in 16" not in results and "| DCR declaration not stated |" not in results
+    assert "agreed with 11 of 11" in results and "eval/recheck_findings.py" in results
     assert "never pooled" not in README
 
 

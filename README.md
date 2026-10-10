@@ -14,7 +14,7 @@ Read the quote, check the numbers and the subsidy rule, and know what to ask the
 
 A rooftop solar quote packs a lot into a page or two: how many panels and of what wattage, the system size, the price with GST and extra charges, and the subsidy the vendor expects the household to get. Under PM Surya Ghar, the central subsidy depends on the DC capacity of the panels, the household's state, and when they applied on the National Portal, and it needs DCR panels made from Indian cells. Checking all of that by hand means finding each figure on the quote, knowing which rule applies, and redoing the sums.
 
-With Surya Lekka, a household uploads the quote as a PDF or as photos of its pages. Amazon Textract reads each page, answering a fixed set of questions and reading its tables, and the app keeps the line each value came from, or says "not found". The reading can be wrong: on our 8 development quotes it read 36 of the 82 printed values correctly, got 9 wrong and filled in 1 that the quote doesn't state, and the app marked all 10 of those "Check this". On 9 held-out quotes, read once, it read 27 of 92 correctly, got 4 wrong and filled in 3, and marked 4 of those 7. (Amazon Nova on Amazon Bedrock can read the quote instead once the account has Bedrock access.) The household confirms or corrects the values and answers a few questions, such as their state and when they applied. Plain, tested Python code then runs the checks, and a finding only appears after the household confirms the numbers it uses. Each finding shows the line from the quote, the rule it was checked against and the rule's date. The details the quote leaves out become a short, polite message to copy or send to the vendor on WhatsApp. Anyone who would rather not upload anything can type the numbers in instead.
+With Surya Lekka, a household uploads the quote as a PDF or as photos of its pages. Amazon Textract reads each page, answering a fixed set of questions and reading its tables, and the app keeps the line each value came from, or says "not found". The reading can be wrong: on our 8 development quotes it read 36 of the 82 printed values correctly, got 9 wrong and filled in 1 that the quote doesn't state, and the app marked all 10 of those "Check this". On 9 held-out quotes, read once, it read 27 of 92 correctly, got 4 wrong and filled in 3, and marked 4 of those 7. The household confirms or corrects the values and answers a few questions, such as their state and when they applied. Plain, tested Python code then runs the checks, and a finding only appears after the household confirms the numbers it uses. Each finding shows the line from the quote, the rule it was checked against and the rule's date. The details the quote leaves out become a short, polite message to copy or send to the vendor on WhatsApp. Anyone who would rather not upload anything can type the numbers in instead.
 
 > "I had the quote on my phone and the vendor wanted an answer. It showed me the panel count didn't add up to the system size and gave me the questions to send back."
 >
@@ -56,7 +56,7 @@ A calculator needs you to find each number, know which figure is the DC panel ca
    A finding only appears after you confirm the numbers it uses. No check says "matches" or "doesn't match" before then. The results screen lists them, each with the quote line it came from or "you typed this", and asks "Are these the numbers on your quote?" with Yes or Fix a number. The confirmation holds only for those numbers in that option: a correction, a switch to another option, or the same number typed in a different format asks again. The server enforces this, not only the page. Each confirmation is a token the server issued, signed with HMAC-SHA256 under a per-stack secret that CloudFormation generates in AWS Secrets Manager. It covers the job, the review revision, the option, the fields and their values. Every change of corrections or answers, an option switch included, moves the job's review revision on, so an edit that is later undone, or a switch from option A to B and back, needs a fresh confirmation; a token from another job, an older revision or one computed outside the server is refused. "Type the numbers instead" stores no numbers. Its first answer carries a challenge with a random id, and only that challenge's tokens confirm the typed values. To make an edit that is later undone ask again, it keeps a short-lived session record holding only that random id, a counter and a keyed hash of the values (no numbers), which expires after 15 minutes.
 6. The results screen groups the findings by outcome and offers the vendor questions with Copy and Send on WhatsApp buttons.
 
-There are two other ways in. The three samples are made-up quotes with saved readings, so trying one never calls the model. While user tests run, a fourth sample, S4, opens only from the link `#sample=S4`. It is a test sample with a deliberately wrong reading: it reads the panel wattage as 550 W where its page prints 500 W, to see whether testers catch it at the confirm step. "Type the numbers instead" sends the figures the user types straight to the checks. Only the short-lived session record described above is stored: a random id, a counter and a keyed hash of the values, no numbers, expiring after 15 minutes. Every result carries a label saying where its values came from: "Read by Amazon Textract", "Read by Amazon Nova", "Sample (saved reading)" or "Entered by you".
+There are two other ways in. The three samples are made-up quotes with saved readings, so trying one never calls the model. While user tests run, a fourth sample, S4, opens only from the link `#sample=S4`. It is a test sample with a deliberately wrong reading: it reads the panel wattage as 550 W where its page prints 500 W, to see whether testers catch it at the confirm step. "Type the numbers instead" sends the figures the user types straight to the checks. Only the short-lived session record described above is stored: a random id, a counter and a keyed hash of the values, no numbers, expiring after 15 minutes. Every result carries a label saying where its values came from: "Read by Amazon Textract", "Read by Amazon Nova", "Saved reading of a made-up quote. Not read live." (every sample, S4 included) or "Entered by you".
 
 The stack is defined in `template.yaml` (AWS SAM): an HTTP API on API Gateway, seven Lambda functions on Python 3.12, a private S3 bucket for uploads, DynamoDB for jobs, an SQS queue for worker events that failed, CloudWatch logs kept for 7 days, X-Ray tracing, and the web app in a second private bucket behind CloudFront.
 
@@ -122,11 +122,12 @@ Sources:
 - The browser renders the quote into page images on the device. Only those images are uploaded, through presigned POSTs that accept one JPEG of limited size per page.
 - The privacy notice in the web app comes from the Region the stack is deployed in and the reading engine. For Mumbai it reads: "Your pages are processed in AWS's Mumbai region (India) and deleted after reading. If reading fails, they're removed automatically, usually within two days." For Sydney it names "AWS's Sydney region (Australia)". When Nova is reached through a cross-Region inference profile (`global.` or `apac.`), pages may be read in other AWS Regions, and the notice says so instead.
 - With Amazon Textract, AWS may store and use the pages to improve its AI services, and may store some of that content in another Region, unless the account opts out through an AWS Organizations AI services opt-out policy. `deploy.ps1` reads the account's effective policy with `aws organizations describe-effective-policy --policy-type AISERVICES_OPT_OUT_POLICY`. Only when that policy opts Textract out, by name or through `default`, does the page say: "Your pages are read by Amazon Textract in AWS's Mumbai region (India) and deleted from our storage after reading. This AWS account has opted out of AWS using them to improve its services. If reading fails, they're removed automatically, usually within two days." If the policy doesn't confirm it, or the call is denied, the page says: "Your pages are read by Amazon Textract in AWS's Mumbai region (India) and deleted from our storage after reading. AWS may keep and use them to improve its AI services and may store some of that content in another AWS region. If reading fails, they're removed automatically, usually within two days."
-- The worker deletes a job's pages after a successful reading, or after a failure that can't be retried. It retries objects S3 reports as not deleted and logs only counts. A lifecycle rule removes anything left under `uploads/` after a day, and job records in DynamoDB expire after 24 hours.
+- The worker deletes a job's pages after a successful reading, or after a failure that can't be retried. It retries objects S3 reports as not deleted and logs only counts. A lifecycle rule removes anything left under `uploads/` after a day, and job records stop being readable after 24 hours: the API refuses an expired job, and DynamoDB deletes expired items in the background, usually within a few days.
 - Logs hold job ids, timings, statuses, token counts or pages read, a cost estimate and reason codes. The logging helper refuses any other field. Tests check that error paths never log document text, evidence or job tokens. The worker never logs or stores Textract's raw reply, only the facts mapped from it.
 - Each job has a random secret token. Only its SHA-256 hash is stored, and every read or change needs the token.
-- Abuse and cost limits: a kill switch that pauses uploads, saved samples and typed checks alike; daily caps on new checks and on pages (counted from each check's declared page count when it is created, live samples included); separate daily caps for saved samples and for typed checks; a per-address daily cap for each kind (the address is stored only as a keyed hash); and API throttling of 5 requests a second with bursts of 10. Requests are validated before they take a slot, and a request's address slot and day slot are taken in one transaction, so a refused day slot uses no address slot. Budget alerts are set on the AWS account by hand; the CloudWatch alarms below come with the template.
-- Both buckets block public access and refuse plain HTTP. Only the CloudFront distribution can read the site bucket, through origin access control. The API and the upload bucket accept requests from the CloudFront domain, or with hosting off from the address set in `SiteOrigin` and, when given, a second one (`SecondSiteOrigin`, the Amplify Hosting domain). `deploy.ps1` refuses `-Pages` or `-Amplify` with hosting on, because the template would then not let that site call the API.
+- Abuse and cost limits: a kill switch that pauses uploads, saved samples and typed checks alike; daily caps on new checks and on pages (counted from each check's declared page count when it is created, live samples included); separate daily caps for saved samples and for typed checks; a per-address daily cap for each kind (the address is stored only as a keyed hash); and API throttling of 5 requests a second with bursts of 10. Requests are validated before they take a slot, and a request's address slot and day slot are taken in one transaction, so a refused day slot uses no address slot. Budget alerts are set on the AWS account by hand, outside the template: a monthly cost budget of $15 that alerts at $3, $8 and 100% of actual cost, and a zero-spend budget that alerts above $0.01. The CloudWatch alarms below come with the template.
+- The upload bucket blocks public access and refuses plain HTTP. The public site runs with CloudFront hosting off: the API and the upload bucket accept requests from two origins, the GitHub Pages address (`SiteOrigin`) and the Amplify Hosting address (`SecondSiteOrigin`). `deploy.ps1` refuses `-Pages` or `-Amplify` with hosting on, because the template would then not let that site call the API.
+- Only with CloudFront hosting on (`HostingEnabled=true`, not the public site's setting): the web app sits in a second private bucket that also blocks public access and refuses plain HTTP, only the CloudFront distribution can read it, through origin access control, and the API and upload bucket accept the CloudFront domain alone.
 - The secret that signs confirmation tokens is created by CloudFormation in AWS Secrets Manager. Only the four functions that sign tokens may read it, and only that one secret; they read it once per cold start. It is not in the repo, `config.js`, any response or the logs. A test checks that no secret value reaches an X-Ray trace.
 - Each Lambda function has its own IAM role with only the actions it needs and no AWS managed policy. It may write logs only to its own log group (create streams and put events, but not create groups) and send X-Ray traces. The worker's Bedrock permission exists only while Nova reads, and names the exact model or inference profile and the Regions that profile lists. Its `textract:AnalyzeDocument` permission exists only while Textract reads. That action has no resource-level permissions, so the statement uses `"*"`. The worker sends page bytes, so Textract needs no access to the bucket.
 - The web app places every piece of quote text with `textContent`, never as HTML. pdf.js is pinned to one version on cdnjs and checked against its SRI hash before it runs.
@@ -244,7 +245,7 @@ GitHub Actions runs the tests and the lint on every push (`.github/workflows/tes
 ## Limits
 
 - Lambda concurrency on our account is 10.
-- Amazon Nova reading is switched off until Bedrock access is granted. Amazon Textract reads the quotes in the meantime. With `ReadingEngine=none`, the samples and typed-in numbers work, and uploads get a message asking the household to type the numbers in.
+- Amazon Nova reading is built but switched off while Bedrock access isn't granted. Amazon Textract reads the quotes in the meantime. With `ReadingEngine=none`, the samples and typed-in numbers work, and uploads get a message asking the household to type the numbers in.
 - Amazon Textract's limits: at most 15 queries per page, and queries in English only. Text smaller than about 15 pixels tall on the page image may be missed, and each page image must be under 10 MB and 10,000 pixels a side. Textract has no question for the vendor's state or for charges outside the total, so those always come from the household.
 - Panel count and wattage answers are paired in the order Textract returns them on a page. When a page has several, the household confirms the pairing.
 - Only the central subsidy for an individual household is checked. State top-ups are not checked, and applications received before 13 Feb 2024 follow earlier rules that aren't covered.
@@ -252,7 +253,7 @@ GitHub Actions runs the tests and the lint on every push (`.github/workflows/tes
 - The reading can be wrong. On our 8 development quotes Amazon Textract, with our mapping, read 36 of 82 printed values correctly, 9 wrong and 1 that isn't on the quote; all 10 were marked "Check this", but that list of risky readings was built from those same quotes. On the 9 held-out quotes it read 27 of 92 correctly, 4 wrong and 3 that aren't on the quote, and marked 4 of those 7 (see Results). Every value is shown with its source text, highlighted on its page, for the household to confirm or correct.
 - The interface language doesn't change what is read: Amazon Textract's questions work on English quotes only. A Telugu draft of the messages (`web/i18n/te.json`, drafted once with Amazon Translate by `scripts/translate_messages.py`) waits for a reviewer and isn't shown yet.
 - At most 20 pages per quote are read.
-- With hosting off, the web app has to be served from `http://127.0.0.1:8000` to reach the API.
+- With hosting off, the web app has to be served from the `SiteOrigin` address (`http://127.0.0.1:8000` by default) or the `SecondSiteOrigin` address to reach the API.
 
 ## Results
 
@@ -281,9 +282,6 @@ Findings on the labelled values (the hand-made labels as the quote's values, eve
 | Central subsidy: matches / doesn't match | 1 / 0 | 3 / 0 |
 | Total: matches / doesn't match | 0 / 0 | 0 / 0 |
 | Net cost: matches / doesn't match | 1 / 0 | 4 / 0 |
-| DCR declaration not stated | 8 | 8 |
-| Vendor registration number not found | 8 | 8 |
-| Net-meter charges not mentioned | 8 | 8 |
 | Charges outside the total, or not clearly inside it | 6 | 8 |
 | Number of panels not found | 3 | 5 |
 | Panel wattage not found, or given as a range | 5 | 3 |
@@ -293,9 +291,9 @@ Findings on the labelled values (the hand-made labels as the quote's values, eve
 
 Using our hand-labelled values and confirming every operand under scenario S-A, central subsidy amounts matched the implemented rule in one development and three held-out cases. This is not reader accuracy or verified eligibility. One development capacity calculation disagreed with the stated capacity; that alone does not establish vendor misconduct.
 
-In our hand-labelled data for these 17 quotes, a DCR declaration, a vendor registration number and net-meter charges were each unrecorded in 16. These are information gaps to clarify, not evidence of non-DCR panels, unregistered vendors or unavailable net metering. This small collection does not establish market prevalence.
+We publish no count of quotes missing a DCR declaration, a vendor registration number or net-meter charges. An earlier count of 16 of 17 for each measured our labels, not the quotes: the labels record DCR wording for 6 quotes in a field the evaluation script didn't read, and they have no field for a registration number or net-meter charges. A keyword search of the quotes' own text (`eval/search_details.py`) finds DCR wording in 6 of the 17, registration or portal wording in 7 and net-meter wording in 14. A keyword hit is not a declaration, and those pages are being checked by eye. This small collection does not establish market prevalence.
 
-No total check completed: none of the 17 labels states a base price that the total can be checked against. Each definitive finding on labelled values is listed, with its numbers and rule, in a file outside this repo for us to check by hand. Positive controls (made-up quotes with hand-worked findings, `eval/positive_controls.txt`) still give every expected "matches" and "doesn't match" at the tag, so the absence of findings on the raw reading is not a harness that can't see them.
+No total check completed: none of the 17 labels states a base price that the total can be checked against. Each definitive finding on labelled values is listed, with its numbers and rule, in a file outside this repo. An independent script that shares no code with the app (`eval/recheck_findings.py`) recomputed all 11 from their operands with the rules as written, and agreed with 11 of 11. Positive controls (made-up quotes with hand-worked findings, `eval/positive_controls.txt`) still give every expected "matches" and "doesn't match" at the tag, so the absence of findings on the raw reading is not a harness that can't see them.
 
 Evaluation notes:
 
@@ -304,15 +302,15 @@ Evaluation notes:
 
 ## How this was built
 
-We built Surya Lekka with these AI tools, each in a set role:
+We used these AI tools while building Surya Lekka:
 
 | Tool | Role |
 |---|---|
-| Claude Code | Wrote the code under our direction. |
-| Claude chat | Planning and prompts. |
-| ChatGPT agent | Finding public quotes. |
+| Claude Code, running Claude Opus 5.5 | Wrote the code under our direction. We reviewed, ran and tested it. |
+| Claude Opus 5.5, in the Claude app and in Claude in Chrome | Planning, prompts and reviews; carried out the AWS console steps for the AI services opt-out policy; reviewed the Telugu text, with a second independent back-translation check. |
+| ChatGPT, model Luna 5.6 | Outside reviews, adversarial test cases, and finding public example quotes. |
 
-The quotes were labelled by hand by us, never by an AI tool.
+Inside the product, Amazon Textract reads the pages, and Amazon Translate drafted the Telugu once (never at runtime).
 
 ## Credits and licences
 
@@ -329,14 +327,14 @@ Surya Lekka's own code is under the MIT License (`LICENSE`). It uses:
 | [moto](https://github.com/getmoto/moto) 5.2.3 | tests | Apache-2.0 |
 | [cfn-lint](https://github.com/aws-cloudformation/cfn-lint) 1.57.2 | template lint | MIT-0 |
 | [AWS SAM translator](https://github.com/awslabs/serverless-application-model) 1.113.0 | template lint | Apache-2.0 |
-| [PyMuPDF](https://github.com/pymupdf/pymupdf) 1.28.2 | redaction tools, sample rendering and the extraction spike, not the deployed app | AGPL-3.0 or Artifex commercial |
+| [PyMuPDF](https://github.com/pymupdf/pymupdf) 1.28.2 | only local tools (redaction, the evaluation scripts) and, at build time, rendering the sample pages; it is not installed in the deployed functions and the site does not use it | AGPL-3.0 (or an Artifex commercial licence) |
 | [RapidOCR](https://github.com/RapidAI/RapidOCR) (rapidocr-onnxruntime) 1.4.4 | redaction tools | Apache-2.0 |
 | [ONNX Runtime](https://onnxruntime.ai) 1.30.0 | redaction tools | MIT |
 | [OpenCV](https://github.com/opencv/opencv-python) (opencv-python) 5.0.0.93 | redaction tools | Apache-2.0 |
 | [NumPy](https://numpy.org) 2.5.3 | redaction tools | BSD-3-Clause, with parts under 0BSD, MIT, Zlib and CC0-1.0 |
 | GitHub Actions: [checkout](https://github.com/actions/checkout), [setup-python](https://github.com/actions/setup-python), [configure-pages](https://github.com/actions/configure-pages), [upload-pages-artifact](https://github.com/actions/upload-pages-artifact), [deploy-pages](https://github.com/actions/deploy-pages) | CI and the GitHub Pages mirror | MIT |
 
-The architecture diagram (`docs/surya-lekka-architecture.svg`) and the made-up sample quotes are our own. Licence names are as each project publishes them; the versions are the ones pinned in the requirements files.
+The architecture diagram (`docs/surya-lekka-architecture.svg`) and the made-up sample quotes are our own. Each licence is taken from the package's own metadata (for pdf.js, its cdnjs entry; for the GitHub Actions, each repository's licence file); the versions are the ones pinned in the requirements files.
 
 ## Team
 

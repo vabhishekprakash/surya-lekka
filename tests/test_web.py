@@ -78,7 +78,7 @@ def test_reading_off_message_matches_the_api_and_leads_to_manual_entry():
 
 def test_every_result_has_a_mode_label():
     labels = re.search(r"const MODE_LABELS = \{(.*?)\};", APP, re.S).group(1)
-    assert 'saved: "Sample (saved reading)"' in labels
+    assert 'saved: "Saved reading of a made-up quote. Not read live."' in labels
     assert 'nova: "Read by Amazon Nova"' in labels
     assert 'textract: "Read by Amazon Textract"' in labels
     assert 'manual: "Entered by you"' in labels
