@@ -251,7 +251,7 @@ def test_worker_permissions():
 
 @pytest.mark.parametrize("name,allowed", [
     ("CreateJobFunction", {"dynamodb:PutItem", "dynamodb:UpdateItem", "s3:PutObject"}),
-    ("GetJobFunction", {"dynamodb:GetItem"}),
+    ("GetJobFunction", {"dynamodb:GetItem", "s3:GetObject"}),  # signs links to sample pages only
     ("RecheckFunction", {"dynamodb:GetItem", "dynamodb:UpdateItem"}),
     ("SampleJobFunction", {"dynamodb:PutItem", "dynamodb:UpdateItem", "s3:GetObject", "s3:PutObject"}),
     ("RetryFunction", {"dynamodb:GetItem", "dynamodb:UpdateItem", "s3:PutObject"}),
@@ -435,3 +435,9 @@ def test_retry_writes_only_manifests():
     s3 = [s for s in statements("RetryFunction") if any(a.startswith("s3:") for a in actions(s))]
     assert [actions(s) for s in s3] == [{"s3:PutObject"}]
     assert text(s3[0]["Resource"]).endswith("/uploads/*/manifest.json'}")
+
+
+def test_get_job_reads_only_the_synthetic_samples():
+    reads = [s for s in statements("GetJobFunction") if "s3:GetObject" in actions(s)]
+    assert reads and all(str(s["Resource"]).endswith("/samples/*'}") or "/samples/*" in str(s["Resource"])
+                         for s in reads)

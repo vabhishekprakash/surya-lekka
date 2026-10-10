@@ -314,6 +314,10 @@ Resources:
             - Effect: Allow
               Action: dynamodb:GetItem
               Resource: !GetAtt JobsTable.Arn
+            # Signs short-lived links to the synthetic samples' page images, for highlighting.
+            - Effect: Allow
+              Action: s3:GetObject
+              Resource: !Sub "arn:${AWS::Partition}:s3:::${StackPrefix}-${AWS::AccountId}-${AWS::Region}/samples/*"
       Events:
         Api:
           Type: HttpApi

@@ -57,4 +57,14 @@ def test_s4_gets_s2s_page_images(tmp_path):
     written = render(tmp_path)
     assert written["S4"] == written["S2"]
     assert (tmp_path / "S4" / "page-01.jpg").read_bytes() == (tmp_path / "S2" / "page-01.jpg").read_bytes()
-    assert json.loads((tmp_path / "S4" / "reading.json").read_text(encoding="utf-8")) == S4
+    uploaded = json.loads((tmp_path / "S4" / "reading.json").read_text(encoding="utf-8"))
+    assert strip(uploaded) == S4  # the uploaded reading only adds highlighting boxes
+    assert uploaded["quote"]["module_groups"][0]["wattage"]["boxes"][0]["page"] == 1
+
+
+def strip(node):
+    if isinstance(node, dict):
+        return {k: strip(v) for k, v in node.items() if k != "boxes"}
+    if isinstance(node, list):
+        return [strip(v) for v in node]
+    return node

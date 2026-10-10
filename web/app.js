@@ -187,6 +187,8 @@ const state = {
   entryChecks: [],
   confirmedOperands: new Set(),
   lastRequest: null,
+  pageImages: [],
+  boxIndex: new Map(),
 };
 
 // ---------------------------------------------------------------- helpers
@@ -636,28 +638,66 @@ async function retryJob() {
 
 // ---------------------------------------------------------------- page viewer
 
-function pageButton(pageNumber, evidenceText) {
+// The page image for a page: the household's own (never uploaded for viewing), or a short-lived
+// link the API gives for a made-up sample's page.
+function pageImage(pageNumber) {
+  const own = state.pages[pageNumber - 1];
+  return own ? own.url : (state.pageImages || [])[pageNumber - 1] || null;
+}
+
+// Boxes beside each piece of evidence in the reading: (page, quoted text) -> [{page, box}].
+function indexBoxes(node, index = new Map()) {
+  if (Array.isArray(node)) node.forEach((v) => indexBoxes(v, index));
+  else if (node && typeof node === "object") {
+    if (node.evidence_text && node.page && Array.isArray(node.boxes)) {
+      index.set(`${node.page}|${node.evidence_text}`, node.boxes);
+    }
+    Object.values(node).forEach((v) => indexBoxes(v, index));
+  }
+  return index;
+}
+
+function boxesFor(pageNumber, evidenceText) {
+  return state.boxIndex.get(`${pageNumber}|${evidenceText}`) || [];
+}
+
+function pageButton(pageNumber, evidenceText, boxes) {
   if (!pageNumber) return null;
-  const image = state.pages[pageNumber - 1];
+  const found = boxes || boxesFor(pageNumber, evidenceText);
+  const image = pageImage(pageNumber);
   if (image) {
     return el("button", { type: "button", class: "thumb", "aria-label": `Show page ${pageNumber}`,
-      onclick: () => openPage(pageNumber, evidenceText) },
-    el("img", { src: image.url, alt: "" }));
+      onclick: () => openPage(pageNumber, evidenceText, found) },
+    el("img", { src: image, alt: "" }));
   }
   if (state.pageText && state.pageText[String(pageNumber)]) {
     return el("button", { type: "button", class: "button secondary text-thumb",
-      onclick: () => openPage(pageNumber, evidenceText) }, `Page ${pageNumber}`);
+      onclick: () => openPage(pageNumber, evidenceText, found) }, `Page ${pageNumber}`);
   }
   return null;
 }
 
-function openPage(pageNumber, evidenceText) {
+// The quoted line itself is a button: tapping it opens the page at the line's box.
+function quoteButton(pageNumber, evidenceText, boxes) {
+  const found = boxes || boxesFor(pageNumber, evidenceText);
+  if (!pageNumber || (!pageImage(pageNumber) && !(state.pageText && state.pageText[String(pageNumber)]))) {
+    return el("q", { text: evidenceText });
+  }
+  return el("button", { type: "button", class: "quote-link", "aria-label": `Show where page ${pageNumber} says this`,
+    onclick: () => openPage(pageNumber, evidenceText, found) }, el("q", { text: evidenceText }));
+}
+
+function openPage(pageNumber, evidenceText, boxes = []) {
   const dialog = $("#page-viewer");
   $("#page-viewer-title").textContent = `Page ${pageNumber}`;
   const body = $("#page-viewer-body");
-  const image = state.pages[pageNumber - 1];
+  const image = pageImage(pageNumber);
   if (image) {
-    body.replaceChildren(el("img", { src: image.url, alt: `Page ${pageNumber} of your quote` }));
+    const marks = boxes.filter((b) => b.page === pageNumber && Array.isArray(b.box)).map(({ box: [left, top, width, height] }) =>
+      el("span", { class: "hl", style: `left:${left * 100}%;top:${top * 100}%;width:${width * 100}%;height:${height * 100}%` }));
+    body.replaceChildren(el("div", { class: "page-frame" },
+      el("img", { src: image, alt: `Page ${pageNumber} of the quote` }), marks));
+    if (marks.length) requestAnimationFrame(() => marks[0].scrollIntoView({ block: "center", behavior: "smooth" }));
   } else {
     const lines = state.pageText[String(pageNumber)] || [];
     const wanted = String(evidenceText || "").trim();
@@ -714,18 +754,32 @@ function evidenceLine(field) {
     return el("div", { class: "evidence" }, el("span", { text: "Not found on the quote." }));
   }
   if (field.conflict) {
+    const candidates = (field.candidates || []).filter((c) => c.evidence_text).map((c) =>
+      el("li", {}, c.page ? `Page ${c.page}: ` : "", quoteButton(c.page, c.evidence_text, c.boxes), " ",
+        pageButton(c.page, c.evidence_text, c.boxes)));
     return el("div", { class: "evidence" },
-      el("span", { class: "warn", text: "Different pages give different values. Enter the right one." }));
+      el("span", { class: "warn", text: "Different pages give different values. Enter the right one." }),
+      candidates.length ? el("ul", { class: "candidates" }, candidates) : null);
   }
   const parts = [];
   if (field.evidence_text) {
-    parts.push(el("span", {}, field.page ? `Page ${field.page}: ` : "", el("q", { text: field.evidence_text })));
+    parts.push(el("span", {}, field.page ? `Page ${field.page}: ` : "", quoteButton(field.page, field.evidence_text, field.boxes)));
   }
   const status = field.value && field.value.parse_status;
   if (status && status !== "ok" && status !== "empty") {
     parts.push(el("span", { class: "warn", text: " This couldn't be read as a number. Please check it." }));
   }
-  return el("div", { class: "evidence" }, pageButton(field.page, field.evidence_text), el("div", {}, parts));
+  return el("div", { class: "evidence" }, pageButton(field.page, field.evidence_text, field.boxes), el("div", {}, parts));
+}
+
+// Once the household changes a value, what the quote said stays in view beside it.
+function readFromQuote(input, field) {
+  if (!field || field.conflict || !field.evidence_text || input.dataset.original === "") return null;
+  const note = el("p", { class: "hint read-from", hidden: true },
+    `Read from the quote: ${input.dataset.original}, `, field.page ? `page ${field.page}: ` : "",
+    quoteButton(field.page, field.evidence_text, field.boxes));
+  input.addEventListener("input", () => { note.hidden = input.value.trim() === input.dataset.original.trim(); });
+  return note;
 }
 
 // "Check this": a value the reading wasn't sure of, or of a kind it has got wrong before.
@@ -774,11 +828,11 @@ function entryLine(path, name) {
 function textRow(path, label, field, extra = {}) {
   const id = `f-${path.replace(/[^a-z0-9]+/gi, "-")}`;
   const original = inputValue(field);
+  const input = el("input", { id, value: original, "data-path": path, "data-original": original,
+    "data-kind": extra.kind || "text", inputmode: extra.inputmode, autocomplete: "off",
+    placeholder: "Not on the quote" });
   return el("div", { class: "row" },
-    el("label", { for: id, text: label }),
-    el("input", { id, value: original, "data-path": path, "data-original": original,
-      "data-kind": extra.kind || "text", inputmode: extra.inputmode, autocomplete: "off",
-      placeholder: "Not on the quote" }),
+    el("label", { for: id, text: label }), input, readFromQuote(input, field),
     evidenceLine(field), checkLine(path), entryLine(path));
 }
 
@@ -928,6 +982,8 @@ function openReview(view) {
   state.checkThis = view.check_this || [];
   state.verified = new Set();
   state.confirmedOperands = new Set();
+  state.pageImages = view.page_images || [];
+  state.boxIndex = indexBoxes(view.extraction);
   const notes = [];
   const skipped = view.extraction.pages_skipped || [];
   if (!view.processing_complete) {
@@ -1165,14 +1221,30 @@ function evidenceItem(e) {
       ? `; the reading was ${valueText(e.original_value)}` : "";
     const shown = isAmountField(e.field) && e.value !== null && e.value !== "" && Number.isFinite(Number(e.value))
       ? formatInr(e.value) : valueText(e.value, e.raw);
-    return el("li", { text: `${label}: ${shown} (entered by you${was})` });
+    if (!e.evidence_text || state.mode === "manual") return el("li", { text: `${label}: ${shown} (entered by you${was})` });
+    return el("li", {}, `${label}: ${shown} (entered by you${was}). Read from the quote: `,
+      e.page ? `page ${e.page}, ` : "", quoteButton(e.page, e.evidence_text), " ", pageButton(e.page, e.evidence_text));
   }
   if (e.kind === "user_confirmed") {
     return el("li", { text: `${label}: ${valueText(e.value)} (your answer)` });
   }
   if (!e.evidence_text) return el("li", { text: `${label}: ${valueText(e.value, e.raw)}` });
-  return el("li", {}, `${label}: `, e.page ? `page ${e.page}, ` : "", el("q", { text: e.evidence_text }), " ",
+  return el("li", {}, `${label}: `, e.page ? `page ${e.page}, ` : "", quoteButton(e.page, e.evidence_text), " ",
     pageButton(e.page, e.evidence_text));
+}
+
+// The reading's own field behind an operand ("module_groups[0].wattage_w" -> the first panel
+// line's wattage for the option being checked), to show what the quote said beside a typed number.
+function readingField(field) {
+  const q = state.extraction;
+  if (!q) return null;
+  const item = /^(module_groups|inverters)\[(\d+)\]\.(\w+)$/.exec(field);
+  if (item) {
+    const key = { wattage_w: "wattage", rating_kw: "rating", rating_kva: "rating" }[item[3]] || item[3];
+    const found = forOption(q[item[1]])[Number(item[2])];
+    return found ? found[key] : null;
+  }
+  return pick(q, field === "stated_capacity_kw" ? "stated_capacity" : field);
 }
 
 // A check holds its result until the household says the numbers it used are the ones on the
@@ -1181,10 +1253,16 @@ function operandItem(o) {
   const label = fieldLabel(o.field);
   const shown = isAmountField(o.field) && o.value !== null && o.value !== "" && Number.isFinite(Number(o.value))
     ? formatInr(o.value) : valueText(o.value, o.raw);
-  if (o.source === "you typed this") return el("li", { text: `${label}: ${shown} (you typed this)` });
+  if (o.source === "you typed this") {
+    const read = state.mode === "manual" ? null : readingField(o.field);
+    if (!read || !read.evidence_text) return el("li", { text: `${label}: ${shown} (you typed this)` });
+    return el("li", {}, `${label}: ${shown} (you typed this). Read from the quote: ${valueText(read.value)}, `,
+      read.page ? `page ${read.page}, ` : "", quoteButton(read.page, read.evidence_text, read.boxes), " ",
+      pageButton(read.page, read.evidence_text, read.boxes));
+  }
   if (!o.source) return el("li", { text: `${label}: ${shown}` });
   return el("li", {}, `${label}: ${shown}, from `, o.source.page ? `page ${o.source.page}, ` : "",
-    el("q", { text: o.source.text }), " ", pageButton(o.source.page, o.source.text));
+    quoteButton(o.source.page, o.source.text), " ", pageButton(o.source.page, o.source.text));
 }
 
 async function confirmOperands(token, button) {

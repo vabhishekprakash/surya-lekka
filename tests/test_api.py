@@ -637,6 +637,10 @@ def test_sample_route_serves_the_saved_reading_by_default(aws, monkeypatch):
     body = get(job)[1]
     assert body["status"] == "done" and body["mode"] == "saved" and body["processing_complete"] is True
     assert body["extraction"] == reading["quote"] and body["page_text"] == reading["pages"]
+    # short-lived links to the synthetic sample's page images, for highlighting
+    assert len(body["page_images"]) == body["page_count"]
+    assert all(f"samples/S1/page-{n:02d}.jpg" in url and "Expires" in url or "X-Amz-Expires" in url
+               for n, url in enumerate(body["page_images"], 1))
     assert body["findings"] == json.loads(json.dumps(run_checks(reading["quote"])["findings"], default=str))
     status, checked = recheck_confirmed(job, {"answers": S1_ANSWERS})
     assert status == 200 and {f["status"] for f in checked["findings"]} == {"consistent"}
@@ -804,6 +808,9 @@ def test_textract_reads_each_page_with_its_own_call(aws, textract, caplog):
     assert SECRET_LINE not in stored and "QUERY_RESULT" not in stored and "Blocks" not in stored
     assert SECRET_LINE not in caplog.text and "Rs 1,90,000" not in caplog.text
     assert uploads(aws, job["job_id"]) == []
+    # Highlighting: each piece of evidence carries its page and box, and nothing more.
+    assert [b["page"] for c in total["candidates"] for b in c["boxes"]] == [1, 2, 3]
+    assert all(b["box"] == [0.05, 0.5, 0.8, 0.02] for c in total["candidates"] for b in c["boxes"])
 
 
 def test_textract_saves_each_page_and_a_retry_reads_only_the_rest(aws, textract):
@@ -818,6 +825,8 @@ def test_textract_saves_each_page_and_a_retry_reads_only_the_rest(aws, textract)
     assert run_worker(job["job_id"]) == ["done"]
     assert len(textract.calls) == 3
     assert json.loads(item(job["job_id"])["stats"])["resumed_batches"] == 2
+    total = get(job)[1]["extraction"]["gross_total"]
+    assert [c["page"] for c in total["candidates"] if c.get("boxes")] == [1, 2, 3]  # saved pages keep their boxes
 
 
 def test_textract_bad_page_leaves_processing_incomplete(aws, textract):

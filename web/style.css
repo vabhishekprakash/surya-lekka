@@ -233,3 +233,11 @@ dialog::backdrop { background: rgba(0, 0, 0, 0.55); }
 .check-this { margin-top: 0.35rem; }
 .check-this .warn { color: var(--bad); display: block; }
 .check-this .verify { display: flex; gap: 0.5rem; align-items: flex-start; margin-top: 0.25rem; font-size: 0.92rem; }
+.page-frame { position: relative; display: block; width: 100%; }
+.page-frame img { display: block; width: 100%; height: auto; }
+.page-frame .hl { position: absolute; border: 2px solid #c2410c; background: rgba(250, 204, 21, 0.28); border-radius: 2px; pointer-events: none; box-sizing: border-box; }
+.quote-link { all: unset; cursor: pointer; text-decoration: underline dotted; overflow-wrap: anywhere; }
+.quote-link:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; }
+.candidates { margin: 6px 0 0; padding-left: 18px; }
+.read-from { margin: 4px 0 0; overflow-wrap: anywhere; }
+.operands ul { padding-left: 18px; overflow-wrap: anywhere; }

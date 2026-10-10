@@ -31,6 +31,7 @@ from extract.merge import merge_batches
 from extract.nova_client import ExtractionFailure, build_request, extract_batch, make_client, request_size
 from extract.render import MAX_IMAGE_BYTES, PageImage
 
+from . import boxes
 from .common import (
     MANIFEST_MAX_BYTES,
     MAX_RETRIES,
@@ -57,7 +58,7 @@ CONNECT_TIMEOUT_SECONDS = 10
 SAVE_RESERVE_SECONDS = 30
 # A call starts only with time left for it to time out and for the job to be saved.
 CALL_BUDGET_MS = (READ_TIMEOUT_SECONDS + CONNECT_TIMEOUT_SECONDS + SAVE_RESERVE_SECONDS) * 1000
-SAVED_KEYS = ("batch", "pages", "model_id", "contract", "usage")
+SAVED_KEYS = ("batch", "pages", "model_id", "contract", "usage", "boxes")
 DELETE_ATTEMPTS = 3
 DELETE_BACKOFF_SECONDS = 0.5
 # Safe reason codes for an error that stops the job.
@@ -277,7 +278,8 @@ def _extract(job_id, pages, saved, context):
             failures.append({"batch": n, "pages": numbers, "kind": f.kind, "code": f.code})
             log("batch_failed", reason=f.kind, batches=n)
             continue
-        record = {k: result.get(k) for k in SAVED_KEYS}
+        record = {k: result.get(k) for k in SAVED_KEYS if k != "boxes"}
+        record["boxes"] = boxes.record_boxes(result)  # page coordinates for highlighting, no text
         record["model_id"] = model
         records.append(record)
         _save_batch(job_id, record)
@@ -291,7 +293,9 @@ def _extract(job_id, pages, saved, context):
     else:
         stats.update(input_tokens=sum(u.get("inputTokens", 0) for u in usage),
                      output_tokens=sum(u.get("outputTokens", 0) for u in usage))
-    return merge_batches(records, failures, rejected), stats
+    quote = merge_batches(records, failures, rejected)
+    boxes.attach(quote, [b for r in records for b in r.get("boxes") or []])
+    return quote, stats
 
 
 def _save(job_id, quote, stats):

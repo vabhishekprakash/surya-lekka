@@ -213,3 +213,19 @@ def test_a_held_finding_asks_about_its_numbers_with_yes_or_fix():
     # every check request carries the operand sets confirmed so far; the server decides which still apply
     assert APP.count("confirmed_operands: [...state.confirmedOperands]") == 3
     assert "state.confirmedOperands = new Set();" in APP[APP.index("function openReview("):]
+
+
+def test_values_are_highlighted_on_their_page():
+    viewer = APP[APP.index("function openPage("):APP.index("function closePage(")] if "function closePage(" in APP \
+        else APP[APP.index("function openPage("):]
+    assert 'class: "hl"' in viewer and "left:${left * 100}%" in viewer and "scrollIntoView" in viewer
+    assert "state.boxIndex = indexBoxes(view.extraction)" in APP and "state.pageImages = view.page_images || []" in APP
+    # tapping a quoted value opens its page at its box, in the review, the results and the confirm step
+    assert APP.count("quoteButton(") >= 6
+    # conflicting evidence shows each candidate with its own box
+    assert "c.boxes" in APP[APP.index("function evidenceLine("):APP.index("function readFromQuote(")]
+    # after a correction, what the quote said stays visible with its source
+    assert "Read from the quote: ${input.dataset.original}" in APP
+    assert "Read from the quote: ${valueText(read.value)}" in APP
+    css = (ROOT / "web" / "style.css").read_text(encoding="utf-8")
+    assert ".page-frame .hl { position: absolute;" in css and ".page-frame { position: relative;" in css

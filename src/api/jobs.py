@@ -97,6 +97,9 @@ def _view(item):
         view["retryable"] = reason in RETRYABLE_REASONS and int(item.get("retries", 0)) < MAX_RETRIES
     if item.get("page_text"):
         view["page_text"] = json.loads(item["page_text"])
+    source = str(item.get("source") or "")
+    if source.startswith("sample:") and view["mode"] == "saved":
+        view["page_images"] = _sample_page_urls(source.split(":", 1)[1], view["page_count"])
     if status == "done":
         result = json.loads(item.get("checked") or item["result"])
         view.update({
@@ -111,6 +114,19 @@ def _view(item):
             "corrections": json.loads(item["corrections"]) if item.get("corrections") else None,
         })
     return view
+
+
+SAMPLE_IMAGE_SECONDS = 900
+
+
+def _sample_page_urls(sample_id, pages):
+    """Short-lived links to a synthetic sample's page images, so its values can be highlighted
+    on the page. Samples only: a household's own pages never leave their device this way."""
+    if sample_id not in sample_ids():
+        return []
+    return [s3().generate_presigned_url("get_object", ExpiresIn=SAMPLE_IMAGE_SECONDS,
+                                        Params={"Bucket": bucket_name(), "Key": f"samples/{sample_id}/page-{n:02d}.jpg"})
+            for n in range(1, pages + 1)]
 
 
 @guarded("read")
