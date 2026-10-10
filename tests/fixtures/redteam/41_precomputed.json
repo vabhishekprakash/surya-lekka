@@ -1,0 +1,62 @@
+{
+ "name": "41_precomputed",
+ "issue": "Non-definitive without a fresh confirmation for this job and review revision",
+ "mode": "api_sequence",
+ "textract_reply": {
+  "DocumentMetadata": {
+   "Pages": 1
+  },
+  "Blocks": [
+   {
+    "BlockType": "PAGE",
+    "Id": "page",
+    "Page": 1
+   },
+   {
+    "BlockType": "LINE",
+    "Text": "Base price Rs 1,00,000",
+    "Confidence": 99.0,
+    "Geometry": {
+     "BoundingBox": {
+      "Left": 0.05,
+      "Top": 0.1,
+      "Width": 0.8,
+      "Height": 0.02
+     }
+    },
+    "Id": "b1",
+    "Page": 1
+   },
+   {
+    "BlockType": "LINE",
+    "Text": "GST Rs 18,000",
+    "Confidence": 99.0,
+    "Geometry": {
+     "BoundingBox": {
+      "Left": 0.05,
+      "Top": 0.2,
+      "Width": 0.8,
+      "Height": 0.02
+     }
+    },
+    "Id": "b2",
+    "Page": 1
+   },
+   {
+    "BlockType": "LINE",
+    "Text": "Grand total Rs 1,20,000",
+    "Confidence": 99.0,
+    "Geometry": {
+     "BoundingBox": {
+      "Left": 0.05,
+      "Top": 0.3,
+      "Width": 0.8,
+      "Height": 0.02
+     }
+    },
+    "Id": "b3",
+    "Page": 1
+   }
+  ]
+ }
+}

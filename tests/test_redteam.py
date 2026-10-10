@@ -17,7 +17,7 @@ from extract.merge import merge_batches
 
 ALL = sorted((Path(__file__).parent / "fixtures" / "redteam").glob("[0-9][0-9]_*.json"))
 FIXTURES = [p for p in ALL if int(p.name[:2]) <= 28]
-ROUND4 = [p for p in ALL if int(p.name[:2]) >= 29]
+ROUND4 = [p for p in ALL if 29 <= int(p.name[:2]) <= 33]  # 37 to 42 are API sequences: test_round5.py
 DISABLED = {13: "FORMS stays disabled", 14: "AnalyzeExpense stays disabled", 15: "AnalyzeExpense stays disabled"}
 
 
