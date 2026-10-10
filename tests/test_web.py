@@ -236,7 +236,7 @@ def test_values_are_highlighted_on_their_page():
     assert "c.boxes" in APP[APP.index("function evidenceLine("):APP.index("function readFromQuote(")]
     # after a correction, what the quote said stays visible with its source
     assert "Read from the quote: ${input.dataset.original}" in APP
-    assert '"op.typed_read": "{label}: {value} (you typed this). Read from the quote: {read}, "' in RES
+    assert '"op.changed": "{label}: The app read {read}; you changed it to {value}."' in RES
     css = (ROOT / "web" / "style.css").read_text(encoding="utf-8")
     assert ".page-frame .hl { position: absolute;" in css and ".page-frame { position: relative;" in css
 
@@ -317,3 +317,22 @@ def test_the_results_screen_has_a_telugu_english_switch_remembered_safely():
 def test_only_telugu_ships_and_hindi_is_not_offered():
     names = {p.name for p in WEB.iterdir() if p.is_file()}
     assert "te.js" in names and not any(n.startswith("hi") for n in names)
+
+
+def test_fix_a_number_goes_to_the_boxes_own_field_and_a_change_asks_again():
+    fix = APP[APP.index("function fixNumber(f)"):APP.index("function viewLang()")]
+    assert "go(state.editView || \"home\")" in fix and 'classList.add("fix-target")' in fix
+    assert "scrollIntoView({ block: \"center\" })" in fix and "focus({ preventScroll: true })" in fix
+    assert "onclick: () => ctx.onFix(f)" in RES and "onFix: fixNumber" in APP
+    assert ".fix-target {" in (WEB / "style.css").read_text(encoding="utf-8")
+    # a change after confirming resets every box (server-side) and says why above them
+    assert APP.count("state.reconfirm = state.reconfirm || state.confirmedOperands.size > 0;") == 2
+    assert '"results.reconfirm": "You changed a number, so please confirm these again."' in RES
+    assert 'id="results-reconfirm"' in INDEX
+
+
+def test_every_charge_listed_defaults_to_not_sure():
+    # the app never assumes the charge list is complete
+    row = APP[APP.index("function chargesCompleteRow()"):APP.index("function renderReviewFlags()")]
+    assert '[["unclear", "Not sure"], ["true", "Yes"], ["false", "No"]]' in row  # first option: the default
+    assert "select.value" not in row and "selected" not in row

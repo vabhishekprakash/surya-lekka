@@ -118,7 +118,9 @@ export const UI_EN = {
   "op.plain": "{label}: {value}",
   "op.from": "{label}: {value}, from ",
   "op.typed": "{label}: {value} (you typed this)",
-  "op.typed_read": "{label}: {value} (you typed this). Read from the quote: {read}, ",
+  "op.changed": "{label}: The app read {read}; you changed it to {value}.",
+  "op.where": "Page {n}: ",
+  "results.reconfirm": "You changed a number, so please confirm these again.",
   "op.yes": "Yes",
   "op.fix": "Fix a number",
   "page.show": "Show page {n}",
@@ -313,9 +315,17 @@ export function valueText(value, raw, ctx) {
   return text;
 }
 
+const UNITS = { wattage_w: "W", wattage: "W", stated_capacity_kw: "kW", rating_kw: "kW", rating_kva: "kVA" };
+
+// A bare number gets its field's unit ("500" in the wattage box is shown as "500 W").
+function withUnit(field, text) {
+  const unit = UNITS[String(field).split(".").pop()];
+  return unit && /^[0-9][0-9.,]*$/.test(String(text).trim()) ? `${String(text).trim()} ${unit}` : text;
+}
+
 function shownValue(field, value, raw, ctx) {
   return isAmountField(field) && value !== null && value !== "" && Number.isFinite(Number(value))
-    ? formatInr(value) : valueText(value, raw, ctx);
+    ? formatInr(value) : withUnit(field, valueText(value, raw, ctx));
 }
 
 function evidenceItem(e, ctx) {
@@ -356,8 +366,9 @@ function operandItem(o, ctx) {
   if (o.source === "you typed this") {
     const read = ctx.mode === "manual" ? null : ctx.readingField(o.field);
     if (!read || !read.evidence_text) return el("li", { text: t(lang, "op.typed", { label, value }) });
-    return el("li", {}, t(lang, "op.typed_read", { label, value, read: valueText(read.value, undefined, ctx) }),
-      read.page ? t(lang, "ev.page", { n: read.page }) : "", ctx.quoteButton(read.page, read.evidence_text, read.boxes),
+    const was = withUnit(o.field, valueText(read.value, undefined, ctx));
+    return el("li", {}, t(lang, "op.changed", { label, read: was, value }), " ",
+      read.page ? t(lang, "op.where", { n: read.page }) : "", ctx.quoteButton(read.page, read.evidence_text, read.boxes),
       " ", ctx.pageButton(read.page, read.evidence_text, read.boxes));
   }
   if (!o.source) return el("li", { text: t(lang, "op.plain", { label, value }) });
@@ -372,7 +383,8 @@ function operandQuestion(f, ctx) {
   if (!f.confirm_token || f.operands_confirmed !== false) return null;
   const yes = el("button", { type: "button", class: "button", text: t(lang, "op.yes") });
   yes.addEventListener("click", () => ctx.onConfirm(f.confirm_token, yes));
-  const fix = el("button", { type: "button", class: "button secondary", text: t(lang, "op.fix"), onclick: ctx.onFix });
+  const fix = el("button", { type: "button", class: "button secondary", text: t(lang, "op.fix"),
+    onclick: () => ctx.onFix(f) });
   return el("div", { class: "operands" },
     el("ul", {}, (f.operands || []).map((o) => operandItem(o, ctx))),
     el("div", { class: "actions" }, yes, fix));
@@ -471,8 +483,11 @@ export function vendorBlock(result, ctx) {
 // Everything the results screen shows for one result, built in one language. Throws MissingText
 // before anything reaches the page if any piece has no words in that language.
 export function buildResults(result, ctx) {
+  const pending = (result.findings || []).some((f) => f.confirm_token && f.operands_confirmed === false);
   return {
     summary: summaryText(result, ctx),
+    // after a change every box asks again (confirmations are bound to the review revision)
+    reconfirm: ctx.reconfirm && pending ? t(ctx.lang, "results.reconfirm") : "",
     groups: findingGroups(result, ctx),
     vendor: vendorBlock(result, ctx),
     mode: ctx.modeKey ? t(ctx.lang, `mode.${ctx.modeKey}`) : "",

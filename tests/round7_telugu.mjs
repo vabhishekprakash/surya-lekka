@@ -6,7 +6,8 @@ import pack from '../web/te.js';
 // Execute the production app functions verbatim, using an in-memory DOM and no network.
 const source = fs.readFileSync('./web/app.js', 'utf8');
 // adapted: fixedTexts is the production helper that now builds the fixed labels inside the fallback
-const functions = ['viewLang', 'resultsContext', 'renderResults', 'applyLanguage', 'fixedTexts', 'setLang',
+// adapted (Block 21): fixNumber and fieldFor are what resultsContext now hands "Fix a number"
+const functions = ['viewLang', 'resultsContext', 'renderResults', 'applyLanguage', 'fixedTexts', 'fixNumber', 'fieldFor', 'setLang',
   'pageButton', 'quoteButton', 'boxesFor', 'openResults', 'go', 'show', 'canShow'];
 const code = functions.map(name => {
   const match = source.match(new RegExp('function ' + name + '\\([\\s\\S]*?\\n\\}'));

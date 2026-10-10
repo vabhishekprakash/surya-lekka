@@ -31,6 +31,8 @@ def test_round8_dom_checks_pass(tmp_path):
     out = dom_run(tmp_path)
     assert out["view"] == "review" and out["requests"][0] == ["POST", "/samples/S4"]
     assert out["missingKeyFallback"] == "entire results screen matches English baseline"
+    # Block 21: "Fix a number" lands on the box's own field on "Check what was read", highlighted
+    assert out["fixTarget"] == "INPUT" and out["fixPath"] and out["fixHighlighted"], out
 
 
 def test_a_cold_sample_link_retries_once_then_offers_try_again(tmp_path):

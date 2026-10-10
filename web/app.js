@@ -143,6 +143,7 @@ const state = {
   pageImages: [],
   boxIndex: new Map(),
   challenge: null,
+  reconfirm: false,   // the household changed a number after confirming some: say why boxes ask again
   retrySample: null,  // a linked sample the problem screen's "Try again" reopens
   seq: 0,          // the latest request whose answer may still change the screen
   lang: "en",      // the results screen's language: "en" or "te" (the household's choice)
@@ -351,6 +352,7 @@ async function openLinkedSample(sampleId) {
 }
 
 function newJob(job, mode) {
+  state.reconfirm = false;
   state.job = { job_id: job.job_id, token: job.token };
   state.mode = mode;
   state.extraction = null;
@@ -1118,6 +1120,7 @@ async function submitReview(event) {
   try {
     // A fresh submission of the review starts over: any change of value, answer or option asks
     // again, and the server refuses tokens from an earlier revision anyway.
+    state.reconfirm = state.reconfirm || state.confirmedOperands.size > 0;
     state.confirmedOperands = new Set();
     const body = { ...collectReview(), confirmed_operands: [] };
     state.lastRequest = { path: jobPath("/checks"), body };
@@ -1232,6 +1235,7 @@ async function submitManual(event) {
   status.textContent = "Running the checks";
   try {
     // A fresh submission of the form starts over: tokens from before an edit never carry over.
+    state.reconfirm = state.reconfirm || state.confirmedOperands.size > 0;
     state.confirmedOperands = new Set();
     const body = { ...collectManual(), challenge: state.challenge, confirmed_operands: [] };
     state.lastRequest = { path: "/checks", body };
@@ -1338,6 +1342,44 @@ function openResults(result, { keepPlace = false, focusCheck = null } = {}) {
 
 const LANG_KEY = "surya-lekka-lang";
 
+// The input behind an operand: on "Check what was read", the box for that line of the option
+// being checked ("module_groups[0].wattage_w" -> the first panel line's wattage); on the typed
+// form, its named box. null when there is none (an added charge on the typed form).
+function fieldFor(field) {
+  const item = /^(module_groups|inverters|extra_charges)\[(\d+)\]\.(\w+)$/.exec(field);
+  const key = item && ({ wattage_w: "wattage", rating_kw: "rating", rating_kva: "rating" }[item[3]] || item[3]);
+  if (state.editView === "manual") {
+    const names = { "module_groups.count": "panel_count", "module_groups.wattage": "panel_wattage",
+      "module_groups.make_model": "panel_make_model", "inverters.make_model": "inverter_make_model",
+      "inverters.rating": "inverter_rating", stated_capacity_kw: "stated_capacity" };
+    const name = item ? names[`${item[1]}.${key}`] : (names[field] || field);
+    return name ? $(`#manual-form [name="${CSS.escape(name)}"]`) : null;
+  }
+  let path = field === "stated_capacity_kw" ? "stated_capacity" : field;
+  if (item) {
+    const found = state.extraction && forOption(state.extraction[item[1]])[Number(item[2])];
+    const id = found && found[{ module_groups: "group_id", inverters: "inverter_id", extra_charges: "charge_id" }[item[1]]];
+    if (!id) return null;
+    path = `${item[1]}[${id}].${key}`;
+  }
+  return $(`#review-fields [data-path="${CSS.escape(path)}"]`);
+}
+
+// "Fix a number": back to the screen the numbers came from, at the fields this box used, with
+// the first one focused and all of them highlighted until they're edited.
+function fixNumber(f) {
+  go(state.editView || "home");
+  for (const old of $$(".fix-target")) old.classList.remove("fix-target");
+  const inputs = (f.operands || []).map((o) => fieldFor(o.field)).filter(Boolean);
+  if (!inputs.length) return;
+  for (const input of inputs) {
+    input.classList.add("fix-target");
+    input.addEventListener("input", () => input.classList.remove("fix-target"), { once: true });
+  }
+  if (inputs[0].scrollIntoView) inputs[0].scrollIntoView({ block: "center" });
+  inputs[0].focus({ preventScroll: true });
+}
+
 function viewLang() {
   return state.view === "results" ? state.shownLang : ENGLISH;
 }
@@ -1348,7 +1390,7 @@ function resultsContext(lang) {
     entryChecks: state.entryChecks.length, readingField,
     quoteButton: (page, text, boxes) => quoteButton(page, text, boxes, lang),
     pageButton: (page, text, boxes) => pageButton(page, text, boxes, lang),
-    onConfirm: confirmOperands, onFix: () => go(state.editView || "home"),
+    onConfirm: confirmOperands, onFix: fixNumber, reconfirm: state.reconfirm,
     copyText: (message) => navigator.clipboard.writeText(message),
   };
 }
@@ -1373,6 +1415,9 @@ function renderResults() {
   $("#results-groups").replaceChildren(...built.groups);
   $("#vendor-questions").replaceChildren(...built.vendor);
   $("#results-mode").textContent = built.mode;
+  $("#results-reconfirm").textContent = built.reconfirm;
+  $("#results-reconfirm").hidden = !built.reconfirm;
+  if (!built.reconfirm) state.reconfirm = false;  // every box is confirmed again
   const notice = $("#lang-notice");
   notice.textContent = wanted !== lang ? NOT_IN_TELUGU : "";
   notice.hidden = wanted === lang;

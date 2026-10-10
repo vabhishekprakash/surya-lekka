@@ -49,7 +49,9 @@ out.missingKeyFallback='entire results screen matches English baseline';
 const fix=[...w.document.querySelectorAll('#view-results button')].find(b=>b.textContent==='Fix a number');
 assert.ok(fix);
 fix.click();
-out.fixTarget=w.document.activeElement.tagName;
+out.fixTarget=w.document.activeElement.tagName;  // required (Block 21): the field itself, not the heading
+out.fixPath=w.document.activeElement.dataset ? w.document.activeElement.dataset.path : null;
+out.fixHighlighted=w.document.activeElement.classList.contains('fix-target');
 assert.equal(read('state.view'),'review');
 console.log(JSON.stringify(out));
 dom.window.close();
