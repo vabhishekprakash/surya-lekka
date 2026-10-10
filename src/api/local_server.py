@@ -236,6 +236,7 @@ class Handler(BaseHTTPRequestHandler):
         if self.backend and urlsplit(self.path).path == UPLOAD_PATH:
             return self._upload()
         if not (self.backend and self._dispatch("POST")):
+            self._body(API_MAX_BYTES)  # read the unused body first, or Windows may abort the connection
             self._send(404, b'{"error": "not_found"}')
 
     def _static(self):
