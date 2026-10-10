@@ -128,12 +128,14 @@ def get_job(event, context):
 
 @guarded("recheck")
 def recheck(event, context):
-    """POST /jobs/{id}/checks?t=token {"corrections": {...}, "answers": {...}, "verified": [path, ...]}
+    """POST /jobs/{id}/checks?t=token {"corrections": {...}, "answers": {...}, "verified": [token],
+    "confirmed_operands": [token]}
 
     Runs the checks on the original extraction with the user's corrections and
     answers (consumer type, state, portal date, first system, prior subsidy, Give It
-    Up, selected option) and the values the household checked one by one. Corrections are
-    stored with their provenance.
+    Up, selected option), the values the household checked one by one and the operand sets
+    it confirmed (tokens bound to option, field and value). Corrections are stored with
+    their provenance.
     """
     try:
         item = authorised_job(event)
@@ -142,12 +144,14 @@ def recheck(event, context):
         body = body_json(event)
         corrections = body.get("corrections") or {}
         answers = body.get("answers", body.get("confirmations")) or {}
-        verified = body.get("verified") or []
         if not isinstance(corrections, dict) or not isinstance(answers, dict):
             raise ApiError(400, "bad_inputs", "corrections and answers must be JSON objects.")
-        if not isinstance(verified, list) or not all(isinstance(p, str) for p in verified):
-            raise ApiError(400, "bad_inputs", "verified must be a list of value paths.")
-        user_inputs = {"corrections": corrections, "confirmations": answers, "verified": verified}
+        tokens = {}
+        for key in ("verified", "confirmed_operands"):  # tokens from an earlier result
+            tokens[key] = body.get(key) or []
+            if not isinstance(tokens[key], list) or not all(isinstance(t, str) for t in tokens[key]):
+                raise ApiError(400, "bad_inputs", f"{key} must be a list of tokens.")
+        user_inputs = {"corrections": corrections, "confirmations": answers, **tokens}
         try:
             result = run_checks(json.loads(item["extraction"]), user_inputs)
         except KeyError as e:

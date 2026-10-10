@@ -13,6 +13,7 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
 from .check_this import _paths
+from .confirm import value_token
 from .common import rupees
 from .contract import TO_KW, TO_WATTS
 
@@ -75,11 +76,14 @@ def _times(a, b):
     return next((t for t in DATA["scale_ratios"] if abs(ratio / t - 1) <= tolerance), None)
 
 
-def check(quote, selected, own_option):
-    """[{"path", "reason", "params"}] for typed numbers to confirm, sorted by path; each such
-    field gets "entry_check" in place."""
+def check(quote, selected, own_option, verified=()):
+    """[{"path", "reason", "params", "message", "token"}] for typed numbers to confirm, sorted by
+    path; each such field gets "entry_check" in place. A typed number whose token (its option,
+    field and value) the household confirmed is used as typed."""
     fields = {path: field for path, _, field in _paths(quote, selected, own_option) if field}
-    typed = {p for p, f in fields.items() if f.get("provenance") == TYPED and not f.get("entry_confirmed")}
+    verified = set(verified)
+    typed = {p for p, f in fields.items() if f.get("provenance") == TYPED
+             and value_token(p, own_option, f) not in verified}
     values = {p: v for p, f in fields.items() if (v := _value(p, f)) is not None}
     out = {}
     for path in sorted(typed):
@@ -118,6 +122,7 @@ def check(quote, selected, own_option):
                     out[m] = {"path": m, "reason": "scale", "params": {"times": times}}
     for path, entry in out.items():
         entry["message"] = message(entry)
+        entry["token"] = value_token(path, own_option, fields[path])
         fields[path]["entry_check"] = entry["reason"]
     return [out[p] for p in sorted(out)]
 

@@ -5,7 +5,7 @@ was written before the code it guards."""
 
 import pytest
 
-from checks import run_checks
+from conftest import run_confirmed as run_checks  # checks after the household confirms the numbers
 from extract import textract_client as tc
 from extract.merge import merge_batches
 from textract_pages import Page, expense

@@ -61,3 +61,15 @@ def batch_fact(part, name, option=None):
     """The field for a fact in one normalised batch, or None."""
     return next((f["field"] for f in part["facts"] if f["name"] == name and f["option_id"] == option), None)
 
+
+
+def run_confirmed(quote, user_inputs=None, **kwargs):
+    """run_checks after the household confirms every operand set exactly as shown: what a check
+    finds once its numbers are confirmed. It ticks no "check this" value and confirms no typed
+    number the guards ask about."""
+    from checks import run_checks
+
+    first = run_checks(copy.deepcopy(quote), copy.deepcopy(user_inputs), **kwargs)
+    tokens = [f["confirm_token"] for f in first["findings"] if f.get("confirm_token")]
+    inputs = {**copy.deepcopy(user_inputs or {}), "confirmed_operands": tokens}
+    return run_checks(quote, inputs, **kwargs)

@@ -91,10 +91,12 @@ def typed_corrections(fields):
 
 @guarded("manual")
 def handler(event, context):
-    """POST /checks {"fields": {...}, "answers": {...}, "confirmed": [field, ...]}
+    """POST /checks {"fields": {...}, "answers": {...}, "verified": [token], "confirmed_operands": [token]}
 
-    confirmed names the typed numbers the household confirmed after a guard asked
-    about them (a form field name such as "panel_wattage", or a charge's path)."""
+    verified holds the tokens of typed numbers the household confirmed after a guard asked
+    about them; confirmed_operands the tokens of operand sets the household confirmed. Both
+    come from an earlier response and bind to the exact value, so a changed number needs
+    confirming again."""
     try:
         body = body_json(event)
         fields, answers = body.get("fields"), body.get("answers")
@@ -103,16 +105,17 @@ def handler(event, context):
             raise ApiError(400, "bad_inputs", "fields and answers must be JSON objects.")
         if any(isinstance(v, (dict, list)) for v in answers.values()):
             raise ApiError(400, "bad_inputs", "Each answer must be a single value.")
-        confirmed = body.get("confirmed") or []
-        if not isinstance(confirmed, list) or not all(isinstance(c, str) for c in confirmed):
-            raise ApiError(400, "bad_inputs", "confirmed must be a list of field names.")
+        tokens = {}
+        for key in ("verified", "confirmed_operands"):
+            tokens[key] = body.get(key) or []
+            if not isinstance(tokens[key], list) or not all(isinstance(t, str) for t in tokens[key]):
+                raise ApiError(400, "bad_inputs", f"{key} must be a list of tokens.")
         charges, corrections = typed_corrections(fields)
-        verified = [TEXT_FIELDS.get(c, c) for c in confirmed if TEXT_FIELDS.get(c, c) in corrections]
         # The user typed one set of figures, so there is one option.
         confirmations = {"multiple_options": False, **answers}
         try:
             result = run_checks(blank_quote(charges), {"corrections": corrections, "confirmations": confirmations,
-                                                       "verified": verified})
+                                                       **tokens})
         except KeyError as e:
             raise ApiError(400, "unknown_field", str(e).strip("'\"")) from None
         except (TypeError, ValueError, AttributeError):

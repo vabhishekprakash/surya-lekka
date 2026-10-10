@@ -182,13 +182,13 @@ def test_amounts_the_household_enters_show_in_rupees():
 
 def test_values_to_check_each_have_their_own_tick_and_no_bulk_accept():
     assert "data-verify" in APP and "verified" in APP
-    assert re.search(r'el\("input", \{ type: "checkbox", id, "data-verify": path \}\)', APP)
+    assert 'el("input", { type: "checkbox", id, "data-verify": entry.token, "data-verify-path": path })' in APP
     for bulk in ("confirm all", "accept all", "check all", "select all", "tick all"):
         assert bulk not in APP.lower() and bulk not in INDEX.lower()
     # a conflicting value has no tick: the household types the right one
     assert 'if (!entry.reasons.includes("conflict"))' in APP
     # a ticked value that was also changed is sent as a correction, not as checked
-    assert "!(path in corrections)" in APP
+    assert "!(path in corrections)" in APP and "map((box) => box.dataset.verify)" in APP
 
 
 def test_check_this_reasons_cover_every_reason_the_checks_give():
@@ -198,9 +198,18 @@ def test_check_this_reasons_cover_every_reason_the_checks_give():
 
 
 def test_typed_numbers_the_guards_ask_about_get_their_own_tick():
-    assert '"data-confirm-entry": name || path' in APP and "This number is right as I typed it" in APP
+    assert '"data-confirm-entry": entry.token' in APP and "This number is right as I typed it" in APP
     collect = APP[APP.index("function collectManual()"):APP.index("async function submitManual(")]
-    assert "confirmed" in collect and "data-confirm-entry" in collect
+    assert "return { fields, answers, verified }" in collect and "data-confirm-entry" in collect
     # a note goes away as soon as the number is changed, so a tick never confirms a new number
     assert 'input.addEventListener("input", () => note.remove(), { once: true })' in APP
     assert "state.entryChecks = result.entry_checks || []" in APP
+
+
+def test_a_held_finding_asks_about_its_numbers_with_yes_or_fix():
+    card = APP[APP.index("function operandItem(o)"):APP.index("function renderVendor(")]
+    assert 'text: "Yes"' in card and 'text: "Fix a number"' in card and "(you typed this)" in card
+    assert "f.operands_confirmed !== false" in card and "state.confirmedOperands.add(token)" in card
+    # every check request carries the operand sets confirmed so far; the server decides which still apply
+    assert APP.count("confirmed_operands: [...state.confirmedOperands]") == 3
+    assert "state.confirmedOperands = new Set();" in APP[APP.index("function openReview("):]

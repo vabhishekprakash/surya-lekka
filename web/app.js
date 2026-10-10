@@ -185,6 +185,8 @@ const state = {
   checkThis: [],
   verified: new Set(),
   entryChecks: [],
+  confirmedOperands: new Set(),
+  lastRequest: null,
 };
 
 // ---------------------------------------------------------------- helpers
@@ -750,8 +752,8 @@ function checkLine(path) {
   const parts = [el("span", { class: "warn", text: `Check this against the quote: ${why}. The checks that use it wait until you do.` })];
   if (!entry.reasons.includes("conflict")) {
     const id = `verify-${path.replace(/[^a-z0-9]+/gi, "-")}`;
-    const box = el("input", { type: "checkbox", id, "data-verify": path });
-    box.checked = state.verified.has(path);
+    const box = el("input", { type: "checkbox", id, "data-verify": entry.token, "data-verify-path": path });
+    box.checked = state.verified.has(entry.token);
     parts.push(el("label", { class: "verify", for: id }, box, " I checked this value against the quote and it is right"));
   }
   return el("div", { class: "check-this" }, parts);
@@ -763,7 +765,7 @@ function entryLine(path, name) {
   const entry = state.entryChecks.find((e) => (name ? e.field === name : e.path === path));
   if (!entry) return null;
   const id = `confirm-${(name || path).replace(/[^a-z0-9]+/gi, "-")}`;
-  const box = el("input", { type: "checkbox", id, "data-confirm-entry": name || path });
+  const box = el("input", { type: "checkbox", id, "data-confirm-entry": entry.token });
   return el("div", { class: "check-this", "data-entry-note": "" },
     el("span", { class: "warn", text: entry.message }),
     el("label", { class: "verify", for: id }, box, " This number is right as I typed it"));
@@ -925,6 +927,7 @@ function openReview(view) {
   state.option = "";
   state.checkThis = view.check_this || [];
   state.verified = new Set();
+  state.confirmedOperands = new Set();
   const notes = [];
   const skipped = view.extraction.pages_skipped || [];
   if (!view.processing_complete) {
@@ -998,8 +1001,10 @@ function collectReview() {
   if (complete) answers.extra_charges_complete = answerValue(complete.value);
   if (state.option) answers.selected_option = state.option;
   // A ticked value counts only while it is unchanged: a changed value is a correction.
-  const verified = $$("#view-review [data-verify]").filter((box) => box.checked).map((box) => box.dataset.verify)
-    .filter((path) => !(path in corrections) && !(path.startsWith("flags.") && path.slice(6) in answers));
+  const verified = $$("#view-review [data-verify]").filter((box) => box.checked)
+    .filter(({ dataset: { verifyPath: path } }) => !(path in corrections)
+      && !(path.startsWith("flags.") && path.slice(6) in answers))
+    .map((box) => box.dataset.verify);
   for (const box of $$("#view-review [data-confirm-entry]")) if (box.checked) verified.push(box.dataset.confirmEntry);
   state.verified = new Set(verified);
   return { corrections, answers, verified };
@@ -1013,7 +1018,9 @@ async function submitReview(event) {
   status.classList.remove("error");
   status.textContent = "Running the checks";
   try {
-    const result = await api("POST", jobPath("/checks"), collectReview());
+    const body = { ...collectReview(), confirmed_operands: [...state.confirmedOperands] };
+    state.lastRequest = { path: jobPath("/checks"), body };
+    const result = await api("POST", state.lastRequest.path, body);
     status.textContent = "";
     openResults(result);
   } catch (error) {
@@ -1107,8 +1114,8 @@ function collectManual() {
   for (const select of $$("select[data-answer]", form)) {
     if (select.value) answers[select.name] = answerValue(select.value);
   }
-  const confirmed = $$("[data-confirm-entry]", form).filter((box) => box.checked).map((box) => box.dataset.confirmEntry);
-  return { fields, answers, confirmed };
+  const verified = $$("[data-confirm-entry]", form).filter((box) => box.checked).map((box) => box.dataset.confirmEntry);
+  return { fields, answers, verified };
 }
 
 async function submitManual(event) {
@@ -1119,7 +1126,9 @@ async function submitManual(event) {
   status.classList.remove("error");
   status.textContent = "Running the checks";
   try {
-    const result = await api("POST", "/checks", collectManual());
+    const body = { ...collectManual(), confirmed_operands: [...state.confirmedOperands] };
+    state.lastRequest = { path: "/checks", body };
+    const result = await api("POST", "/checks", body);
     status.textContent = "";
     state.mode = "manual";
     state.job = null;
@@ -1166,6 +1175,44 @@ function evidenceItem(e) {
     pageButton(e.page, e.evidence_text));
 }
 
+// A check holds its result until the household says the numbers it used are the ones on the
+// quote. "Yes" confirms exactly these numbers for this option; any later change asks again.
+function operandItem(o) {
+  const label = fieldLabel(o.field);
+  const shown = isAmountField(o.field) && o.value !== null && o.value !== "" && Number.isFinite(Number(o.value))
+    ? formatInr(o.value) : valueText(o.value, o.raw);
+  if (o.source === "you typed this") return el("li", { text: `${label}: ${shown} (you typed this)` });
+  if (!o.source) return el("li", { text: `${label}: ${shown}` });
+  return el("li", {}, `${label}: ${shown}, from `, o.source.page ? `page ${o.source.page}, ` : "",
+    el("q", { text: o.source.text }), " ", pageButton(o.source.page, o.source.text));
+}
+
+async function confirmOperands(token, button) {
+  if (!state.lastRequest) return;
+  button.disabled = true;
+  state.confirmedOperands.add(token);
+  const body = { ...state.lastRequest.body, confirmed_operands: [...state.confirmedOperands] };
+  state.lastRequest = { ...state.lastRequest, body };
+  try {
+    openResults(await api("POST", state.lastRequest.path, body));
+  } catch (error) {
+    state.confirmedOperands.delete(token);
+    button.disabled = false;
+    showApiError(error);
+  }
+}
+
+function operandQuestion(f) {
+  if (!f.confirm_token || f.operands_confirmed !== false) return null;
+  const yes = el("button", { type: "button", class: "button", text: "Yes" });
+  yes.addEventListener("click", () => confirmOperands(f.confirm_token, yes));
+  const fix = el("button", { type: "button", class: "button secondary", text: "Fix a number",
+    onclick: () => go(state.editView || "home") });
+  return el("div", { class: "operands" },
+    el("ul", {}, (f.operands || []).map(operandItem)),
+    el("div", { class: "actions" }, yes, fix));
+}
+
 function findingCard(f) {
   const title = f.item ? (ITEM_TITLES[f.item] || f.item) : (CHECK_TITLES[f.check_id] || f.check_id);
   const evidence = (f.evidence || []).map(evidenceItem);
@@ -1177,7 +1224,7 @@ function findingCard(f) {
   return el("article", { class: `finding status-${f.status}` },
     el("h4", {}, title, " ", el("span", { class: `badge status-${f.status}`, text: STATUS_WORDS[f.status][0] })),
     el("p", { text: f.message }),
-    evidence.length ? el("ul", {}, evidence) : null,
+    operandQuestion(f) || (evidence.length ? el("ul", {}, evidence) : null),
     rule,
     (f.notes || []).map((note) => el("p", { class: "note", text: note })));
 }

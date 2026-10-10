@@ -27,6 +27,13 @@ def post(body=None, raw=None):
     return r["statusCode"], json.loads(r["body"])
 
 
+def post_confirmed(body):
+    """Post, then post again confirming every operand set the first answer asked about."""
+    status, first = post(body)
+    tokens = [f["confirm_token"] for f in first["findings"] if f.get("confirm_token")]
+    return post({**body, "confirmed_operands": tokens})
+
+
 def statuses(body):
     return [{"check_id": f["check_id"], "item": f["item"], "status": f["status"]} for f in body["findings"]]
 
@@ -38,7 +45,9 @@ def evidence(body):
 def test_typed_s1_matches_the_sample_findings(monkeypatch):
     for name in ("TABLE_NAME", "BUCKET_NAME"):
         monkeypatch.delenv(name, raising=False)  # nothing is stored
-    status, body = post({"fields": S1_TYPED, "answers": S1_ANSWERS})
+    status, held = post({"fields": S1_TYPED, "answers": S1_ANSWERS})
+    assert status == 200 and not [f for f in held["findings"] if f["status"] in ("consistent", "inconsistent")]
+    status, body = post_confirmed({"fields": S1_TYPED, "answers": S1_ANSWERS})
     assert status == 200 and body["mode"] == "manual"
     assert statuses(body) == S1["expected"]["findings"]
     assert body["questions"] == [] and body["vendor_message"] is None
@@ -55,7 +64,7 @@ def test_typed_values_are_never_shown_as_quoted():
 def test_the_s2_mismatch_shows_up_when_typed():
     typed = {**S1_TYPED, "stated_capacity": "3 kWp", "panel_count": "5", "panel_wattage": "500 W",
              "subsidy_central": "85,800"}
-    body = post({"fields": typed, "answers": S1_ANSWERS})[1]
+    body = post_confirmed({"fields": typed, "answers": S1_ANSWERS})[1]
     found = {f["check_id"]: f["status"] for f in body["findings"] if f["item"] is None}
     assert found["C1_capacity"] == "inconsistent" and found["C2_central_subsidy"] == "inconsistent"
     assert [q["id"] for q in body["questions"]][:2] == ["capacity_mismatch", "subsidy_higher"]

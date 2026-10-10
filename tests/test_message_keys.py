@@ -17,6 +17,12 @@ def test_the_corpus_is_the_one_the_golden_file_was_saved_from():
     assert sorted(NOW) == sorted(GOLDEN)
 
 
+def test_no_check_is_definitive_until_its_numbers_are_confirmed():
+    for name, result in RUNS:
+        if not name.endswith("/confirmed"):
+            assert not [f for f in result["findings"] if f["status"] in ("consistent", "inconsistent")], name
+
+
 @pytest.mark.parametrize("name", sorted(GOLDEN))
 def test_statuses_and_english_text_are_unchanged(name):
     assert json.loads(json.dumps(NOW[name], default=str)) == GOLDEN[name]
@@ -27,7 +33,11 @@ from checks import messages, run_checks  # noqa: E402
 
 def full_runs():
     import copy
-    return [(name, run_checks(copy.deepcopy(q), copy.deepcopy(i))) for name, q, i in mc.cases()]
+    out = []
+    for name, q, i in mc.cases():
+        out.append((name, run_checks(copy.deepcopy(q), copy.deepcopy(i))))  # held findings ask for confirmation
+        out.append((f"{name}/confirmed", mc.confirmed_run(q, i)))
+    return out
 
 
 RUNS = full_runs()

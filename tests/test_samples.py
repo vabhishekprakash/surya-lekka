@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from checks import run_checks
+from conftest import run_confirmed as run_checks  # checks after the household confirms the numbers
 from checks.evidence import verify_evidence
 
 ROOT = Path(__file__).resolve().parent.parent

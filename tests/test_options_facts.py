@@ -3,7 +3,7 @@ option_id; selecting an option selects exactly its own facts."""
 
 import copy
 
-from checks import run_checks
+from conftest import run_confirmed as run_checks  # checks after the household confirms the numbers
 from checks.contract import normalise
 from extract.dryrun import load_dry_run_wire
 from extract.merge import merge_batches

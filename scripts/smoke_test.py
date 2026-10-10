@@ -3,8 +3,10 @@
     python scripts/smoke_test.py --api <ApiUrl> [--reading-engine none|nova] [--site <SiteUrl>] [--page <jpeg>]
 
 Steps:
-  sample   POST /samples/S2 gives a done job with the saved reading and its findings.
-  manual   POST /checks with S2's numbers typed in gives the same capacity and price results.
+  sample   POST /samples/S2 gives a done job with the saved reading, every result held until the numbers
+           are confirmed, and the expected results once they are.
+  manual   POST /checks with S2's numbers typed in holds every result until the numbers are confirmed,
+           then gives the same capacity and price results.
   reading  With reading off: POST /jobs is refused with reading_unavailable.
   job      With reading on: one synthetic page goes through the whole job flow (one model call).
   site     With --site: the page and every file it loads come back from under the site's path,
@@ -91,8 +93,16 @@ def statuses(findings):
     return {f.get("check_id"): f.get("status") for f in findings}
 
 
+def tokens(findings):
+    """The operand sets the checks ask the household to confirm."""
+    return [f["confirm_token"] for f in findings if f.get("confirm_token")]
+
+
 def expected_statuses():
-    return {k: v for k, v in statuses(run_checks(saved_quote())["findings"]).items() if k in COMPARED}
+    """What the checks find once the household confirms every operand set as shown."""
+    held = run_checks(saved_quote())
+    confirmed = run_checks(saved_quote(), {"confirmed_operands": tokens(held["findings"])})
+    return {k: v for k, v in statuses(confirmed["findings"]).items() if k in COMPARED}
 
 
 def value(field):
@@ -141,15 +151,25 @@ def step_sample(api, args):
     expect(status == 201 and job.get("mode") == "saved", f"POST /samples/{SAMPLE} returned {refused(status, job)}")
     view = wait(api, job, 30)
     expect(view.get("status") == "done" and view.get("mode") == "saved", f"the sample job is {view.get('status')}")
-    got = {k: v for k, v in statuses(view.get("findings") or []).items() if k in COMPARED}
+    held = [f for f in view.get("findings") or [] if f["status"] in ("consistent", "inconsistent")]
+    expect(not held, "a sample check gave a result before its numbers were confirmed")
+    path = api.job(job, "/checks")
+    status, checked = api.call("POST", path, {"confirmed_operands": tokens(view["findings"])})
+    expect(status == 200, f"POST /jobs/{{id}}/checks returned {refused(status, checked)}")
+    got = {k: v for k, v in statuses(checked.get("findings") or []).items() if k in COMPARED}
     expect(got == expected_statuses(), f"sample results {got} differ from {expected_statuses()}")
-    return f"saved reading with {len(view['findings'])} findings"
+    return f"saved reading with {len(checked['findings'])} findings, held until the numbers were confirmed"
 
 
 def step_manual(api, args):
     fields, answers = typed_numbers(saved_quote())
     status, result = api.call("POST", "/checks", {"fields": fields, "answers": answers})
     expect(status == 200 and result.get("mode") == "manual", f"POST /checks returned {refused(status, result)}")
+    held = [f for f in result.get("findings") or [] if f["status"] in ("consistent", "inconsistent")]
+    expect(not held, "a check gave a result before its numbers were confirmed")
+    status, result = api.call("POST", "/checks", {"fields": fields, "answers": answers,
+                                                  "confirmed_operands": tokens(result["findings"])})
+    expect(status == 200, f"POST /checks with confirmed numbers returned {refused(status, result)}")
     got = {k: v for k, v in statuses(result.get("findings") or []).items() if k in COMPARED}
     expect(got == expected_statuses(), f"typed-in results {got} differ from {expected_statuses()}")
     return f"{len(fields)} typed fields, {len(result['findings'])} findings"

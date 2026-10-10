@@ -14,14 +14,20 @@ Unparsed, so every finding that uses it stays "needs confirmation".
 import json
 from pathlib import Path
 
+from .confirm import value_token
+from .common import jsonable
+
 CONFIG = json.loads((Path(__file__).resolve().parent.parent / "rules" / "check_this.json").read_text(encoding="utf-8"))
-SETTLED = ("user_verified", "user_corrected", "user_confirmed")
+SETTLED = ("user_corrected", "user_confirmed")
 REASONS = ("conflict", "unresolved", "low_confidence", "source_rule")
 
 
 def reasons(field, config=None):
     """The reasons this value needs checking, in REASONS order; [] when it needs none."""
     config = CONFIG if config is None else config
+    if field and field.get("provenance") == "user_corrected" and field.get("original") \
+            and _same_number(field["value"], field["original"].get("value")):
+        return reasons(field["original"], config)  # a format-only edit settles nothing
     if not field or field.get("provenance") in SETTLED:
         return []
     found = set()
@@ -38,6 +44,12 @@ def reasons(field, config=None):
     if rules & (set(config["rules_with_dev_errors"]) | {"unmatched"}):
         found.add("source_rule")
     return [r for r in REASONS if r in found]
+
+
+def _same_number(a, b):
+    def number(v):
+        return (v.get("parsed"), v.get("unit")) if isinstance(v, dict) and v.get("parse_status") == "ok" else v
+    return a is not None and number(a) == number(b)
 
 
 FACTS = ("stated_capacity", "base_price", "gst_amount", "discount", "gross_total", "subsidy_central",
@@ -75,15 +87,22 @@ def _paths(quote, selected, own_option):
             yield f"flags.{name}", None, field
 
 
-def mark(quote, selected, own_option, config=None):
+def mark(quote, selected, own_option, config=None, verified=()):
     """Mark each value that needs checking with "check_this": [reasons], in place, and
-    return [{"path", "option_id", "reasons"}] sorted by option and path."""
-    out = []
+    return [{"path", "option_id", "reasons", "value", "token"}] sorted by option and path. A
+    value whose token (its option, field and value) the household verified needs nothing more;
+    a conflict can't be verified, only corrected."""
+    out, verified = [], set(verified)
     for path, option_id, field in _paths(quote, selected, own_option):
         found = reasons(field, config)
+        token = value_token(path, own_option, field) if field else None
+        if found and "conflict" not in found and token in verified:
+            field["verified"] = True
+            found = []
         if found:
             field["check_this"] = found
-            out.append({"path": path, "option_id": option_id, "reasons": found})
+            out.append({"path": path, "option_id": option_id, "reasons": found,
+                        "value": jsonable(field.get("value")), "token": token})
         elif field:
             field.pop("check_this", None)
     return sorted(out, key=lambda c: (c["option_id"] or "", c["path"]))

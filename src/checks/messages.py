@@ -23,6 +23,7 @@ TEMPLATES = {
     "options.unclear": (None, "It isn't clear whether the quote has one option or several. Please confirm this "
                               "before the figures are checked."),
     "entry.check_number": (None, "Please check the number you entered for {fields}."),
+    "confirm.operands": (None, "Are these the numbers on your quote?"),
     "fields.not_found": (("C1_capacity", "C3_gross_total", "C3_net_cost"), "Not found on the quote: {fields}."),
     "amounts.unusable": (("C3_gross_total", "C3_net_cost"), "Please check {fields}: it can't be used as an amount."),
 

@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from checks import run_checks
+from conftest import run_confirmed as run_checks  # checks after the household confirms the numbers
 
 ROOT = Path(__file__).resolve().parent.parent
 ANSWERS = {"state": "Telangana", "consumer_type": "individual_household",

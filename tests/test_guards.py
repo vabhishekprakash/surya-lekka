@@ -10,6 +10,7 @@ import pytest
 
 from api import manual
 from checks import guards, run_checks
+from conftest import run_confirmed
 
 ROOT = Path(__file__).resolve().parent.parent
 ANSWERS = {"state": "Telangana", "consumer_type": "individual_household", "portal_application_on_or_after_cutoff": True,
@@ -20,11 +21,18 @@ GOOD = {"stated_capacity": "3.3 kWp", "panel_count": "6", "panel_wattage": "550 
         "gst_amount": "18,000", "gross_total": "1,68,000", "subsidy_central": "78,000", "net_cost": "90,000"}
 
 
-def typed(fields, confirmed=()):
+def typed(fields, confirmed=(), operands=False):
+    """Run the checks on typed fields. confirmed names typed numbers the household confirms after
+    the guards ask (by the token the first run gave them); operands=True also confirms every
+    operand set as shown."""
     charges, corrections = manual.typed_corrections(fields)
-    paths = [manual.TEXT_FIELDS.get(n, n) for n in confirmed]
-    return run_checks(manual.blank_quote(charges), {"corrections": corrections, "confirmations": ANSWERS,
-                                                     "verified": paths})
+    quote = manual.blank_quote(charges)
+    inputs = {"corrections": corrections, "confirmations": ANSWERS}
+    paths = {manual.TEXT_FIELDS.get(n, n) for n in confirmed}
+    if paths:
+        first = run_checks(quote, inputs)
+        inputs["verified"] = [e["token"] for e in first["entry_checks"] if e["path"] in paths]
+    return (run_confirmed if operands else run_checks)(quote, inputs)
 
 
 def statuses(result):
@@ -39,7 +47,7 @@ def test_the_ranges_are_data_with_the_asked_bounds():
 
 
 def test_plausible_numbers_raise_nothing():
-    result = typed(GOOD)
+    result = typed(GOOD, operands=True)
     assert result["entry_checks"] == []
     assert statuses(result)["C1_capacity"]["status"] == "consistent"
 
@@ -91,7 +99,8 @@ def test_scale_against_the_panels():
 
 
 def test_confirming_the_number_lets_the_checks_use_it_as_typed():
-    result = typed({**GOOD, "panel_wattage": "750 Wp", "stated_capacity": "33 kWp"}, confirmed=["stated_capacity"])
+    result = typed({**GOOD, "panel_wattage": "750 Wp", "stated_capacity": "33 kWp"}, confirmed=["stated_capacity"],
+                   operands=True)
     assert not [e for e in result["entry_checks"] if e["path"] == "stated_capacity"]
     assert statuses(result)["C1_capacity"]["status"] == "inconsistent"  # 6 x 750 W is 4.5 kW, not 33
 
@@ -119,13 +128,23 @@ def test_the_manual_api_takes_confirmed_entries():
     held = manual.handler({"body": json.dumps(body)}, None)
     view = json.loads(held["body"])
     assert [e["field"] for e in view["entry_checks"]] == ["stated_capacity"]
-    body["confirmed"] = ["stated_capacity"]
+    body["verified"] = [view["entry_checks"][0]["token"]]
     view = json.loads(manual.handler({"body": json.dumps(body)}, None)["body"])
     assert "stated_capacity" not in [e["field"] for e in view["entry_checks"]]
     # with 33 kW confirmed, 6 panels of 550 W are now the numbers that look 10 times off
     assert {e["field"] for e in view["entry_checks"]} == {"panel_count", "panel_wattage"}
-    body["confirmed"] = "stated_capacity"
+    body["verified"] = "stated_capacity"
     assert manual.handler({"body": json.dumps(body)}, None)["statusCode"] == 400
+
+
+def test_a_confirmed_typed_number_needs_confirming_again_once_changed():
+    first = typed({**GOOD, "stated_capacity": "33 kWp"})
+    token = first["entry_checks"][0]["token"]
+    for again in ("33.0 kWp", "34 kWp", "33 kW"):  # a reformat, a new number, another unit
+        charges, corrections = manual.typed_corrections({**GOOD, "stated_capacity": again})
+        result = run_checks(manual.blank_quote(charges), {"corrections": corrections, "confirmations": ANSWERS,
+                                                          "verified": [token]})
+        assert "stated_capacity" in [e["path"] for e in result["entry_checks"]], again
 
 
 def test_guards_name_their_reason_in_plain_words():

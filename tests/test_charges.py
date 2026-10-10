@@ -1,6 +1,6 @@
 """Extra charges across batches are matched by label and parsed amount."""
 
-from checks import run_checks
+from conftest import run_confirmed as run_checks  # checks after the household confirms the numbers
 from extract.dryrun import load_dry_run_wire
 from extract.merge import merge_batches
 from test_extract_merge import ANSWERS, on_page, record

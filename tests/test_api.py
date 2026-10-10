@@ -638,8 +638,7 @@ def test_sample_route_serves_the_saved_reading_by_default(aws, monkeypatch):
     assert body["status"] == "done" and body["mode"] == "saved" and body["processing_complete"] is True
     assert body["extraction"] == reading["quote"] and body["page_text"] == reading["pages"]
     assert body["findings"] == json.loads(json.dumps(run_checks(reading["quote"])["findings"], default=str))
-    status, checked = call(jobs.recheck, {"answers": S1_ANSWERS}, path={"id": job["job_id"]},
-                           query={"t": job["token"]})
+    status, checked = recheck_confirmed(job, {"answers": S1_ANSWERS})
     assert status == 200 and {f["status"] for f in checked["findings"]} == {"consistent"}
 
 
@@ -673,12 +672,21 @@ def test_bad_saved_reading_is_missing(aws):
 
 # --- POST /jobs/{id}/checks -----------------------------------------------------------------------
 
+def recheck_confirmed(job, body):
+    """POST the checks, then POST again confirming every operand set the first answer showed."""
+    where = {"path": {"id": job["job_id"]}, "query": {"t": job["token"]}}
+    status, first = call(jobs.recheck, body, **where)
+    assert status == 200, first
+    assert not [f for f in first["findings"] if f["status"] in ("consistent", "inconsistent")]
+    tokens = [f["confirm_token"] for f in first["findings"] if f.get("confirm_token")]
+    return call(jobs.recheck, {**body, "confirmed_operands": tokens}, **where)
+
+
 def test_recheck_with_answers_and_corrections(aws):
     job = done_job(aws)
     before = {f["check_id"]: f["status"] for f in get(job)[1]["findings"] if f["item"] is None}
     assert before["C2_central_subsidy"] == "needs_confirmation"
-    status, body = call(jobs.recheck, {"answers": S1_ANSWERS, "corrections": {"base_price": "Rs. 1,80,000"}},
-                        path={"id": job["job_id"]}, query={"t": job["token"]})
+    status, body = recheck_confirmed(job, {"answers": S1_ANSWERS, "corrections": {"base_price": "Rs. 1,80,000"}})
     assert status == 200
     after = {f["check_id"]: f["status"] for f in body["findings"] if f["item"] is None}
     assert after["C2_central_subsidy"] == "consistent"
@@ -708,9 +716,11 @@ def test_recheck_takes_values_checked_one_by_one(aws):
     where = {"path": {"id": job["job_id"]}, "query": {"t": job["token"]}}
     status, body = call(jobs.recheck, {"answers": S1_ANSWERS, "verified": ["gross_total"]}, **where)
     assert status == 200 and isinstance(body["check_this"], list)
-    assert get(job)[1]["corrections"]["user_inputs"]["verified"] == ["gross_total"]
-    for bad in ("gross_total", {"gross_total": True}, [1], ["*"]):
+    assert get(job)[1]["corrections"]["user_inputs"]["verified"] == ["gross_total"]  # not a token: no effect
+    for bad in ("gross_total", {"gross_total": True}, [1]):
         status, body = call(jobs.recheck, {"answers": S1_ANSWERS, "verified": bad}, **where)
+        assert status == 400, bad
+        status, body = call(jobs.recheck, {"answers": S1_ANSWERS, "confirmed_operands": bad}, **where)
         assert status == 400, bad
 
 

@@ -4,7 +4,7 @@ import json
 import pytest
 from conftest import field_v1
 
-from checks import run_checks
+from conftest import run_confirmed as run_checks  # checks after the household confirms the numbers
 
 
 def statuses(result):

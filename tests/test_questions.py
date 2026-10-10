@@ -2,7 +2,7 @@ import re
 
 from conftest import amount_field, capacity_field, field_v1
 
-from checks import run_checks
+from conftest import run_confirmed as run_checks  # checks after the household confirms the numbers
 from checks.questions import INTRO, OUTRO, TEMPLATES, vendor_message, vendor_questions
 
 ACCUSATORY = re.compile(r"\b(fraud|cheat|lie|lying|illegal|unregistered|wrong|scam|mislead|overcharg)", re.I)

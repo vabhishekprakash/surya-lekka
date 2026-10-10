@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 
 from checks import run_checks
+from conftest import run_confirmed
 from checks import check_this as ct
 from extract import textract_client as tc
 from extract.merge import merge_batches
@@ -108,9 +109,19 @@ def test_reasons_come_from_the_values_own_properties(f, reasons):
     assert ct.reasons(f, CONFIG) == reasons
 
 
-def test_a_value_the_household_confirmed_or_corrected_needs_nothing():
-    for provenance in ("user_verified", "user_corrected"):
-        assert ct.reasons(field(confidence=10.0, rules=["queries.net_cost"], provenance=provenance), CONFIG) == []
+def test_a_value_the_household_corrected_to_another_number_needs_nothing():
+    original = field(confidence=10.0, rules=["queries.net_cost"])
+    corrected = {"value": {"raw": "2,10,000", "parsed": "210000", "parse_status": "ok"}, "provenance": "user_corrected",
+                 "original": original}
+    assert ct.reasons(corrected, CONFIG) == []
+
+
+@pytest.mark.parametrize("raw", ["200000", "2,00,000.00", "Rs 2,00,000"])
+def test_a_format_only_correction_settles_nothing(raw):
+    original = field(confidence=10.0, rules=["queries.net_cost"])
+    corrected = {"value": {"raw": raw, "parsed": "200000", "parse_status": "ok"}, "provenance": "user_corrected",
+                 "original": original}
+    assert ct.reasons(corrected, CONFIG) == ["low_confidence", "source_rule"]
 
 
 def test_a_value_with_no_rule_from_a_saved_or_typed_reading_needs_nothing():
@@ -159,53 +170,63 @@ def flagged(q, path):
     return q
 
 
+def token(result, path):
+    (entry,) = [c for c in result["check_this"] if c["path"] == path]
+    return entry["token"]
+
+
 def test_a_value_to_check_holds_every_finding_that_uses_it_at_needs_confirmation(monkeypatch):
     monkeypatch.setattr(ct, "CONFIG", CONFIG)
     q = sample_quote()
-    before = by_id(run_checks(q, {"confirmations": ANSWERS}))
+    before = by_id(run_confirmed(q, {"confirmations": ANSWERS}))
     assert before[("C3_gross_total", None)]["status"] != "needs_confirmation"
-    after = run_checks(flagged(q, "gross_total"), {"confirmations": ANSWERS})
+    after = run_confirmed(flagged(q, "gross_total"), {"confirmations": ANSWERS})
     findings = by_id(after)
     assert findings[("C3_gross_total", None)]["status"] == "needs_confirmation"
     assert findings[("C3_net_cost", None)]["status"] == "needs_confirmation"
-    assert findings[("C1_capacity", None)] == before[("C1_capacity", None)]  # doesn't use the total
+    assert findings[("C1_capacity", None)]["status"] == before[("C1_capacity", None)]["status"]  # no total in it
     assert [c["path"] for c in after["check_this"]] == ["gross_total"]
     assert after["check_this"][0]["reasons"] == ["source_rule"]
 
 
-def test_confirming_that_one_value_releases_its_findings(monkeypatch):
+def test_ticking_that_one_value_releases_its_findings(monkeypatch):
     monkeypatch.setattr(ct, "CONFIG", CONFIG)
     q = flagged(sample_quote(), "gross_total")
-    result = run_checks(q, {"confirmations": ANSWERS, "verified": ["gross_total"]})
+    first = run_checks(q, {"confirmations": ANSWERS})
+    result = run_confirmed(q, {"confirmations": ANSWERS, "verified": [token(first, "gross_total")]})
     assert by_id(result)[("C3_gross_total", None)]["status"] != "needs_confirmation"
     assert result["check_this"] == []
 
 
-def test_confirming_another_value_releases_nothing(monkeypatch):
+@pytest.mark.parametrize("verified", [["gross_total"], ["*"], ["all"], ["0" * 24]])
+def test_a_path_or_a_wildcard_or_an_unknown_token_ticks_nothing(monkeypatch, verified):
     monkeypatch.setattr(ct, "CONFIG", CONFIG)
     q = flagged(sample_quote(), "gross_total")
-    result = run_checks(q, {"confirmations": ANSWERS, "verified": ["base_price"]})
+    result = run_confirmed(q, {"confirmations": ANSWERS, "verified": verified})
+    assert by_id(result)[("C3_gross_total", None)]["status"] == "needs_confirmation"
+
+
+def test_verified_must_be_a_list_of_tokens():
+    for bad in (True, "gross_total", [1]):
+        with pytest.raises(TypeError):
+            run_checks(sample_quote(), {"confirmations": ANSWERS, "verified": bad})
+
+
+def test_a_tick_binds_to_the_value_it_saw(monkeypatch):
+    monkeypatch.setattr(ct, "CONFIG", CONFIG)
+    q = flagged(sample_quote(), "gross_total")
+    tick = token(run_checks(q, {"confirmations": ANSWERS}), "gross_total")
+    q["gross_total"]["value"] = {**q["gross_total"]["value"], "raw": "Rs 9,99,999", "parsed": "999999"}
+    result = run_confirmed(q, {"confirmations": ANSWERS, "verified": [tick]})
     assert by_id(result)[("C3_gross_total", None)]["status"] == "needs_confirmation"
 
 
 def test_a_panel_value_to_check_holds_the_capacity_check(monkeypatch):
     monkeypatch.setattr(ct, "CONFIG", CONFIG)
-    q = sample_quote()
-    gid = q["module_groups"][0]["group_id"]
-    result = run_checks(flagged(q, f"module_groups[{gid}].count"), {"confirmations": ANSWERS})
+    q = flagged(sample_quote(), f"module_groups[{sample_quote()['module_groups'][0]['group_id']}].count")
+    path = f"module_groups[{q['module_groups'][0]['group_id']}].count"
+    result = run_confirmed(q, {"confirmations": ANSWERS})
     assert by_id(result)[("C1_capacity", None)]["status"] == "needs_confirmation"
-    assert [c["path"] for c in result["check_this"]] == [f"module_groups[{gid}].count"]
-    result = run_checks(flagged(q, f"module_groups[{gid}].count"),
-                        {"confirmations": ANSWERS, "verified": [f"module_groups[{gid}].count"]})
+    assert [c["path"] for c in result["check_this"]] == [path]
+    result = run_confirmed(q, {"confirmations": ANSWERS, "verified": [token(result, path)]})
     assert by_id(result)[("C1_capacity", None)]["status"] != "needs_confirmation"
-
-
-def test_verified_paths_must_be_real_values():
-    with pytest.raises(KeyError):
-        run_checks(sample_quote(), {"confirmations": ANSWERS, "verified": ["no_such_field"]})
-
-
-def test_there_is_no_way_to_verify_everything_at_once():
-    for bulk in (["*"], ["all"], True):
-        with pytest.raises((KeyError, TypeError, ValueError)):
-            run_checks(sample_quote(), {"confirmations": ANSWERS, "verified": bulk})

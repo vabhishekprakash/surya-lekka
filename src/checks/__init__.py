@@ -3,7 +3,7 @@ import copy
 from .arithmetic import check_gross_total, check_net_cost
 from .capacity import check_capacity
 from .common import NEEDS_CONFIRMATION, USER_KINDS, field_words, join_words
-from . import check_this, guards, messages
+from . import check_this, confirm, guards, messages
 from .contract import effective_option, normalise
 from .evidence import verify_evidence
 from .missing import check_missing_details
@@ -49,10 +49,13 @@ def run_checks(quote, user_inputs=None, page_texts=None, rules=None):
     page_texts (optional) adds an evidence_status to each quoted evidence entry.
     """
     original = copy.deepcopy(quote)
+    verified = confirm.tokens((user_inputs or {}).get("verified"))
+    confirmed = confirm.tokens((user_inputs or {}).get("confirmed_operands"))
     effective, corrected = apply_user_inputs(quote, user_inputs)
     selected = ((effective.get("flags") or {}).get("user_confirmed") or {}).get("selected_option")
-    to_check = check_this.mark(effective, selected, effective_option(effective))
-    entries = guards.check(effective, selected, effective_option(effective))
+    option = effective_option(effective)
+    to_check = check_this.mark(effective, selected, option, verified=verified)
+    entries = guards.check(effective, selected, option, verified=verified)
     view = normalise(effective)
     findings = [
         check_capacity(view),
@@ -62,6 +65,7 @@ def run_checks(quote, user_inputs=None, page_texts=None, rules=None):
         *check_missing_details(view),
     ]
     _ask_for_typed_numbers(findings, view)
+    confirm.hold_until_confirmed(findings, view, option, confirmed)
     _add_keys(findings)
     if page_texts is not None:
         _annotate(findings, page_texts)
