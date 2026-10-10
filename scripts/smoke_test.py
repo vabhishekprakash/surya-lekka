@@ -32,12 +32,25 @@ from urllib.parse import urlsplit
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 
-from checks import run_checks  # noqa: E402
 
 SAMPLE = "S2"
 SAVED_READING = ROOT / "samples" / "cached" / f"{SAMPLE}.json"
 DEFAULT_PAGE = ROOT / ".build" / "samples" / SAMPLE / "page-01.jpg"
-COMPARED = ("C1_capacity", "C3_gross_total", "C3_net_cost")
+# What the checks must find on sample S2, worked out by hand from the figures it prints, not by
+# this app's code. The household answers below (an individual household in Telangana, applying
+# on or after 13 Feb 2024, first system, no earlier subsidy, no Give It Up) let the subsidy run.
+#   System size: 5 panels x 500 W = 2,500 W = 2.5 kWp, but the quote states 3 kWp: doesn't match.
+#   Central subsidy (general category): 30,000 x 2 + 18,000 x 0.5 = 69,000 for 2.5 kWp, but the
+#     quote states 85,800: doesn't match, with the rule giving Rs 69,000.
+#   Total (GST added on top): 1,50,000 + 13,350 GST + 2,500 net meter (inside the total)
+#     = 1,65,850, the quote's total: matches.
+#   Net cost: 1,65,850 - 85,800 central subsidy = 80,050, the quote's net cost: matches.
+EXPECTED = {"C1_capacity": "inconsistent", "C2_central_subsidy": "inconsistent", "C3_gross_total": "consistent",
+            "C3_net_cost": "consistent"}
+EXPECTED_RULE = "₹69,000"
+HOUSEHOLD = {"state": "Telangana", "consumer_type": "individual_household", "portal_application_on_or_after_cutoff": True,
+             "first_system": True, "prior_central_subsidy": False, "give_it_up": False}
+COMPARED = tuple(EXPECTED)
 REQUEST_SECONDS = 30
 JOB_WAIT_SECONDS = 600
 
@@ -99,10 +112,16 @@ def tokens(findings):
 
 
 def expected_statuses():
-    """What the checks find once the household confirms every operand set as shown."""
-    held = run_checks(saved_quote())
-    confirmed = run_checks(saved_quote(), {"confirmed_operands": tokens(held["findings"])})
-    return {k: v for k, v in statuses(confirmed["findings"]).items() if k in COMPARED}
+    """The hand-worked results (EXPECTED)."""
+    return dict(EXPECTED)
+
+
+def expect_hand_worked(findings, what):
+    got = {k: v for k, v in statuses(findings).items() if k in COMPARED}
+    expect(got == EXPECTED, f"{what} results {got} differ from the hand-worked {EXPECTED}")
+    (subsidy,) = [f for f in findings if f.get("check_id") == "C2_central_subsidy"]
+    rule = (subsidy.get("message_params") or {}).get("rule")
+    expect(rule == EXPECTED_RULE, f"{what} subsidy rule amount {rule} differs from the hand-worked {EXPECTED_RULE}")
 
 
 def value(field):
@@ -154,15 +173,19 @@ def step_sample(api, args):
     held = [f for f in view.get("findings") or [] if f["status"] in ("consistent", "inconsistent")]
     expect(not held, "a sample check gave a result before its numbers were confirmed")
     path = api.job(job, "/checks")
-    status, checked = api.call("POST", path, {"confirmed_operands": tokens(view["findings"])})
+    status, answered = api.call("POST", path, {"answers": HOUSEHOLD})
+    expect(status == 200, f"POST /jobs/{{id}}/checks returned {refused(status, answered)}")
+    held = [f for f in answered.get("findings") or [] if f["status"] in ("consistent", "inconsistent")]
+    expect(not held, "a sample check gave a result before its numbers were confirmed")
+    status, checked = api.call("POST", path, {"answers": HOUSEHOLD, "confirmed_operands": tokens(answered["findings"])})
     expect(status == 200, f"POST /jobs/{{id}}/checks returned {refused(status, checked)}")
-    got = {k: v for k, v in statuses(checked.get("findings") or []).items() if k in COMPARED}
-    expect(got == expected_statuses(), f"sample results {got} differ from {expected_statuses()}")
+    expect_hand_worked(checked.get("findings") or [], "sample")
     return f"saved reading with {len(checked['findings'])} findings, held until the numbers were confirmed"
 
 
 def step_manual(api, args):
     fields, answers = typed_numbers(saved_quote())
+    answers = {**answers, **HOUSEHOLD}
     status, result = api.call("POST", "/checks", {"fields": fields, "answers": answers})
     expect(status == 200 and result.get("mode") == "manual", f"POST /checks returned {refused(status, result)}")
     held = [f for f in result.get("findings") or [] if f["status"] in ("consistent", "inconsistent")]
@@ -171,8 +194,7 @@ def step_manual(api, args):
                                                   "challenge": result.get("challenge"),
                                                   "confirmed_operands": tokens(result["findings"])})
     expect(status == 200, f"POST /checks with confirmed numbers returned {refused(status, result)}")
-    got = {k: v for k, v in statuses(result.get("findings") or []).items() if k in COMPARED}
-    expect(got == expected_statuses(), f"typed-in results {got} differ from {expected_statuses()}")
+    expect_hand_worked(result.get("findings") or [], "typed-in")
     return f"{len(fields)} typed fields, {len(result['findings'])} findings"
 
 

@@ -180,3 +180,11 @@ def test_smoke_script_reads_the_stack_and_runs_the_checks():
     assert "PASS reading" in run.stdout and "All steps passed." in run.stdout
     assert calls[1] == ("aws cloudformation describe-stacks --stack-name surya-lekka --profile default "
                         "--region ap-south-1 --query Stacks[0] --output json")
+
+
+def test_expected_results_are_worked_out_by_hand_not_by_the_app():
+    source = (ROOT / "scripts" / "smoke_test.py").read_text(encoding="utf-8")
+    assert "from checks" not in source and "run_checks" not in source
+    assert smoke["EXPECTED"] == {"C1_capacity": "inconsistent", "C2_central_subsidy": "inconsistent",
+                                 "C3_gross_total": "consistent", "C3_net_cost": "consistent"}
+    assert smoke["EXPECTED_RULE"] == "₹69,000"  # 30,000 x 2 + 18,000 x 0.5 for 2.5 kWp
