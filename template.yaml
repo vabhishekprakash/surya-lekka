@@ -47,6 +47,33 @@ Parameters:
     Description: >-
       Pages allowed per UTC day across all new checks, live samples included, counted from each
       check's declared page count when it is created. 0 refuses every new check.
+  AlarmEmail:
+    Type: String
+    Default: none
+    Description: >-
+      Where the alarms are emailed (the address must confirm the subscription), or none. Passed at
+      deploy time; never stored in the repository.
+    AllowedPattern: "^(none|[^@\\s]+@[^@\\s]+\\.[^@\\s]+)$"
+  SampleDailyCap:
+    Type: Number
+    Default: 1000
+    MinValue: 0
+    Description: Saved samples a day, overall. 0 refuses every sample.
+  IpSampleDailyCap:
+    Type: Number
+    Default: 50
+    MinValue: 0
+    Description: Saved samples a day from one source address. 0 refuses every sample.
+  TypedDailyCap:
+    Type: Number
+    Default: 5000
+    MinValue: 0
+    Description: Typed-in checks a day, overall. 0 refuses every typed check.
+  IpTypedDailyCap:
+    Type: Number
+    Default: 200
+    MinValue: 0
+    Description: Typed-in checks a day from one source address. 0 refuses every typed check.
   IpDailyJobCap:
     Type: Number
     Default: 10
@@ -102,6 +129,7 @@ Rules:
         AssertDescription: ReadingEngine nova needs a ModelId.
 
 Conditions:
+  HasAlarmEmail: !Not [!Equals [!Ref AlarmEmail, none]]
   Hosting: !Equals [!Ref HostingEnabled, "true"]
   HasSecondOrigin: !Not [!Equals [!Ref SecondSiteOrigin, none]]
   SecondOrigin: !And [!Not [!Condition Hosting], !Condition HasSecondOrigin]
@@ -133,6 +161,10 @@ Globals:
         DAILY_JOB_CAP: !Ref DailyJobCap
         DAILY_PAGE_CAP: !Ref DailyPageCap
         IP_DAILY_JOB_CAP: !Ref IpDailyJobCap
+        SAMPLE_DAILY_CAP: !Ref SampleDailyCap
+        IP_SAMPLE_DAILY_CAP: !Ref IpSampleDailyCap
+        TYPED_DAILY_CAP: !Ref TypedDailyCap
+        IP_TYPED_DAILY_CAP: !Ref IpTypedDailyCap
         IP_HASH_KEY: !Ref AWS::StackId
         JOB_TTL_HOURS: "24"
         # The secret's ARN, not its value. Only the functions granted ReadConfirmSecret can read it.
@@ -316,14 +348,7 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       Handler: api.jobs.create_job
-      Policies:
-        - Statement:
-            - Effect: Allow
-              Action: [dynamodb:PutItem, dynamodb:UpdateItem]
-              Resource: !GetAtt JobsTable.Arn
-            - Effect: Allow
-              Action: s3:PutObject
-              Resource: !Sub "arn:${AWS::Partition}:s3:::${StackPrefix}-${AWS::AccountId}-${AWS::Region}/uploads/*"
+      Role: !GetAtt CreateJobFunctionRole.Arn
       Events:
         Api:
           Type: HttpApi
@@ -336,15 +361,7 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       Handler: api.jobs.get_job
-      Policies:
-        - Statement:
-            - Effect: Allow
-              Action: dynamodb:GetItem
-              Resource: !GetAtt JobsTable.Arn
-            # Signs short-lived links to the synthetic samples' page images, for highlighting.
-            - Effect: Allow
-              Action: s3:GetObject
-              Resource: !Sub "arn:${AWS::Partition}:s3:::${StackPrefix}-${AWS::AccountId}-${AWS::Region}/samples/*"
+      Role: !GetAtt GetJobFunctionRole.Arn
       Events:
         Api:
           Type: HttpApi
@@ -357,16 +374,7 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       Handler: api.jobs.recheck
-      Policies:
-        - Statement:
-            - Effect: Allow
-              Action: [dynamodb:GetItem, dynamodb:UpdateItem]
-              Resource: !GetAtt JobsTable.Arn
-            # Signs confirmation tokens: this one secret only, read once per cold start.
-            - Sid: ReadConfirmSecret
-              Effect: Allow
-              Action: secretsmanager:GetSecretValue
-              Resource: !Ref ConfirmSecret
+      Role: !GetAtt RecheckFunctionRole.Arn
       Events:
         Api:
           Type: HttpApi
@@ -379,14 +387,7 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       Handler: api.jobs.retry_job
-      Policies:
-        - Statement:
-            - Effect: Allow
-              Action: [dynamodb:GetItem, dynamodb:UpdateItem]
-              Resource: !GetAtt JobsTable.Arn
-            - Effect: Allow
-              Action: s3:PutObject  # a retry only writes the job's manifest again
-              Resource: !Sub "arn:${AWS::Partition}:s3:::${StackPrefix}-${AWS::AccountId}-${AWS::Region}/uploads/*/manifest.json"
+      Role: !GetAtt RetryFunctionRole.Arn
       Events:
         Api:
           Type: HttpApi
@@ -400,13 +401,7 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       Handler: api.manual.handler
-      Policies:
-        - Statement:
-            # Signs confirmation tokens: this one secret only, read once per cold start.
-            - Sid: ReadConfirmSecret
-              Effect: Allow
-              Action: secretsmanager:GetSecretValue
-              Resource: !Ref ConfirmSecret
+      Role: !GetAtt ManualCheckFunctionRole.Arn
       Events:
         Api:
           Type: HttpApi
@@ -419,22 +414,7 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       Handler: api.jobs.create_sample_job
-      Policies:
-        - Statement:
-            - Effect: Allow
-              Action: [dynamodb:PutItem, dynamodb:UpdateItem]
-              Resource: !GetAtt JobsTable.Arn
-            - Effect: Allow
-              Action: s3:GetObject
-              Resource: !Sub "arn:${AWS::Partition}:s3:::${StackPrefix}-${AWS::AccountId}-${AWS::Region}/samples/*"
-            - Effect: Allow
-              Action: s3:PutObject
-              Resource: !Sub "arn:${AWS::Partition}:s3:::${StackPrefix}-${AWS::AccountId}-${AWS::Region}/uploads/*"
-            # Signs confirmation tokens: this one secret only, read once per cold start.
-            - Sid: ReadConfirmSecret
-              Effect: Allow
-              Action: secretsmanager:GetSecretValue
-              Resource: !Ref ConfirmSecret
+      Role: !GetAtt SampleJobFunctionRole.Arn
       Events:
         Api:
           Type: HttpApi
@@ -460,76 +440,7 @@ Resources:
           OnFailure:
             Type: SQS
             Destination: !GetAtt WorkerFailures.Arn
-      Policies:
-        - Statement:
-            - Sid: ReadAndDeleteUploads
-              Effect: Allow
-              Action: [s3:GetObject, s3:DeleteObject]
-              Resource: !Sub "arn:${AWS::Partition}:s3:::${StackPrefix}-${AWS::AccountId}-${AWS::Region}/uploads/*"
-            - Sid: JobsTableOnly
-              Effect: Allow
-              Action: [dynamodb:GetItem, dynamodb:UpdateItem]
-              Resource: !GetAtt JobsTable.Arn
-            # Signs confirmation tokens: this one secret only, read once per cold start.
-            - Sid: ReadConfirmSecret
-              Effect: Allow
-              Action: secretsmanager:GetSecretValue
-              Resource: !Ref ConfirmSecret
-        # Bedrock only while Nova reads the quotes. Through an inference profile: the profile in this
-        # Region, then the model in each Region it routes to, only when called through that profile.
-        - !If
-          - NovaThroughProfile
-          - Statement:
-              - Sid: NovaInferenceProfile
-                Effect: Allow
-                Action: bedrock:InvokeModel
-                Resource: !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/${ModelId}"
-          - !Ref AWS::NoValue
-        - !If
-          - NovaRegionalModels
-          - Statement:
-              - Sid: NovaProfileRegions
-                Effect: Allow
-                Action: bedrock:InvokeModel
-                Resource: !Ref ProfileModelArns
-                Condition:
-                  StringEquals:
-                    bedrock:InferenceProfileArn: !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/${ModelId}"
-          - !Ref AWS::NoValue
-        - !If
-          - NovaGlobalModels
-          - Statement:
-              - Sid: NovaGlobalRouting
-                Effect: Allow
-                Action: bedrock:InvokeModel
-                Resource: !Ref GlobalModelArns
-                Condition:
-                  StringEquals:
-                    aws:RequestedRegion: unspecified
-                    bedrock:InferenceProfileArn: !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/${ModelId}"
-          - !Ref AWS::NoValue
-        - !If
-          - NovaInRegion
-          - Statement:
-              - Sid: NovaInRegionModel
-                Effect: Allow
-                Action: bedrock:InvokeModel
-                Resource: !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}::foundation-model/${ModelId}"
-          - !Ref AWS::NoValue
-        # Textract only while it reads the quotes. The worker sends page bytes, so Textract needs no
-        # S3 access. textract:AnalyzeDocument has no resource-level permissions (the Service
-        # Authorization Reference lists no resource types for it), so the resource is "*".
-        - !If
-          - TextractReading
-          - Statement:
-              - Sid: TextractAnalyzeDocument
-                Effect: Allow
-                Action: textract:AnalyzeDocument
-                Resource: "*"
-                Condition:
-                  StringEquals:
-                    aws:RequestedRegion: !Ref AWS::Region
-          - !Ref AWS::NoValue
+      Role: !GetAtt WorkerFunctionRole.Arn
       Events:
         ManifestUploaded:
           Type: S3
@@ -593,6 +504,641 @@ Resources:
     Properties:
       LogGroupName: !Sub "/aws/lambda/${WorkerFunction}"
       RetentionInDays: 7
+
+  # --- One role per function (no AWS managed policies): its own permissions, X-Ray writes,
+  # and logs only to its own log group (the *Logging policies below). ------------------------
+  CreateJobFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: {Service: lambda.amazonaws.com}
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: CreateJobFunction-1
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+            - Effect: Allow
+              Action: [dynamodb:PutItem, dynamodb:UpdateItem]
+              Resource: !GetAtt JobsTable.Arn
+            - Effect: Allow
+              Action: s3:PutObject
+              Resource: !Sub "arn:${AWS::Partition}:s3:::${StackPrefix}-${AWS::AccountId}-${AWS::Region}/uploads/*"
+        - PolicyName: xray
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: WriteTraces  # X-Ray has no resource-level permissions
+                Effect: Allow
+                Action: [xray:PutTraceSegments, xray:PutTelemetryRecords]
+                Resource: "*"
+
+  CreateJobFunctionLogging:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: CreateJobFunction-logs
+      Roles: [!Ref CreateJobFunctionRole]
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: OwnLogGroupOnly
+            Effect: Allow
+            Action: [logs:CreateLogStream, logs:PutLogEvents]
+            Resource: !GetAtt CreateJobLogs.Arn
+
+  GetJobFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: {Service: lambda.amazonaws.com}
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: GetJobFunction-1
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+            - Effect: Allow
+              Action: dynamodb:GetItem
+              Resource: !GetAtt JobsTable.Arn
+            # Signs short-lived links to the synthetic samples' page images, for highlighting: page images only.
+            - Effect: Allow
+              Action: s3:GetObject
+              Resource: !Sub "arn:${AWS::Partition}:s3:::${StackPrefix}-${AWS::AccountId}-${AWS::Region}/samples/*/page-*.jpg"
+        - PolicyName: xray
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: WriteTraces  # X-Ray has no resource-level permissions
+                Effect: Allow
+                Action: [xray:PutTraceSegments, xray:PutTelemetryRecords]
+                Resource: "*"
+
+  GetJobFunctionLogging:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: GetJobFunction-logs
+      Roles: [!Ref GetJobFunctionRole]
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: OwnLogGroupOnly
+            Effect: Allow
+            Action: [logs:CreateLogStream, logs:PutLogEvents]
+            Resource: !GetAtt GetJobLogs.Arn
+
+  RecheckFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: {Service: lambda.amazonaws.com}
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: RecheckFunction-1
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+            - Effect: Allow
+              Action: [dynamodb:GetItem, dynamodb:UpdateItem]
+              Resource: !GetAtt JobsTable.Arn
+            # Signs confirmation tokens: this one secret only, read once per cold start.
+            - Sid: ReadConfirmSecret
+              Effect: Allow
+              Action: secretsmanager:GetSecretValue
+              Resource: !Ref ConfirmSecret
+        - PolicyName: xray
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: WriteTraces  # X-Ray has no resource-level permissions
+                Effect: Allow
+                Action: [xray:PutTraceSegments, xray:PutTelemetryRecords]
+                Resource: "*"
+
+  RecheckFunctionLogging:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: RecheckFunction-logs
+      Roles: [!Ref RecheckFunctionRole]
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: OwnLogGroupOnly
+            Effect: Allow
+            Action: [logs:CreateLogStream, logs:PutLogEvents]
+            Resource: !GetAtt RecheckLogs.Arn
+
+  RetryFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: {Service: lambda.amazonaws.com}
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: RetryFunction-1
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+            - Effect: Allow
+              Action: [dynamodb:GetItem, dynamodb:UpdateItem]
+              Resource: !GetAtt JobsTable.Arn
+            - Effect: Allow
+              Action: s3:PutObject  # a retry only writes the job's manifest again
+              Resource: !Sub "arn:${AWS::Partition}:s3:::${StackPrefix}-${AWS::AccountId}-${AWS::Region}/uploads/*/manifest.json"
+        - PolicyName: xray
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: WriteTraces  # X-Ray has no resource-level permissions
+                Effect: Allow
+                Action: [xray:PutTraceSegments, xray:PutTelemetryRecords]
+                Resource: "*"
+
+  RetryFunctionLogging:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: RetryFunction-logs
+      Roles: [!Ref RetryFunctionRole]
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: OwnLogGroupOnly
+            Effect: Allow
+            Action: [logs:CreateLogStream, logs:PutLogEvents]
+            Resource: !GetAtt RetryLogs.Arn
+
+  ManualCheckFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: {Service: lambda.amazonaws.com}
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: ManualCheckFunction-1
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+            # The short-lived typed-in session record (no numbers) and the typed checks' daily counters.
+            - Effect: Allow
+              Action: [dynamodb:GetItem, dynamodb:PutItem, dynamodb:UpdateItem]
+              Resource: !GetAtt JobsTable.Arn
+            # Signs confirmation tokens: this one secret only, read once per cold start.
+            - Sid: ReadConfirmSecret
+              Effect: Allow
+              Action: secretsmanager:GetSecretValue
+              Resource: !Ref ConfirmSecret
+        - PolicyName: xray
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: WriteTraces  # X-Ray has no resource-level permissions
+                Effect: Allow
+                Action: [xray:PutTraceSegments, xray:PutTelemetryRecords]
+                Resource: "*"
+
+  ManualCheckFunctionLogging:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: ManualCheckFunction-logs
+      Roles: [!Ref ManualCheckFunctionRole]
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: OwnLogGroupOnly
+            Effect: Allow
+            Action: [logs:CreateLogStream, logs:PutLogEvents]
+            Resource: !GetAtt ManualCheckLogs.Arn
+
+  SampleJobFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: {Service: lambda.amazonaws.com}
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: SampleJobFunction-1
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+            - Effect: Allow
+              Action: [dynamodb:PutItem, dynamodb:UpdateItem]
+              Resource: !GetAtt JobsTable.Arn
+            - Effect: Allow
+              Action: s3:GetObject
+              Resource: !Sub "arn:${AWS::Partition}:s3:::${StackPrefix}-${AWS::AccountId}-${AWS::Region}/samples/*"
+            - Effect: Allow
+              Action: s3:PutObject
+              Resource: !Sub "arn:${AWS::Partition}:s3:::${StackPrefix}-${AWS::AccountId}-${AWS::Region}/uploads/*"
+            # Signs confirmation tokens: this one secret only, read once per cold start.
+            - Sid: ReadConfirmSecret
+              Effect: Allow
+              Action: secretsmanager:GetSecretValue
+              Resource: !Ref ConfirmSecret
+        - PolicyName: xray
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: WriteTraces  # X-Ray has no resource-level permissions
+                Effect: Allow
+                Action: [xray:PutTraceSegments, xray:PutTelemetryRecords]
+                Resource: "*"
+
+  SampleJobFunctionLogging:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: SampleJobFunction-logs
+      Roles: [!Ref SampleJobFunctionRole]
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: OwnLogGroupOnly
+            Effect: Allow
+            Action: [logs:CreateLogStream, logs:PutLogEvents]
+            Resource: !GetAtt SampleJobLogs.Arn
+
+  WorkerFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: {Service: lambda.amazonaws.com}
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: WorkerFunction-1
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+            - Sid: ReadAndDeleteUploads
+              Effect: Allow
+              Action: [s3:GetObject, s3:DeleteObject]
+              Resource: !Sub "arn:${AWS::Partition}:s3:::${StackPrefix}-${AWS::AccountId}-${AWS::Region}/uploads/*"
+            - Sid: JobsTableOnly
+              Effect: Allow
+              Action: [dynamodb:GetItem, dynamodb:UpdateItem]
+              Resource: !GetAtt JobsTable.Arn
+            # Signs confirmation tokens: this one secret only, read once per cold start.
+            - Sid: ReadConfirmSecret
+              Effect: Allow
+              Action: secretsmanager:GetSecretValue
+              Resource: !Ref ConfirmSecret
+        # Bedrock only while Nova reads the quotes. Through an inference profile: the profile in this
+        # Region, then the model in each Region it routes to, only when called through that profile.
+        - !If
+          - NovaThroughProfile
+          - PolicyName: WorkerFunction-2
+            PolicyDocument:
+              Version: "2012-10-17"
+              Statement:
+              - Sid: NovaInferenceProfile
+                Effect: Allow
+                Action: bedrock:InvokeModel
+                Resource: !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/${ModelId}"
+          - !Ref AWS::NoValue
+        - !If
+          - NovaRegionalModels
+          - PolicyName: WorkerFunction-3
+            PolicyDocument:
+              Version: "2012-10-17"
+              Statement:
+              - Sid: NovaProfileRegions
+                Effect: Allow
+                Action: bedrock:InvokeModel
+                Resource: !Ref ProfileModelArns
+                Condition:
+                  StringEquals:
+                    bedrock:InferenceProfileArn: !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/${ModelId}"
+          - !Ref AWS::NoValue
+        - !If
+          - NovaGlobalModels
+          - PolicyName: WorkerFunction-4
+            PolicyDocument:
+              Version: "2012-10-17"
+              Statement:
+              - Sid: NovaGlobalRouting
+                Effect: Allow
+                Action: bedrock:InvokeModel
+                Resource: !Ref GlobalModelArns
+                Condition:
+                  StringEquals:
+                    aws:RequestedRegion: unspecified
+                    bedrock:InferenceProfileArn: !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/${ModelId}"
+          - !Ref AWS::NoValue
+        - !If
+          - NovaInRegion
+          - PolicyName: WorkerFunction-5
+            PolicyDocument:
+              Version: "2012-10-17"
+              Statement:
+              - Sid: NovaInRegionModel
+                Effect: Allow
+                Action: bedrock:InvokeModel
+                Resource: !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}::foundation-model/${ModelId}"
+          - !Ref AWS::NoValue
+        # Textract only while it reads the quotes. The worker sends page bytes, so Textract needs no
+        # S3 access. textract:AnalyzeDocument has no resource-level permissions (the Service
+        # Authorization Reference lists no resource types for it), so the resource is "*".
+        - !If
+          - TextractReading
+          - PolicyName: WorkerFunction-6
+            PolicyDocument:
+              Version: "2012-10-17"
+              Statement:
+              - Sid: TextractAnalyzeDocument
+                Effect: Allow
+                Action: textract:AnalyzeDocument
+                Resource: "*"
+                Condition:
+                  StringEquals:
+                    aws:RequestedRegion: !Ref AWS::Region
+          - !Ref AWS::NoValue
+        - PolicyName: failures-queue
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: SendFailedEvents  # the worker's on-failure destination
+                Effect: Allow
+                Action: sqs:SendMessage
+                Resource: !GetAtt WorkerFailures.Arn
+        - PolicyName: xray
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: WriteTraces  # X-Ray has no resource-level permissions
+                Effect: Allow
+                Action: [xray:PutTraceSegments, xray:PutTelemetryRecords]
+                Resource: "*"
+
+  WorkerFunctionLogging:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: WorkerFunction-logs
+      Roles: [!Ref WorkerFunctionRole]
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: OwnLogGroupOnly
+            Effect: Allow
+            Action: [logs:CreateLogStream, logs:PutLogEvents]
+            Resource: !GetAtt WorkerLogs.Arn
+
+  # --- Alarms: emailed through SNS to the -AlarmEmail address (README: Alarms) -----------------
+  # Not encrypted with the AWS managed SNS key: CloudWatch alarms can't publish to a topic that
+  # uses it. The topic carries alarm notices only, never quote content.
+  Alarms:
+    Type: AWS::SNS::Topic
+
+  AlarmsByEmail:
+    Type: AWS::SNS::Subscription
+    Condition: HasAlarmEmail
+    Properties:
+      TopicArn: !Ref Alarms
+      Protocol: email
+      Endpoint: !Ref AlarmEmail
+
+  FailedJobsMetric:
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      LogGroupName: !Ref WorkerLogs
+      FilterPattern: '{ $.event = "job_failed" }'
+      MetricTransformations:
+        - MetricNamespace: SuryaLekka
+          MetricName: FailedJobs
+          MetricValue: "1"
+          DefaultValue: 0
+
+  FailedJobsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: A job could not be read (the worker logged job_failed). See README, Alarms.
+      Namespace: SuryaLekka
+      MetricName: FailedJobs
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref Alarms]
+
+  FailureQueueAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: Worker events that failed twice are waiting in the failure queue. See README, Alarms.
+      Namespace: AWS/SQS
+      MetricName: ApproximateNumberOfMessagesVisible
+      Dimensions:
+        - Name: QueueName
+          Value: !GetAtt WorkerFailures.QueueName
+      Statistic: Maximum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref Alarms]
+
+  LambdaErrorsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: A function of this stack failed (Lambda Errors). See README, Alarms.
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref Alarms]
+      Metrics:
+        - Id: f1
+          ReturnData: false
+          MetricStat:
+            Metric:
+              Namespace: AWS/Lambda
+              MetricName: Errors
+              Dimensions:
+                - Name: FunctionName
+                  Value: !Ref CreateJobFunction
+            Period: 300
+            Stat: Sum
+        - Id: f2
+          ReturnData: false
+          MetricStat:
+            Metric:
+              Namespace: AWS/Lambda
+              MetricName: Errors
+              Dimensions:
+                - Name: FunctionName
+                  Value: !Ref GetJobFunction
+            Period: 300
+            Stat: Sum
+        - Id: f3
+          ReturnData: false
+          MetricStat:
+            Metric:
+              Namespace: AWS/Lambda
+              MetricName: Errors
+              Dimensions:
+                - Name: FunctionName
+                  Value: !Ref RecheckFunction
+            Period: 300
+            Stat: Sum
+        - Id: f4
+          ReturnData: false
+          MetricStat:
+            Metric:
+              Namespace: AWS/Lambda
+              MetricName: Errors
+              Dimensions:
+                - Name: FunctionName
+                  Value: !Ref RetryFunction
+            Period: 300
+            Stat: Sum
+        - Id: f5
+          ReturnData: false
+          MetricStat:
+            Metric:
+              Namespace: AWS/Lambda
+              MetricName: Errors
+              Dimensions:
+                - Name: FunctionName
+                  Value: !Ref ManualCheckFunction
+            Period: 300
+            Stat: Sum
+        - Id: f6
+          ReturnData: false
+          MetricStat:
+            Metric:
+              Namespace: AWS/Lambda
+              MetricName: Errors
+              Dimensions:
+                - Name: FunctionName
+                  Value: !Ref SampleJobFunction
+            Period: 300
+            Stat: Sum
+        - Id: f7
+          ReturnData: false
+          MetricStat:
+            Metric:
+              Namespace: AWS/Lambda
+              MetricName: Errors
+              Dimensions:
+                - Name: FunctionName
+                  Value: !Ref WorkerFunction
+            Period: 300
+            Stat: Sum
+        - Id: total
+          Expression: SUM([f1, f2, f3, f4, f5, f6, f7])
+          Label: Errors across the stack's functions
+          ReturnData: true
+
+  LambdaThrottlesAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: A function of this stack was throttled (Lambda Throttles). See README, Alarms.
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref Alarms]
+      Metrics:
+        - Id: f1
+          ReturnData: false
+          MetricStat:
+            Metric:
+              Namespace: AWS/Lambda
+              MetricName: Throttles
+              Dimensions:
+                - Name: FunctionName
+                  Value: !Ref CreateJobFunction
+            Period: 300
+            Stat: Sum
+        - Id: f2
+          ReturnData: false
+          MetricStat:
+            Metric:
+              Namespace: AWS/Lambda
+              MetricName: Throttles
+              Dimensions:
+                - Name: FunctionName
+                  Value: !Ref GetJobFunction
+            Period: 300
+            Stat: Sum
+        - Id: f3
+          ReturnData: false
+          MetricStat:
+            Metric:
+              Namespace: AWS/Lambda
+              MetricName: Throttles
+              Dimensions:
+                - Name: FunctionName
+                  Value: !Ref RecheckFunction
+            Period: 300
+            Stat: Sum
+        - Id: f4
+          ReturnData: false
+          MetricStat:
+            Metric:
+              Namespace: AWS/Lambda
+              MetricName: Throttles
+              Dimensions:
+                - Name: FunctionName
+                  Value: !Ref RetryFunction
+            Period: 300
+            Stat: Sum
+        - Id: f5
+          ReturnData: false
+          MetricStat:
+            Metric:
+              Namespace: AWS/Lambda
+              MetricName: Throttles
+              Dimensions:
+                - Name: FunctionName
+                  Value: !Ref ManualCheckFunction
+            Period: 300
+            Stat: Sum
+        - Id: f6
+          ReturnData: false
+          MetricStat:
+            Metric:
+              Namespace: AWS/Lambda
+              MetricName: Throttles
+              Dimensions:
+                - Name: FunctionName
+                  Value: !Ref SampleJobFunction
+            Period: 300
+            Stat: Sum
+        - Id: f7
+          ReturnData: false
+          MetricStat:
+            Metric:
+              Namespace: AWS/Lambda
+              MetricName: Throttles
+              Dimensions:
+                - Name: FunctionName
+                  Value: !Ref WorkerFunction
+            Period: 300
+            Stat: Sum
+        - Id: total
+          Expression: SUM([f1, f2, f3, f4, f5, f6, f7])
+          Label: Throttles across the stack's functions
+          ReturnData: true
 
 Outputs:
   ApiUrl:

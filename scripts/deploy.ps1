@@ -42,6 +42,12 @@ param(
     [ValidateRange(0, 100000)][int]$DailyJobCap = 200,
     [ValidateRange(0, 100000)][int]$IpDailyJobCap = 10,
     [ValidateRange(0, 100000)][int]$DailyPageCap = 300,
+    [ValidateRange(0, 100000)][int]$SampleDailyCap = 1000,
+    [ValidateRange(0, 100000)][int]$IpSampleDailyCap = 50,
+    [ValidateRange(0, 100000)][int]$TypedDailyCap = 5000,
+    [ValidateRange(0, 100000)][int]$IpTypedDailyCap = 200,
+    # Where CloudWatch alarms are emailed (SNS asks the address to confirm). Never stored in the repo.
+    [string]$AlarmEmail = "none",
     [switch]$Pages,
     # Also publish web/ to Amplify Hosting by a manual deployment (no Git connection) to an app
     # made once with: aws amplify create-app --name <name> --platform WEB, and its branch.
@@ -58,6 +64,14 @@ if ($Pages -and $SiteOrigin -cnotmatch '^https://[a-z0-9-]+\.github\.io$') {
     throw "With -Pages, -SiteOrigin must be the GitHub Pages origin, such as https://<user>.github.io (no path)."
 }
 
+# With hosting on, the template lets only its own CloudFront address call the API, so a site
+# published to GitHub Pages or Amplify could not reach it: refuse before anything is deployed.
+if (($Pages -or $Amplify) -and $HostingEnabled -eq "true") {
+    throw "-Pages and -Amplify need -HostingEnabled false: with hosting on, the API accepts only the CloudFront address."
+}
+if ($AlarmEmail -ne "none" -and $AlarmEmail -notmatch '^[^@\s]+@[^@\s]+\.[^@\s]+$') {
+    throw "-AlarmEmail must be an email address, or none."
+}
 if ($Amplify -and $AmplifyAppId -cnotmatch '^d[a-z0-9]{6,20}$') {
     throw "With -Amplify, -AmplifyAppId must be the Amplify app id, such as d2sqhcgne0nq26."
 }
@@ -115,7 +129,9 @@ $deployArgs = @("--stack-name", $StackName, "--capabilities", "CAPABILITY_IAM") 
     "SecondSiteOrigin=$secondOrigin",
     "ReadingEngine=$ReadingEngine", "ModelId=$ModelId",
     "ProfileModelArns=$($access.ProfileModelArns)", "GlobalModelArns=$($access.GlobalModelArns)",
-    "DailyJobCap=$DailyJobCap", "IpDailyJobCap=$IpDailyJobCap", "DailyPageCap=$DailyPageCap"
+    "DailyJobCap=$DailyJobCap", "IpDailyJobCap=$IpDailyJobCap", "DailyPageCap=$DailyPageCap",
+    "SampleDailyCap=$SampleDailyCap", "IpSampleDailyCap=$IpSampleDailyCap", "TypedDailyCap=$TypedDailyCap",
+    "IpTypedDailyCap=$IpTypedDailyCap", "AlarmEmail=$AlarmEmail"
 )
 # Unattended: SAM makes or reuses its own artifacts bucket and saves these settings to samconfig.toml.
 Invoke-Step "Deploy" {
@@ -229,6 +245,8 @@ if ($Amplify) {
 Write-Host ""
 Write-Host "API URL: $apiUrl"
 Write-Host "Caps in effect: $DailyJobCap checks a day, $IpDailyJobCap per address a day, $DailyPageCap pages a day"
+Write-Host "Sample caps: $SampleDailyCap a day, $IpSampleDailyCap per address; typed-in caps: $TypedDailyCap a day, $IpTypedDailyCap per address"
+Write-Host "Alarms: $(if ($AlarmEmail -eq 'none') { 'no email subscription' } else { 'emailed (confirm the subscription from the inbox)' })"
 if ($Amplify) { Write-Host "Amplify: $secondOrigin/ (the API accepts it as a second origin)" }
 if ($HostingEnabled -eq "true") {
     Write-Host "Site:    $siteUrl"

@@ -355,3 +355,27 @@ def test_amplify_needs_an_app_id():
     run, calls = run_ps("deploy.ps1", f"-Profile default -Region ap-south-1 -ExpectedAccount {ACCOUNT} "
                         "-HostingEnabled false -Amplify", {})
     assert run.returncode != 0 and "AmplifyAppId" in run.stdout and not [c for c in calls if c.startswith("sam ")]
+
+
+@windows_powershell
+@pytest.mark.parametrize("extra", ["-Pages -SiteOrigin https://someone.github.io", "-Amplify -AmplifyAppId d2sqhcgne0nq26"])
+def test_a_site_the_template_would_not_let_call_the_api_is_refused_before_deploying(extra):
+    run, calls = run_ps("deploy.ps1", f"-Profile default -Region ap-south-1 -ExpectedAccount {ACCOUNT} "
+                        f"-HostingEnabled true {extra}", {})
+    assert run.returncode != 0 and "HostingEnabled false" in run.stdout
+    assert not [c for c in calls if c.startswith(("sam ", "gh ", "aws amplify"))]
+
+
+@windows_powershell
+def test_every_deploy_passes_the_sample_and_typed_caps_and_the_alarm_address():
+    stack = {"FAKE_STACK": outputs(("ApiUrl", "https://abc.example.com"), ("BucketName", "b"))}
+    base = f"-Profile default -Region ap-south-1 -ExpectedAccount {ACCOUNT} -HostingEnabled false "
+    run, calls = run_ps("deploy.ps1", base + "-SampleDailyCap 7 -IpTypedDailyCap 3 -AlarmEmail ops@example.com", stack)
+    assert run.returncode == 0, run.stdout + run.stderr
+    (deploy,) = [c for c in calls if c.startswith("sam deploy")]
+    for override in ("SampleDailyCap=7", "IpSampleDailyCap=50", "TypedDailyCap=5000", "IpTypedDailyCap=3",
+                     "AlarmEmail=ops@example.com"):
+        assert override in deploy
+    assert "Sample caps: 7 a day, 50 per address; typed-in caps: 5000 a day, 3 per address" in run.stdout
+    run, calls = run_ps("deploy.ps1", base + "-AlarmEmail not-an-address", stack)
+    assert run.returncode != 0 and not [c for c in calls if c.startswith("sam ")]

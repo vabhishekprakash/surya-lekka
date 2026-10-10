@@ -1,3 +1,4 @@
+import json
 import re
 import runpy
 from pathlib import Path
@@ -80,9 +81,17 @@ RES = resolve()["Resources"]
 SITE_ORIGIN = {"Fn::Sub": "https://${SiteDistribution.DomainName}"}
 
 
-def statements(name, resources=None):
+def role_of(name, resources=None):
     resources = resources or RES
-    return [s for p in resources[name]["Properties"].get("Policies", []) for s in p["Statement"]]
+    return resources[name]["Properties"]["Role"]["Fn::GetAtt"][0]
+
+
+def statements(name, resources=None, xray=False):
+    """A function's own permissions, from its role (X-Ray writes left out unless asked for)."""
+    resources = resources or RES
+    role = resources[role_of(name, resources)]
+    return [s for p in role["Properties"].get("Policies", []) for s in p["PolicyDocument"]["Statement"]
+            if xray or s.get("Sid") != "WriteTraces"]
 
 
 def actions(statement):
@@ -256,7 +265,8 @@ def test_worker_permissions():
     ("SampleJobFunction", {"dynamodb:PutItem", "dynamodb:UpdateItem", "s3:GetObject", "s3:PutObject",
                            "secretsmanager:GetSecretValue"}),
     ("RetryFunction", {"dynamodb:GetItem", "dynamodb:UpdateItem", "s3:PutObject"}),
-    ("ManualCheckFunction", {"secretsmanager:GetSecretValue"}),
+    ("ManualCheckFunction", {"dynamodb:GetItem", "dynamodb:PutItem", "dynamodb:UpdateItem",
+                             "secretsmanager:GetSecretValue"}),
 ])
 def test_api_functions_least_privilege(name, allowed):
     granted = set().union(*(actions(s) for s in statements(name)))
@@ -298,8 +308,64 @@ def test_every_function_is_traced_with_permission_to_send_traces():
     translated = lint["translate"](ROOT / "template.yaml")["Resources"]
     for name in functions:
         assert translated[name]["Properties"]["TracingConfig"] == {"Mode": "Active"}
-        managed = translated[f"{name}Role"]["Properties"]["ManagedPolicyArns"]
-        assert any(text(m).endswith(":iam::aws:policy/AWSXrayWriteOnlyAccess") for m in managed)
+        (trace,) = [s for s in statements(name, xray=True) if s.get("Sid") == "WriteTraces"]
+        assert actions(trace) == {"xray:PutTraceSegments", "xray:PutTelemetryRecords"}
+
+
+FUNCTIONS = ["CreateJobFunction", "GetJobFunction", "RecheckFunction", "RetryFunction", "ManualCheckFunction",
+             "SampleJobFunction", "WorkerFunction"]
+LOGS = {f: f.replace("Function", "Logs") for f in FUNCTIONS}
+
+
+def test_every_function_has_its_own_role_and_no_aws_managed_policy():
+    lint = runpy.run_path(str(ROOT / "scripts" / "lint_template.py"))
+    translated = lint["translate"](ROOT / "template.yaml")["Resources"]
+    roles = [n for n, r in translated.items() if r["Type"] == "AWS::IAM::Role"]
+    assert sorted(roles) == sorted(f"{f}Role" for f in FUNCTIONS)
+    for name in roles:
+        assert "ManagedPolicyArns" not in translated[name]["Properties"], name
+        assert "AWSLambdaBasicExecutionRole" not in json.dumps(translated[name])
+    for f in FUNCTIONS:
+        assert role_of(f) == f"{f}Role"
+
+
+def test_each_function_writes_logs_only_to_its_own_log_group():
+    for f in FUNCTIONS:
+        (policy,) = [r for r in RAW.values() if r["Type"] == "AWS::IAM::Policy"
+                     and r["Properties"]["Roles"] == [{"Ref": f"{f}Role"}]]
+        (statement,) = policy["Properties"]["PolicyDocument"]["Statement"]
+        assert actions(statement) == {"logs:CreateLogStream", "logs:PutLogEvents"}  # never CreateLogGroup
+        assert statement["Resource"] == {"Fn::GetAtt": [LOGS[f], "Arn"]}
+        assert not [s for s in statements(f, xray=True) if any(a.startswith("logs:") for a in actions(s))]
+
+
+def test_the_worker_may_send_to_its_failure_queue_only():
+    (send,) = [s for s in statements("WorkerFunction") if "sqs:SendMessage" in actions(s)]
+    assert send["Resource"] == {"Fn::GetAtt": ["WorkerFailures", "Arn"]} and actions(send) == {"sqs:SendMessage"}
+
+
+def test_alarms_reach_an_email_only_when_one_is_given():
+    assert TEMPLATE["Parameters"]["AlarmEmail"]["Default"] == "none"
+    assert "AlarmsByEmail" not in RES  # no address, no subscription
+    res = resolve(AlarmEmail="someone@example.com")["Resources"]
+    assert res["AlarmsByEmail"]["Properties"]["Endpoint"] == {"Ref": "AlarmEmail"}
+    pattern = re.compile(TEMPLATE["Parameters"]["AlarmEmail"]["AllowedPattern"])
+    assert pattern.fullmatch("none") and pattern.fullmatch("a@b.co") and not pattern.fullmatch("not an email")
+    alarms = {n: r for n, r in RAW.items() if r["Type"] == "AWS::CloudWatch::Alarm"}
+    assert set(alarms) == {"FailedJobsAlarm", "FailureQueueAlarm", "LambdaErrorsAlarm", "LambdaThrottlesAlarm"}
+    assert all(a["Properties"]["AlarmActions"] == [{"Ref": "Alarms"}] for a in alarms.values())
+    metric = RAW["FailedJobsMetric"]["Properties"]
+    assert metric["LogGroupName"] == {"Ref": "WorkerLogs"} and "job_failed" in metric["FilterPattern"]
+    for name in ("LambdaErrorsAlarm", "LambdaThrottlesAlarm"):
+        functions = [m["MetricStat"]["Metric"]["Dimensions"][0]["Value"] for m in alarms[name]["Properties"]["Metrics"]
+                     if "MetricStat" in m]
+        assert functions == [{"Ref": f} for f in FUNCTIONS]
+    assert not re.search(r"[\w.+-]+@[\w-]+\.[A-Za-z]{2,}", json.dumps(TEMPLATE))  # no address in the template
+
+
+def test_get_job_reads_sample_page_images_only():
+    (read,) = [s for s in statements("GetJobFunction") if "s3:GetObject" in actions(s)]
+    assert str(read["Resource"]).endswith("/samples/*/page-*.jpg'}")
 
 
 def test_bucket_name_starts_with_the_stack_prefix():
