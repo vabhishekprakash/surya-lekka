@@ -1,0 +1,378 @@
+{
+ "name": "32_option_switch_stale_tick",
+ "issue": "Verification of A gross_total must not apply to B gross_total; the third request is the unticked B control.",
+ "mode": "default",
+ "sources": null,
+ "expense": null,
+ "requests": [
+  {
+   "confirmations": {
+    "state": "Telangana",
+    "consumer_type": "individual_household",
+    "portal_application_on_or_after_cutoff": true,
+    "first_system": true,
+    "prior_central_subsidy": false,
+    "give_it_up": false,
+    "multiple_options": true,
+    "capacity_basis": "dc_kwp",
+    "gst_treatment": "included",
+    "extra_charges_complete": true,
+    "net_cost_subsidy_basis": "central",
+    "selected_option": "3 kW"
+   },
+   "verified": [
+    "gross_total"
+   ]
+  },
+  {
+   "confirmations": {
+    "state": "Telangana",
+    "consumer_type": "individual_household",
+    "portal_application_on_or_after_cutoff": true,
+    "first_system": true,
+    "prior_central_subsidy": false,
+    "give_it_up": false,
+    "multiple_options": true,
+    "capacity_basis": "dc_kwp",
+    "gst_treatment": "included",
+    "extra_charges_complete": true,
+    "net_cost_subsidy_basis": "central",
+    "selected_option": "5 kW"
+   },
+   "verified": [
+    "gross_total"
+   ]
+  },
+  {
+   "confirmations": {
+    "state": "Telangana",
+    "consumer_type": "individual_household",
+    "portal_application_on_or_after_cutoff": true,
+    "first_system": true,
+    "prior_central_subsidy": false,
+    "give_it_up": false,
+    "multiple_options": true,
+    "capacity_basis": "dc_kwp",
+    "gst_treatment": "included",
+    "extra_charges_complete": true,
+    "net_cost_subsidy_basis": "central",
+    "selected_option": "5 kW"
+   },
+   "verified": []
+  }
+ ],
+ "textract_reply": {
+  "DocumentMetadata": {
+   "Pages": 1
+  },
+  "Blocks": [
+   {
+    "BlockType": "PAGE",
+    "Id": "page",
+    "Page": 1
+   },
+   {
+    "BlockType": "LINE",
+    "Text": "Base price Rs 1,00,000",
+    "Confidence": 99.0,
+    "Geometry": {
+     "BoundingBox": {
+      "Left": 0.05,
+      "Top": 0.1,
+      "Width": 0.8,
+      "Height": 0.02
+     }
+    },
+    "Id": "b1",
+    "Page": 1
+   },
+   {
+    "BlockType": "WORD",
+    "Text": "Option",
+    "Confidence": 99.0,
+    "Id": "b2",
+    "Page": 1
+   },
+   {
+    "BlockType": "CELL",
+    "RowIndex": 1,
+    "ColumnIndex": 1,
+    "RowSpan": 1,
+    "ColumnSpan": 1,
+    "Confidence": 90.0,
+    "Relationships": [
+     {
+      "Type": "CHILD",
+      "Ids": [
+       "b2"
+      ]
+     }
+    ],
+    "EntityTypes": [
+     "COLUMN_HEADER"
+    ],
+    "Id": "b3",
+    "Page": 1
+   },
+   {
+    "BlockType": "WORD",
+    "Text": "Capacity",
+    "Confidence": 99.0,
+    "Id": "b4",
+    "Page": 1
+   },
+   {
+    "BlockType": "CELL",
+    "RowIndex": 1,
+    "ColumnIndex": 2,
+    "RowSpan": 1,
+    "ColumnSpan": 1,
+    "Confidence": 90.0,
+    "Relationships": [
+     {
+      "Type": "CHILD",
+      "Ids": [
+       "b4"
+      ]
+     }
+    ],
+    "EntityTypes": [
+     "COLUMN_HEADER"
+    ],
+    "Id": "b5",
+    "Page": 1
+   },
+   {
+    "BlockType": "WORD",
+    "Text": "Total",
+    "Confidence": 99.0,
+    "Id": "b6",
+    "Page": 1
+   },
+   {
+    "BlockType": "WORD",
+    "Text": "price",
+    "Confidence": 99.0,
+    "Id": "b7",
+    "Page": 1
+   },
+   {
+    "BlockType": "WORD",
+    "Text": "(Rs)",
+    "Confidence": 99.0,
+    "Id": "b8",
+    "Page": 1
+   },
+   {
+    "BlockType": "CELL",
+    "RowIndex": 1,
+    "ColumnIndex": 3,
+    "RowSpan": 1,
+    "ColumnSpan": 1,
+    "Confidence": 90.0,
+    "Relationships": [
+     {
+      "Type": "CHILD",
+      "Ids": [
+       "b6",
+       "b7",
+       "b8"
+      ]
+     }
+    ],
+    "EntityTypes": [
+     "COLUMN_HEADER"
+    ],
+    "Id": "b9",
+    "Page": 1
+   },
+   {
+    "BlockType": "WORD",
+    "Text": "A",
+    "Confidence": 99.0,
+    "Id": "b10",
+    "Page": 1
+   },
+   {
+    "BlockType": "CELL",
+    "RowIndex": 2,
+    "ColumnIndex": 1,
+    "RowSpan": 1,
+    "ColumnSpan": 1,
+    "Confidence": 90.0,
+    "Relationships": [
+     {
+      "Type": "CHILD",
+      "Ids": [
+       "b10"
+      ]
+     }
+    ],
+    "Id": "b11",
+    "Page": 1
+   },
+   {
+    "BlockType": "WORD",
+    "Text": "3",
+    "Confidence": 99.0,
+    "Id": "b12",
+    "Page": 1
+   },
+   {
+    "BlockType": "WORD",
+    "Text": "kW",
+    "Confidence": 99.0,
+    "Id": "b13",
+    "Page": 1
+   },
+   {
+    "BlockType": "CELL",
+    "RowIndex": 2,
+    "ColumnIndex": 2,
+    "RowSpan": 1,
+    "ColumnSpan": 1,
+    "Confidence": 90.0,
+    "Relationships": [
+     {
+      "Type": "CHILD",
+      "Ids": [
+       "b12",
+       "b13"
+      ]
+     }
+    ],
+    "Id": "b14",
+    "Page": 1
+   },
+   {
+    "BlockType": "WORD",
+    "Text": "1,00,000",
+    "Confidence": 99.0,
+    "Id": "b15",
+    "Page": 1
+   },
+   {
+    "BlockType": "CELL",
+    "RowIndex": 2,
+    "ColumnIndex": 3,
+    "RowSpan": 1,
+    "ColumnSpan": 1,
+    "Confidence": 60,
+    "Relationships": [
+     {
+      "Type": "CHILD",
+      "Ids": [
+       "b15"
+      ]
+     }
+    ],
+    "Id": "b16",
+    "Page": 1
+   },
+   {
+    "BlockType": "WORD",
+    "Text": "B",
+    "Confidence": 99.0,
+    "Id": "b17",
+    "Page": 1
+   },
+   {
+    "BlockType": "CELL",
+    "RowIndex": 3,
+    "ColumnIndex": 1,
+    "RowSpan": 1,
+    "ColumnSpan": 1,
+    "Confidence": 90.0,
+    "Relationships": [
+     {
+      "Type": "CHILD",
+      "Ids": [
+       "b17"
+      ]
+     }
+    ],
+    "Id": "b18",
+    "Page": 1
+   },
+   {
+    "BlockType": "WORD",
+    "Text": "5",
+    "Confidence": 99.0,
+    "Id": "b19",
+    "Page": 1
+   },
+   {
+    "BlockType": "WORD",
+    "Text": "kW",
+    "Confidence": 99.0,
+    "Id": "b20",
+    "Page": 1
+   },
+   {
+    "BlockType": "CELL",
+    "RowIndex": 3,
+    "ColumnIndex": 2,
+    "RowSpan": 1,
+    "ColumnSpan": 1,
+    "Confidence": 90.0,
+    "Relationships": [
+     {
+      "Type": "CHILD",
+      "Ids": [
+       "b19",
+       "b20"
+      ]
+     }
+    ],
+    "Id": "b21",
+    "Page": 1
+   },
+   {
+    "BlockType": "WORD",
+    "Text": "1,10,000",
+    "Confidence": 99.0,
+    "Id": "b22",
+    "Page": 1
+   },
+   {
+    "BlockType": "CELL",
+    "RowIndex": 3,
+    "ColumnIndex": 3,
+    "RowSpan": 1,
+    "ColumnSpan": 1,
+    "Confidence": 60,
+    "Relationships": [
+     {
+      "Type": "CHILD",
+      "Ids": [
+       "b22"
+      ]
+     }
+    ],
+    "Id": "b23",
+    "Page": 1
+   },
+   {
+    "BlockType": "TABLE",
+    "Relationships": [
+     {
+      "Type": "CHILD",
+      "Ids": [
+       "b3",
+       "b5",
+       "b9",
+       "b11",
+       "b14",
+       "b16",
+       "b18",
+       "b21",
+       "b23"
+      ]
+     }
+    ],
+    "Id": "b24",
+    "Page": 1
+   }
+  ]
+ }
+}
