@@ -195,3 +195,12 @@ def test_the_telugu_limit_is_stated_as_agreed():
             "Opus 5.5 reviewed it, and a second independent Claude check back-translated it. No professional "
             "translator has reviewed it. Other screens are in English.") in section("Limits")
     assert "Hindi isn't offered." in section("Limits")
+
+
+def test_round7_claims_are_stated_as_built():
+    assert "at most four" not in README and "never publishes stale settings" not in README
+    assert "Every request is checked in full before it takes a slot" in README
+    assert "CORS is a browser access policy, not a security boundary" in README
+    assert "accept requests from" not in README and "accepts requests only" not in README
+    assert "subsidy findings that use a rule also name the rule and its date" in README
+    assert "stops the job, with reason `read_limit`" in README and "counts reads started, not AWS charges" in README
