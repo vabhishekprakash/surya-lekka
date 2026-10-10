@@ -59,6 +59,9 @@ def _candidate(f):
     out = {k: f.get(k) for k in ("value", "evidence_text", "page", "batch")}
     if f.get("source"):  # e.g. a state read from the GSTIN, labelled as the GST registration state
         out["source"] = f["source"]
+    for key in ("rules", "confidence"):  # which source rule read it and how sure the reading was
+        if key in f:
+            out[key] = f[key]
     return out
 
 

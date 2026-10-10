@@ -225,7 +225,9 @@ def from_lines(page, threshold):
         if page.line_confidence(line) < threshold:
             continue
         text = " ".join(line["Text"].split())
-        out += line_candidates(text, text, (line["Id"],), "lines")
+        for c in line_candidates(text, text, (line["Id"],), "lines"):
+            c["confidence"] = page.line_confidence(line)
+            out.append(c)
     return out
 
 
@@ -293,6 +295,7 @@ def bom_candidates(grid, header, confidence, threshold, table_no, row_merged=fro
         option = sure(cols["option"]).strip() or None
         unreadable = bool(cols["option"]) and option is None  # empty or below the threshold
         occurrence = ("table", table_no, r)
+        row_confidence = min([confidence.get((r, c), 0) for c in cells if cells[c]] or [0])
         if _PANEL.search(desc) and not _INVERTER.search(desc):
             qty = sure([qty_col])
             m = re.fullmatch(r"\s*(\d{1,3})\s*(?:nos?\.?|pcs\.?|numbers?)?\s*", qty, re.I)
@@ -303,14 +306,16 @@ def bom_candidates(grid, header, confidence, threshold, table_no, row_merged=fro
             watts = one_measure(rating, ("w", "wp")) or one_measure(desc, ("w", "wp"))
             if count or watts:
                 groups.append({"count": count, "wattage": watts, "make_model": make, "evidence": row_text,
-                               "occurrence": occurrence, "option_id": option, "option_unreadable": unreadable})
+                               "occurrence": occurrence, "option_id": option, "option_unreadable": unreadable,
+                               "confidence": row_confidence})
         elif _INVERTER.search(desc) and not _PANEL.search(desc):
             kw = one_measure(rating, ("kw", "kva", "w"))
             if not kw and not _INPUT.search(desc):
                 kw = one_measure(desc, ("kw", "kva", "w"))
             if kw or make:
                 inverters.append({"rating": kw, "make_model": make, "evidence": row_text, "occurrence": occurrence,
-                                  "option_id": option, "option_unreadable": unreadable})
+                                  "option_id": option, "option_unreadable": unreadable,
+                                  "confidence": row_confidence})
     return groups, inverters
 
 

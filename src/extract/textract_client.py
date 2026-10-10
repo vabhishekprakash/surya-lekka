@@ -301,8 +301,9 @@ def _option_rows(grid, header, confidence, threshold=CONFIDENCE_THRESHOLD, heade
         if min([confidence.get((r, col), 0), confidence.get((r, price_col), 0)]
                + [confidence.get(k, 0) for k in heads]) < threshold:
             continue
-        rows.append((cell, raw, cells[price_col], text, price_col))
-    capacities = [parse_capacity(raw) for _, raw, _, _, _ in rows]
+        rows.append((cell, raw, cells[price_col], text, price_col,
+                     min(confidence.get((r, col), 0), confidence.get((r, price_col), 0))))
+    capacities = [parse_capacity(row[1]) for row in rows]
     keys = {(Decimal(str(c["parsed"])), c["unit"].lower().rstrip("p")) for c in capacities}
     return rows if len(rows) >= 2 and len(keys) == len(rows) else []
 
@@ -458,6 +459,10 @@ def map_page(reply, page_number, threshold=CONFIDENCE_THRESHOLD, sources=None, e
     page = _Page(reply)
     wire, report = _empty_wire(), []
     cands, gstin, conflicts = [], None, []
+    prov = []  # (slot, raw, evidence, rule, confidence) for every value written
+
+    def note(slot, raw, evidence, rule, confidence):
+        prov.append((slot, raw, evidence, rule, confidence))
     group_loose, inverter_loose = {}, {}
     seen = {}
     if "queries" in sources:
@@ -498,6 +503,7 @@ def map_page(reply, page_number, threshold=CONFIDENCE_THRESHOLD, sources=None, e
             entry["kept"] = True
             target, key = TARGETS[alias]
             field = QUERY_FIELDS.get(alias)
+            answer_confidence = min([confidence] + [page.line_confidence(l) for l in lines])
             occurrence = next((tuple([l["Id"]]) for l in lines if _loose(raw) in _loose(l["Text"])),
                               tuple(l["Id"] for l in lines))
             if target == "dcr_declaration":
@@ -505,6 +511,7 @@ def map_page(reply, page_number, threshold=CONFIDENCE_THRESHOLD, sources=None, e
                     entry["kept"], entry["why"] = False, "unparsed"
                 elif "dcr_declaration" not in wire:
                     wire["dcr_declaration"] = _flag(_dcr_value(raw), evidence, page_number)
+                    note("dcr_declaration", None, evidence, "queries.dcr_declaration", answer_confidence)
             elif target == "vendor_registration":
                 if GSTIN.fullmatch(re.sub(r"\s+", "", raw).upper()):
                     entry["kept"], entry["why"] = False, "gstin"
@@ -512,13 +519,17 @@ def map_page(reply, page_number, threshold=CONFIDENCE_THRESHOLD, sources=None, e
                                       "page": page_number}
                 elif "vendor_registration" not in wire:
                     wire["vendor_registration"] = {"value": raw, "evidence_text": evidence, "page": page_number}
+                    note("vendor_registration", raw, evidence, "queries.vendor_registration", answer_confidence)
             elif field in GROUP_KEYS or field in INVERTER_KEYS:
                 index = seen[alias] = seen.get(alias, -1) + 1  # the nth answer to this query on the page
                 loose = group_loose if field in GROUP_KEYS else inverter_loose
                 loose.setdefault(key, []).append((index, (raw, evidence)))
+                note(key, raw, evidence, f"queries.{field}", answer_confidence)
             else:
                 named = src.role(evidence) == field if field in PRICE_FIELDS else True
-                cands.append(src.candidate(field, raw, evidence, occurrence, named, "queries"))
+                c = src.candidate(field, raw, evidence, occurrence, named, "queries")
+                c["confidence"] = answer_confidence
+                cands.append(c)
 
     if "lines" in sources:
         cands += src.from_lines(page, threshold)
@@ -574,9 +585,14 @@ def map_page(reply, page_number, threshold=CONFIDENCE_THRESHOLD, sources=None, e
     if included or excluded:
         value = "unclear" if included and excluded else "included" if included else "excluded"
         wire["gst_treatment"] = _flag(value, (included or excluded)[0], page_number)
+        note("flag:gst_treatment", None, (included or excluded)[0], "lines.gst_treatment",
+             _lines_confidence(page, [l for l in page.lines if GST_INCLUDED.search(l["Text"])
+                                      or GST_EXCLUDED.search(l["Text"])]))
     give = [_tidy(l["Text"]) for l in page.lines if GIVE_IT_UP.search(l["Text"])]
     if give:
         wire["give_it_up"] = _flag("mentioned", give[0], page_number)
+        note("flag:give_it_up", None, give[0], "lines.give_it_up",
+             _lines_confidence(page, [l for l in page.lines if GIVE_IT_UP.search(l["Text"])]))
 
     headings = src.option_headings(page)
     for table_no, (grid, header, confidence, merged_header, row_merged, header_cells) in enumerate(page.tables()):
@@ -585,17 +601,22 @@ def map_page(reply, page_number, threshold=CONFIDENCE_THRESHOLD, sources=None, e
         if rows:
             if wire["multiple_options"]["value"] != "yes":
                 wire["multiple_options"] = _flag("yes", rows[0][3], page_number)
+                note("flag:multiple_options", None, rows[0][3], "options_table.multiple_options",
+                     min(row[5] for row in rows))
             price_role = None
-            for cell, raw, price, text, price_col in rows:
+            for cell, raw, price, text, price_col, row_confidence in rows:
                 wire["options"].append({"option_id": cell, "label": text, "page": page_number})
                 wire["capacities"].append({"option_id": cell, "raw": raw, "evidence_text": text, "page": page_number})
+                note("capacity", raw, text, "options_table.stated_capacity", row_confidence)
                 price_role = _price_kind(header[price_col])
                 if price_role == "subsidy":
                     wire["subsidies"].append({"option_id": cell, "kind": _subsidy_kind(f"{header[price_col]} {text}"),
                                               "raw": price, "evidence_text": text, "page": page_number})
+                    note("subsidy", price, text, "options_table.subsidy", row_confidence)
                 elif price_role:  # a header that names no role leaves the amount unresolved
                     wire["prices"].append({"option_id": cell, "kind": price_role, "raw": price,
                                            "evidence_text": text, "page": page_number})
+                    note(f"price:{price_role}", price, text, f"options_table.{price_role}", row_confidence)
             continue
         if merged_header:  # a merged header cell can't be tied to one column
             continue
@@ -616,6 +637,11 @@ def map_page(reply, page_number, threshold=CONFIDENCE_THRESHOLD, sources=None, e
                 if option and not any(o["option_id"] == option for o in wire["options"]):
                     wire["options"].append({"option_id": option, "label": option, "page": page_number})
                     wire["multiple_options"] = _flag("yes", row["evidence"], page_number)
+                    note("flag:multiple_options", None, row["evidence"], "bom_table.multiple_options",
+                         row["confidence"])
+                for key in ("count", "wattage", "make_model", "rating"):
+                    if row.get(key):
+                        note(key, row[key], row["evidence"], f"bom_table.{key}", row["confidence"])
             table_groups += g
             table_inverters += i
         if "amount_table" in sources:
@@ -626,6 +652,7 @@ def map_page(reply, page_number, threshold=CONFIDENCE_THRESHOLD, sources=None, e
         loose = group_loose if c["field"] in GROUP_KEYS else inverter_loose
         key = (GROUP_KEYS if c["field"] in GROUP_KEYS else INVERTER_KEYS)[c["field"]]
         loose.setdefault(key, []).append((0, (c["raw"], c["evidence"])))
+        note(key, c["raw"], c["evidence"], f"{c['source']}.{c['field']}", c.get("confidence"))
     cands = [c for c in cands if c["field"] not in GROUP_KEYS and c["field"] not in INVERTER_KEYS]
     for loose, rows in ((group_loose, table_groups), (inverter_loose, table_inverters)):
         if rows:
@@ -640,6 +667,10 @@ def map_page(reply, page_number, threshold=CONFIDENCE_THRESHOLD, sources=None, e
     by_field = {}
     for c in cands:
         by_field.setdefault(c["field"], []).append(c)
+    for c in cands:
+        slot = ("capacity" if c["field"] == "stated_capacity" else "subsidy" if c["field"] == "subsidy"
+                else f"price:{c['field']}" if c["field"] in PRICE_FIELDS else c["field"])
+        note(slot, c["raw"], c["evidence"], f"{c['source']}.{c['field']}", c.get("confidence"))
     for field, found in by_field.items():
         distinct = _distinct(field, found)
         if field == "stated_capacity":
@@ -651,6 +682,8 @@ def map_page(reply, page_number, threshold=CONFIDENCE_THRESHOLD, sources=None, e
             if asked:
                 wire["capacity_basis"] = _flag(bases.pop() if len(bases) == 1 else "unspecified",
                                                asked[0]["evidence"], page_number)
+                note("flag:capacity_basis", None, asked[0]["evidence"], "queries.capacity_basis",
+                     min(c.get("confidence") or 0 for c in asked))
         elif field == "subsidy":
             for c in distinct:
                 wire["subsidies"].append({"option_id": "All", "kind": _subsidy_kind(c["evidence"]), "raw": c["raw"],
@@ -671,10 +704,52 @@ def map_page(reply, page_number, threshold=CONFIDENCE_THRESHOLD, sources=None, e
                                        "source": "gst_registration_state"}
     if conflicts:
         wire["_conflicts"] = conflicts
+    wire["_provenance"] = prov
     return wire, report
 
 
-PRIVATE = ("_vendor_gstin", "_supplier_gst_state", "_conflicts")
+PRIVATE = ("_vendor_gstin", "_supplier_gst_state", "_conflicts", "_provenance")
+
+
+def _lines_confidence(page, lines):
+    return min((page.line_confidence(l) for l in lines), default=None)
+
+
+_FACT_SLOTS = {"stated_capacity": "capacity", "subsidy_central": "subsidy", "subsidy_state": "subsidy",
+               "subsidy_combined": "subsidy", "subsidy_unspecified": "subsidy"}
+
+
+def _raw_of(value):
+    if isinstance(value, dict):
+        return value.get("raw")
+    return None if value is None or isinstance(value, bool) else value
+
+
+def _attach_provenance(out, prov):
+    """Give each value the source rules that wrote it and the lowest confidence among
+    them. A value no rule claims gets the rule "unmatched", so it is never trusted."""
+    def attach(f, slot):
+        if not f or f.get("conflict") or f.get("value") is None:
+            return
+        raw = _raw_of(f["value"])
+        hits = [(rule, conf) for s, r, evidence, rule, conf in prov
+                if s == slot and evidence == f.get("evidence_text")
+                and (r is None or raw is None or _loose(str(r)) == _loose(str(raw)))]
+        f["rules"] = sorted({rule for rule, _ in hits}) or ["unmatched"]
+        confidences = [conf for _, conf in hits if conf is not None]
+        f["confidence"] = round(min(confidences), 1) if confidences else None
+
+    for fact in out.get("facts") or []:
+        attach(fact["field"], _FACT_SLOTS.get(fact["name"], f"price:{fact['name']}"))
+    for list_name, keys in (("module_groups", ("count", "wattage", "make_model")),
+                            ("inverters", ("rating", "make_model"))):
+        for item in out.get(list_name) or []:
+            for key in keys:
+                attach(item.get(key), key)
+    for name in ("dcr_declaration", "vendor_registration", "vendor_name", "quote_date"):
+        attach(out.get(name), name)
+    for name, f in ((out.get("flags") or {}).get("model_proposed") or {}).items():
+        attach(f, f"flag:{name}")
 
 
 def _conflict_field(list_key, candidates, page, batch):
@@ -702,6 +777,7 @@ def to_contract(wire, batch):
     out["vendor_gstin"] = None if gstin is None else {**gstin, "batch": batch}
     # Information only: where the supplier is registered for GST, never the household's state.
     out["supplier_gst_state"] = None if state is None else {**state, "batch": batch}
+    _attach_provenance(out, wire.get("_provenance") or [])
     page = pages[0]
     for conflict in wire.get("_conflicts") or []:
         if conflict[0] == "item":
