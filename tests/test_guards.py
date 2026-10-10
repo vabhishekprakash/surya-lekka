@@ -129,6 +129,7 @@ def test_the_manual_api_takes_confirmed_entries():
     view = json.loads(held["body"])
     assert [e["field"] for e in view["entry_checks"]] == ["stated_capacity"]
     body["verified"] = [view["entry_checks"][0]["token"]]
+    body["challenge"] = view["challenge"]  # the token is signed for this response's challenge
     view = json.loads(manual.handler({"body": json.dumps(body)}, None)["body"])
     assert "stated_capacity" not in [e["field"] for e in view["entry_checks"]]
     # with 33 kW confirmed, 6 panels of 550 W are now the numbers that look 10 times off

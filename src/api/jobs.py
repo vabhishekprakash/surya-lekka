@@ -8,6 +8,7 @@ worker. Every job read or change needs the job's secret token.
 
 import json
 import os
+import uuid
 
 from checks import run_checks
 from extract.render import MAX_IMAGE_BYTES, MAX_PAGES
@@ -25,6 +26,7 @@ from .common import (
     check_kill_switch,
     check_reading_available,
     conditional_update,
+    job_binding,
     error_response,
     guarded,
     log,
@@ -168,8 +170,15 @@ def recheck(event, context):
             if not isinstance(tokens[key], list) or not all(isinstance(t, str) for t in tokens[key]):
                 raise ApiError(400, "bad_inputs", f"{key} must be a list of tokens.")
         user_inputs = {"corrections": corrections, "confirmations": answers, **tokens}
+        # Any change of corrections or answers (an option switch included) starts a new review
+        # revision, so tokens issued before it no longer confirm anything, even after a revert.
+        revision = int(item.get("review_revision", 0))
+        before = json.loads(item["corrections"])["user_inputs"] if item.get("corrections") else {}
+        if (corrections, answers) != (before.get("corrections") or {}, before.get("confirmations") or {}):
+            revision = _next_revision(item["job_id"], revision)
         try:
-            result = run_checks(json.loads(item["extraction"]), user_inputs)
+            result = run_checks(json.loads(item["extraction"]), user_inputs,
+                                binding=job_binding(item["job_id"], revision))
         except KeyError as e:
             raise ApiError(400, "unknown_field", str(e).strip("'\"")) from None
         except (TypeError, ValueError, AttributeError):
@@ -190,6 +199,15 @@ def recheck(event, context):
         return error_response(e)
     log("rechecked", job_id=item["job_id"], http_status=200)
     return response(200, {**checked, "corrected_fields": stored["corrected_fields"]})
+
+
+def _next_revision(job_id, current):
+    """Move the job's review revision on by one, atomically; refuse if another request did first."""
+    first = "attribute_not_exists(#rev) OR " if current == 0 else ""
+    if not conditional_update(job_id, "SET #rev = :next", f"{first}#rev = :current", {"#rev": "review_revision"},
+                              {":next": current + 1, ":current": current}):
+        raise ApiError(409, "review_changed", "The review changed in another window. Please open the quote again.")
+    return current + 1
 
 
 @guarded("retry")
@@ -277,10 +295,11 @@ def _saved_sample(event, sample_id):
     quote, pages = reading.get("quote"), reading.get("pages")
     if reading.get("reading") != "saved" or not isinstance(quote, dict) or not isinstance(pages, dict):
         raise ApiError(404, *SAMPLE_MISSING)
-    result = run_checks(quote)
+    job_id = str(uuid.uuid4())  # the findings' tokens are signed for this job, revision 0
+    result = run_checks(quote, binding=job_binding(job_id, 0))
     checked = {k: result[k] for k in ("findings", "questions", "vendor_message", "vendor_message_lines", "check_this", "entry_checks")}
     job_id, token = new_job(
-        len(pages), f"sample:{sample_id}", mode="saved", status="done",
+        len(pages), f"sample:{sample_id}", mode="saved", status="done", job_id=job_id,
         extraction=json.dumps(quote, default=str), result=json.dumps(checked, default=str),
         processing_complete=quote.get("processing_complete") is True, page_text=json.dumps(pages),
         finished_at=now())

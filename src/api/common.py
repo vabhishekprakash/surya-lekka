@@ -44,6 +44,26 @@ READING_ENGINES = ("nova", "textract")
 READING_UNAVAILABLE = "AI reading isn't available yet. Please type the numbers instead."
 
 
+@lru_cache(maxsize=1)
+def confirm_key():
+    """The per-stack secret that signs confirmation tokens, read once per cold start from AWS
+    Secrets Manager (CONFIRM_SECRET_ARN, created by the template; this function's role may read
+    only that one secret). It is never logged, returned or written anywhere. Local runs with no
+    secret get a random key that lives only as long as the process."""
+    arn = os.environ.get("CONFIRM_SECRET_ARN")
+    if not arn:
+        import secrets
+        return secrets.token_bytes(32)
+    import boto3
+    value = boto3.client("secretsmanager").get_secret_value(SecretId=arn)["SecretString"]
+    return value.encode("utf-8")
+
+
+def job_binding(job_id, revision):
+    """What run_checks signs every token with for one job and its review revision."""
+    return {"key": confirm_key(), "job": job_id, "revision": int(revision)}
+
+
 def trace_aws_calls():
     """In Lambda, record each AWS SDK call (Textract, S3, DynamoDB) as an X-Ray subsegment,
     so traces and the service map show them. The SDK's botocore patch records the
@@ -139,6 +159,7 @@ def table():
 def reset_clients():
     s3.cache_clear()
     table.cache_clear()
+    confirm_key.cache_clear()
 
 
 def error_code(exc):
@@ -313,10 +334,11 @@ def _take_day_slots(day, cap, pages, page_cap):
     return True
 
 
-def new_job(page_count, source, mode="nova", status="awaiting_upload", **fields):
+def new_job(page_count, source, mode="nova", status="awaiting_upload", job_id=None, **fields):
     """Create a job, awaiting upload unless told otherwise. Returns (job_id, token).
-    mode says who read the quote: a reading engine, or "saved" for a sample's saved reading."""
-    job_id = str(uuid.uuid4())
+    mode says who read the quote: a reading engine, or "saved" for a sample's saved reading.
+    job_id may be chosen beforehand (a sample's findings are signed for it)."""
+    job_id = job_id or str(uuid.uuid4())
     token, digest = new_token()
     created = now()
     table().put_item(

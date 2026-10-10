@@ -5,10 +5,17 @@ same correction path as a fix on the review page, so each one is labelled as
 entered by the user and never as quoted from a document.
 """
 
+import hashlib
+import hmac
+import json
+import time
+
 from checks import run_checks
 from checks.contract import AMOUNT_FIELDS
 
-from .common import ApiError, body_json, error_response, guarded, log, response
+from .common import ApiError, body_json, confirm_key, error_response, guarded, log, response
+
+CHALLENGE_SECONDS = 900  # how long a challenge for one set of typed values lasts
 
 TEXT_FIELDS = {
     "stated_capacity": "stated_capacity",
@@ -89,14 +96,40 @@ def typed_corrections(fields):
     return len(charges), corrections
 
 
+def _digest(fields, answers):
+    return hashlib.sha256(json.dumps({"fields": fields, "answers": answers}, sort_keys=True, default=str)
+                          .encode("utf-8")).hexdigest()
+
+
+def _signed(digest, expires):
+    return hmac.new(confirm_key(), f"{expires}|{digest}".encode("utf-8"), hashlib.sha256).hexdigest()
+
+
+def challenge_for(fields, answers, offered=None, clock=None):
+    """The challenge every token in this response is bound to. Nothing is stored for typed-in
+    numbers, so the first response carries a challenge signed over the exact typed values and
+    answers; it lasts CHALLENGE_SECONDS. An offered challenge is kept only while it is for these
+    same values and unexpired; otherwise a new one is issued, and tokens bound to the old one no
+    longer confirm anything."""
+    clock = clock or time.time
+    digest = _digest(fields, answers)
+    if isinstance(offered, str) and offered.count(".") == 1:
+        expires, signature = offered.split(".")
+        if expires.isdigit() and int(expires) > clock() and hmac.compare_digest(signature, _signed(digest, expires)):
+            return offered
+    expires = str(int(clock()) + CHALLENGE_SECONDS)
+    return f"{expires}.{_signed(digest, expires)}"
+
+
 @guarded("manual")
 def handler(event, context):
-    """POST /checks {"fields": {...}, "answers": {...}, "verified": [token], "confirmed_operands": [token]}
+    """POST /checks {"fields": {...}, "answers": {...}, "challenge": "...", "verified": [token],
+    "confirmed_operands": [token]}
 
     verified holds the tokens of typed numbers the household confirmed after a guard asked
     about them; confirmed_operands the tokens of operand sets the household confirmed. Both
-    come from an earlier response and bind to the exact value, so a changed number needs
-    confirming again."""
+    come from an earlier response and are signed for its challenge, which covers the exact typed
+    values: a changed number gets a new challenge and needs confirming again."""
     try:
         body = body_json(event)
         fields, answers = body.get("fields"), body.get("answers")
@@ -114,8 +147,9 @@ def handler(event, context):
         # The user typed one set of figures, so there is one option.
         confirmations = {"multiple_options": False, **answers}
         try:
+            challenge = challenge_for(fields, answers, body.get("challenge"))
             result = run_checks(blank_quote(charges), {"corrections": corrections, "confirmations": confirmations,
-                                                       **tokens})
+                                                       **tokens}, binding={"key": confirm_key(), "challenge": challenge})
         except KeyError as e:
             raise ApiError(400, "unknown_field", str(e).strip("'\"")) from None
         except (TypeError, ValueError, AttributeError):
@@ -127,4 +161,4 @@ def handler(event, context):
     view = {k: result[k] for k in ("findings", "questions", "vendor_message", "vendor_message_lines", "check_this")}
     names = {path: name for name, path in TEXT_FIELDS.items()}
     view["entry_checks"] = [{**e, "field": names.get(e["path"], e["path"])} for e in result["entry_checks"]]
-    return response(200, {"mode": "manual", **view})
+    return response(200, {"mode": "manual", "challenge": challenge, **view})

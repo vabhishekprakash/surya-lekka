@@ -38,6 +38,7 @@ from .common import (
     RETRYABLE_REASONS,
     claim,
     error_code,
+    job_binding,
     job_ttl_seconds,
     log,
     manifest_key,
@@ -299,7 +300,7 @@ def _extract(job_id, pages, saved, context):
 
 
 def _save(job_id, quote, stats):
-    result = run_checks(quote)
+    result = run_checks(quote, binding=job_binding(job_id, 0))
     extraction = json.dumps(quote, default=str)
     checked = json.dumps({k: result[k] for k in ("findings", "questions", "vendor_message", "vendor_message_lines", "check_this", "entry_checks")}, default=str)
     if len(extraction) + len(checked) > RESULT_MAX_BYTES:

@@ -28,10 +28,33 @@ def post(body=None, raw=None):
 
 
 def post_confirmed(body):
-    """Post, then post again confirming every operand set the first answer asked about."""
+    """Post, then post again with the first answer's challenge, confirming every operand set it
+    asked about."""
     status, first = post(body)
     tokens = [f["confirm_token"] for f in first["findings"] if f.get("confirm_token")]
-    return post({**body, "confirmed_operands": tokens})
+    return post({**body, "challenge": first["challenge"], "confirmed_operands": tokens})
+
+
+def definitive(body):
+    return [f["check_id"] for f in body["findings"] if f["status"] in ("consistent", "inconsistent")]
+
+
+def test_typed_numbers_are_confirmed_only_through_their_own_challenge(monkeypatch):
+    clock = [1_800_000_000.0]
+    monkeypatch.setattr(manual.time, "time", lambda: clock[0])
+    body = {"fields": S1_TYPED, "answers": S1_ANSWERS}
+    first = post(body)[1]
+    assert first["challenge"] and not definitive(first)
+    tokens = [f["confirm_token"] for f in first["findings"] if f.get("confirm_token")]
+    clock[0] += 5
+    assert definitive(post({**body, "challenge": first["challenge"], "confirmed_operands": tokens})[1])
+    assert not definitive(post({**body, "confirmed_operands": tokens})[1])  # no challenge: a new one
+    forged = first["challenge"].split(".")[0] + "." + "0" * 64
+    assert not definitive(post({**body, "challenge": forged, "confirmed_operands": tokens})[1])
+    changed = {**body, "fields": {**S1_TYPED, "base_price": "1,80,001"}}
+    assert not definitive(post({**changed, "challenge": first["challenge"], "confirmed_operands": tokens})[1])
+    clock[0] += manual.CHALLENGE_SECONDS
+    assert not definitive(post({**body, "challenge": first["challenge"], "confirmed_operands": tokens})[1])
 
 
 def statuses(body):

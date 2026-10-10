@@ -58,3 +58,26 @@ def test_a_traced_call_records_the_operation_and_never_the_content():
     assert subsegments[1]["aws"]["table_name"] == "jobs"
     for secret in ("QUOTE-TEXT-7731", "PAGE-BYTES-7731", "TOKEN-HASH-7731"):
         assert secret not in segment
+
+
+SECRET_PROBE = r'''
+import json, sys
+sys.path.insert(0, "src")
+from aws_xray_sdk.core import patch, xray_recorder
+xray_recorder.configure(sampling=False, context_missing="IGNORE_ERROR")
+patch(["botocore"])
+from extract.dryrun import stubbed_client
+segment = xray_recorder.begin_segment("probe")
+client, stub = stubbed_client("secretsmanager")
+stub.add_response("get_secret_value", {"ARN": "arn:aws:secretsmanager:ap-south-1:000000000000:secret:c-AbCdEf",
+                                       "Name": "c", "SecretString": "SECRET-VALUE-7731"})
+client.get_secret_value(SecretId="arn:aws:secretsmanager:ap-south-1:000000000000:secret:c-AbCdEf")
+print(json.dumps(segment.to_dict(), default=str))
+'''
+
+
+def test_reading_the_confirm_secret_records_no_secret_in_a_trace():
+    run = subprocess.run([sys.executable, "-c", SECRET_PROBE], capture_output=True, text=True, cwd=ROOT, timeout=120)
+    assert run.returncode == 0, run.stderr
+    segment = run.stdout.strip().splitlines()[-1]
+    assert "GetSecretValue" in segment and "SECRET-VALUE-7731" not in segment

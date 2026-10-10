@@ -641,7 +641,11 @@ def test_sample_route_serves_the_saved_reading_by_default(aws, monkeypatch):
     assert len(body["page_images"]) == body["page_count"]
     assert all(f"samples/S1/page-{n:02d}.jpg" in url and "Expires" in url or "X-Amz-Expires" in url
                for n, url in enumerate(body["page_images"], 1))
-    assert body["findings"] == json.loads(json.dumps(run_checks(reading["quote"])["findings"], default=str))
+    def unsigned(findings):  # the server signs tokens for this job; everything else is the same
+        return [{k: v for k, v in f.items() if k != "confirm_token"} for f in findings]
+    assert unsigned(body["findings"]) == unsigned(json.loads(json.dumps(run_checks(reading["quote"])["findings"],
+                                                                         default=str)))
+    assert all(len(f["confirm_token"]) == 64 for f in body["findings"] if f.get("confirm_token"))
     status, checked = recheck_confirmed(job, {"answers": S1_ANSWERS})
     assert status == 200 and {f["status"] for f in checked["findings"]} == {"consistent"}
 
@@ -877,3 +881,55 @@ def test_recheck_takes_charges_the_household_adds(aws):
     gross = next(f for f in result["findings"] if f["check_id"] == "C3_gross_total")
     assert gross["status"] == "needs_confirmation"
     assert "U1" in json.dumps(json.loads(item(job["job_id"])["corrections"]))
+
+
+def test_tokens_are_signed_with_the_stacks_secret_and_it_is_never_exposed(aws, monkeypatch, caplog):
+    import hashlib
+    import hmac
+
+    secret = "synthetic-secret-for-tests-7731"
+    arn = boto3.client("secretsmanager", region_name=REGION).create_secret(Name="confirm",
+                                                                           SecretString=secret)["ARN"]
+    monkeypatch.setenv("CONFIRM_SECRET_ARN", arn)
+    common.reset_clients()
+    calls = []
+    real = boto3.client
+
+    def counting(service, *args, **kwargs):
+        if service == "secretsmanager":
+            calls.append(service)
+        return real(service, *args, **kwargs)
+    monkeypatch.setattr(boto3, "client", counting)
+    caplog.set_level("INFO")
+    assert common.confirm_key() == secret.encode() and common.confirm_key() == secret.encode()
+    assert calls == ["secretsmanager"]  # read once per cold start
+    job = done_job(aws)
+    status, body = call(jobs.recheck, {"answers": S1_ANSWERS}, path={"id": job["job_id"]}, query={"t": job["token"]})
+    tokens = [f["confirm_token"] for f in body["findings"] if f.get("confirm_token")]
+    assert status == 200 and tokens and all(len(t) == 64 for t in tokens)
+    # nothing a client sees, and nothing stored or logged, holds the secret
+    stored = json.dumps(item(job["job_id"]), default=str)
+    for place in (json.dumps(body), stored, caplog.text):
+        assert secret not in place
+    # the same checks signed with another key give other tokens
+    extraction = json.loads(item(job["job_id"])["extraction"])
+    other = run_checks(extraction, {"confirmations": S1_ANSWERS},
+                       binding={"key": b"another key", "job": job["job_id"], "revision": 1})
+    assert not set(tokens) & {f.get("confirm_token") for f in other["findings"]}
+    assert hmac.new(secret.encode(), b"x", hashlib.sha256).hexdigest() not in json.dumps(body)
+
+
+def test_a_new_revision_only_when_corrections_or_answers_change(aws):
+    job = done_job(aws)
+    where = {"path": {"id": job["job_id"]}, "query": {"t": job["token"]}}
+    revision = lambda: int(item(job["job_id"]).get("review_revision", 0))  # noqa: E731
+    call(jobs.recheck, {"answers": S1_ANSWERS}, **where)
+    assert revision() == 1
+    first = call(jobs.recheck, {"answers": S1_ANSWERS}, **where)[1]  # same inputs, e.g. confirming
+    assert revision() == 1
+    tokens = [f["confirm_token"] for f in first["findings"] if f.get("confirm_token")]
+    call(jobs.recheck, {"answers": {**S1_ANSWERS, "state": "Assam"}}, **where)
+    call(jobs.recheck, {"answers": S1_ANSWERS}, **where)  # changed back
+    assert revision() == 3
+    again = call(jobs.recheck, {"answers": S1_ANSWERS, "confirmed_operands": tokens}, **where)[1]
+    assert not [f for f in again["findings"] if f["status"] in ("consistent", "inconsistent")]
