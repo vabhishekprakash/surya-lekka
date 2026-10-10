@@ -184,6 +184,7 @@ const state = {
   editView: null,
   checkThis: [],
   verified: new Set(),
+  entryChecks: [],
 };
 
 // ---------------------------------------------------------------- helpers
@@ -756,6 +757,18 @@ function checkLine(path) {
   return el("div", { class: "check-this" }, parts);
 }
 
+// A number the household typed that looks unusual for a home system. It is never changed:
+// the household confirms it with its own tick, or types it again.
+function entryLine(path, name) {
+  const entry = state.entryChecks.find((e) => (name ? e.field === name : e.path === path));
+  if (!entry) return null;
+  const id = `confirm-${(name || path).replace(/[^a-z0-9]+/gi, "-")}`;
+  const box = el("input", { type: "checkbox", id, "data-confirm-entry": name || path });
+  return el("div", { class: "check-this", "data-entry-note": "" },
+    el("span", { class: "warn", text: entry.message }),
+    el("label", { class: "verify", for: id }, box, " This number is right as I typed it"));
+}
+
 function textRow(path, label, field, extra = {}) {
   const id = `f-${path.replace(/[^a-z0-9]+/gi, "-")}`;
   const original = inputValue(field);
@@ -764,7 +777,7 @@ function textRow(path, label, field, extra = {}) {
     el("input", { id, value: original, "data-path": path, "data-original": original,
       "data-kind": extra.kind || "text", inputmode: extra.inputmode, autocomplete: "off",
       placeholder: "Not on the quote" }),
-    evidenceLine(field), checkLine(path));
+    evidenceLine(field), checkLine(path), entryLine(path));
 }
 
 function selectRow(path, label, field, options) {
@@ -987,6 +1000,7 @@ function collectReview() {
   // A ticked value counts only while it is unchanged: a changed value is a correction.
   const verified = $$("#view-review [data-verify]").filter((box) => box.checked).map((box) => box.dataset.verify)
     .filter((path) => !(path in corrections) && !(path.startsWith("flags.") && path.slice(6) in answers));
+  for (const box of $$("#view-review [data-confirm-entry]")) if (box.checked) verified.push(box.dataset.confirmEntry);
   state.verified = new Set(verified);
   return { corrections, answers, verified };
 }
@@ -1057,6 +1071,19 @@ function addCharge(values = {}) {
   $("#add-charge").hidden = box.children.length >= MAX_CHARGES;
 }
 
+function showManualEntryChecks() {
+  const form = $("#manual-form");
+  for (const note of $$("[data-entry-note]", form)) note.remove();
+  for (const entry of state.entryChecks) {
+    const charge = /^extra_charges\[E(\d+)\]\.amount$/.exec(entry.field);
+    const input = charge ? $$("[data-charge=amount]", form)[Number(charge[1]) - 1] : form.elements[entry.field];
+    const note = entryLine(null, entry.field);
+    if (!input || !note) continue;
+    input.closest("label").after(note);
+    input.addEventListener("input", () => note.remove(), { once: true });
+  }
+}
+
 function collectManual() {
   const form = $("#manual-form");
   const fields = {};
@@ -1080,7 +1107,8 @@ function collectManual() {
   for (const select of $$("select[data-answer]", form)) {
     if (select.value) answers[select.name] = answerValue(select.value);
   }
-  return { fields, answers };
+  const confirmed = $$("[data-confirm-entry]", form).filter((box) => box.checked).map((box) => box.dataset.confirmEntry);
+  return { fields, answers, confirmed };
 }
 
 async function submitManual(event) {
@@ -1185,6 +1213,8 @@ function renderVendor(result) {
 
 function openResults(result) {
   state.result = result;
+  state.entryChecks = result.entry_checks || [];
+  if (state.mode === "manual") showManualEntryChecks();
   const findings = result.findings || [];
   const counts = Object.fromEntries(STATUS_ORDER.map((s) => [s, findings.filter((f) => f.status === s).length]));
   const phrases = {
@@ -1196,7 +1226,8 @@ function openResults(result) {
   const toCheck = (result.check_this || []).filter((c) => !c.option_id || c.option_id === state.option).length;
   $("#results-summary").textContent = (parts.length ? `Results: ${parts.join(", ")}.` : "")
     + (toCheck ? ` ${toCheck === 1 ? "One value still needs" : `${toCheck} values still need`} checking against the quote.`
-      : "");
+      : "")
+    + (state.entryChecks.length ? " Some numbers you entered look unusual. Please check them." : "");
   $("#results-groups").replaceChildren(...STATUS_ORDER.filter((s) => counts[s]).map((status) =>
     el("section", { class: "finding-group" },
       el("h3", { text: STATUS_WORDS[status][1] }),

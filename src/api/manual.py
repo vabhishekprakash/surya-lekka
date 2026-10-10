@@ -91,7 +91,10 @@ def typed_corrections(fields):
 
 @guarded("manual")
 def handler(event, context):
-    """POST /checks {"fields": {...}, "answers": {...}}"""
+    """POST /checks {"fields": {...}, "answers": {...}, "confirmed": [field, ...]}
+
+    confirmed names the typed numbers the household confirmed after a guard asked
+    about them (a form field name such as "panel_wattage", or a charge's path)."""
     try:
         body = body_json(event)
         fields, answers = body.get("fields"), body.get("answers")
@@ -100,11 +103,16 @@ def handler(event, context):
             raise ApiError(400, "bad_inputs", "fields and answers must be JSON objects.")
         if any(isinstance(v, (dict, list)) for v in answers.values()):
             raise ApiError(400, "bad_inputs", "Each answer must be a single value.")
+        confirmed = body.get("confirmed") or []
+        if not isinstance(confirmed, list) or not all(isinstance(c, str) for c in confirmed):
+            raise ApiError(400, "bad_inputs", "confirmed must be a list of field names.")
         charges, corrections = typed_corrections(fields)
+        verified = [TEXT_FIELDS.get(c, c) for c in confirmed if TEXT_FIELDS.get(c, c) in corrections]
         # The user typed one set of figures, so there is one option.
         confirmations = {"multiple_options": False, **answers}
         try:
-            result = run_checks(blank_quote(charges), {"corrections": corrections, "confirmations": confirmations})
+            result = run_checks(blank_quote(charges), {"corrections": corrections, "confirmations": confirmations,
+                                                       "verified": verified})
         except KeyError as e:
             raise ApiError(400, "unknown_field", str(e).strip("'\"")) from None
         except (TypeError, ValueError, AttributeError):
@@ -113,4 +121,7 @@ def handler(event, context):
         log("manual_refused", reason=e.code, http_status=e.status)
         return error_response(e)
     log("manual_checked", http_status=200)
-    return response(200, {"mode": "manual", **{k: result[k] for k in ("findings", "questions", "vendor_message", "check_this")}})
+    view = {k: result[k] for k in ("findings", "questions", "vendor_message", "check_this")}
+    names = {path: name for name, path in TEXT_FIELDS.items()}
+    view["entry_checks"] = [{**e, "field": names.get(e["path"], e["path"])} for e in result["entry_checks"]]
+    return response(200, {"mode": "manual", **view})

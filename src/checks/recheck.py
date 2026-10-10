@@ -147,3 +147,5 @@ def _verify(q, paths):
             raise ValueError(f"{path} has more than one reading: type the right value instead")
         if field.get("provenance") is None:
             container[key] = {**field, "provenance": USER_VERIFIED}
+        elif field.get("provenance") == USER_CORRECTED:  # a typed number the household confirms as typed
+            container[key] = {**field, "entry_confirmed": True}

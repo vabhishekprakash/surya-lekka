@@ -195,3 +195,12 @@ def test_check_this_reasons_cover_every_reason_the_checks_give():
     from checks.check_this import REASONS
     words = re.search(r"const CHECK_REASONS = \{(.*?)\};", APP, re.S).group(1)
     assert sorted(re.findall(r"^\s*(\w+):", words, re.M)) == sorted(REASONS)
+
+
+def test_typed_numbers_the_guards_ask_about_get_their_own_tick():
+    assert '"data-confirm-entry": name || path' in APP and "This number is right as I typed it" in APP
+    collect = APP[APP.index("function collectManual()"):APP.index("async function submitManual(")]
+    assert "confirmed" in collect and "data-confirm-entry" in collect
+    # a note goes away as soon as the number is changed, so a tick never confirms a new number
+    assert 'input.addEventListener("input", () => note.remove(), { once: true })' in APP
+    assert "state.entryChecks = result.entry_checks || []" in APP

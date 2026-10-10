@@ -106,6 +106,7 @@ def _view(item):
             "questions": result["questions"],
             "vendor_message": result["vendor_message"],
             "check_this": result.get("check_this", []),
+            "entry_checks": result.get("entry_checks", []),
             "corrections": json.loads(item["corrections"]) if item.get("corrections") else None,
         })
     return view
@@ -152,7 +153,7 @@ def recheck(event, context):
             raise ApiError(400, "unknown_field", str(e).strip("'\"")) from None
         except (TypeError, ValueError, AttributeError):
             raise ApiError(400, "bad_inputs", "A correction or answer has the wrong type.") from None
-        checked = {k: result[k] for k in ("findings", "questions", "vendor_message", "check_this")}
+        checked = {k: result[k] for k in ("findings", "questions", "vendor_message", "check_this", "entry_checks")}
         stored = {"user_inputs": user_inputs,
                   "corrected_fields": [{**c, "provenance": "user_corrected"} for c in result["corrected_fields"]]}
         checked_text, stored_text = json.dumps(checked, default=str), json.dumps(stored, default=str)
@@ -255,7 +256,7 @@ def _saved_sample(event, sample_id):
     if reading.get("reading") != "saved" or not isinstance(quote, dict) or not isinstance(pages, dict):
         raise ApiError(404, *SAMPLE_MISSING)
     result = run_checks(quote)
-    checked = {k: result[k] for k in ("findings", "questions", "vendor_message", "check_this")}
+    checked = {k: result[k] for k in ("findings", "questions", "vendor_message", "check_this", "entry_checks")}
     job_id, token = new_job(
         len(pages), f"sample:{sample_id}", mode="saved", status="done",
         extraction=json.dumps(quote, default=str), result=json.dumps(checked, default=str),

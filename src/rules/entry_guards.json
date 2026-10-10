@@ -1,0 +1,20 @@
+{
+  "source": "Plausible ranges for one household rooftop system, set for typing slips. Not rules about what a quote may contain: a number outside them is asked about, never changed.",
+  "panel_wattage_w": [100, 800],
+  "system_size_kw": [0.5, 20],
+  "panel_count": [1, 100],
+  "amounts": {
+    "base_price": [10000, 3000000],
+    "gross_total": [10000, 3000000],
+    "net_cost": [10000, 3000000],
+    "gst_amount": [0, 600000],
+    "discount": [0, 600000],
+    "subsidy_central": [0, 200000],
+    "subsidy_state": [0, 200000],
+    "subsidy_combined": [0, 200000],
+    "subsidy_unspecified": [0, 200000],
+    "extra_charge": [0, 300000]
+  },
+  "scale_ratios": [10, 100, 1000],
+  "scale_tolerance": 0.2
+}

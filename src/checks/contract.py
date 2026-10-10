@@ -67,9 +67,14 @@ def plain(f):
         return None
     if f.get("conflict"):
         return _field(f, Unparsed(None, "conflict"))
-    if f.get("check_this"):  # held until the household checks this value
-        return _field(f, Unparsed(_raw(f.get("value")), "check_this"))
+    if _held(f):  # held until the household checks this value
+        return _field(f, Unparsed(_raw(f.get("value")), _held(f)))
     return _field(f, f.get("value"))
+
+
+def _held(f):
+    """"check_this" for a read value to check, "check_entry" for a typed number to confirm."""
+    return "check_entry" if f.get("entry_check") else "check_this" if f.get("check_this") else None
 
 
 def _raw(value):
@@ -93,8 +98,8 @@ def amount(f):
         return _field(f, None)
     status = v.get("parse_status")
     number = _decimal(v.get("parsed")) if status == "ok" else None
-    if f.get("check_this"):
-        value = Unparsed(v.get("raw"), "check_this")
+    if _held(f):
+        value = Unparsed(v.get("raw"), _held(f))
     elif status == "empty":
         value = None
     elif number is None:
@@ -123,8 +128,8 @@ def measure(f, scale):
                 value = lo * factor if lo == hi else {"min": lo * factor, "max": hi * factor}
         elif (number := _decimal(parsed)) is not None:
             value = number * factor
-    if f.get("check_this"):
-        value = Unparsed(v.get("raw"), "check_this")
+    if _held(f):
+        value = Unparsed(v.get("raw"), _held(f))
     return _field(f, value, raw=v.get("raw"))
 
 
