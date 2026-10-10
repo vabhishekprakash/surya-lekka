@@ -24,8 +24,9 @@ def section(title):
 
 def test_sections_in_order():
     titles = re.findall(r"^## (.+)$", README, re.M)
-    assert titles == ["Press release", "FAQ", "How it works", "What it checks", "Privacy and safety", "Run it locally",
-                      "Deploy", "Tests", "Limits", "Results", "Team"]
+    assert titles == ["Press release", "FAQ", "How it works", "What it checks", "Privacy and safety", "Alarms",
+                      "Run it locally", "Deploy", "Tests", "Limits", "Results", "How this was built",
+                      "Credits and licences", "Team"]
 
 
 def test_rule_values_match_the_rules_file():
@@ -64,7 +65,8 @@ def test_results_team_and_limits_say_only_what_is_known():
     # dev and held-out side by side with their denominators, never pooled
     assert "| Development (8 quotes) | Held out (9 quotes) |" in results
     assert "36 of 82 (44%)" in results and "27 of 92 (29%)" in results
-    assert section("Team").strip().endswith("TEAM: to be filled in by the authors")
+    assert "\n\nTEAM: to be filled in by the authors" in section("Team")
+    assert "placeholder" in section("Team")
     limits = section("Limits")
     assert "Lambda concurrency on our account is 10." in limits
     assert "Amazon Nova reading is switched off until Bedrock access is granted." in limits
@@ -80,7 +82,10 @@ def test_deploy_commands_and_architecture_image():
 
 def test_plain_text_rules():
     assert "—" not in README and "–" not in README
-    assert not re.search(r"Claude|ChatGPT|Copilot|Anthropic|generated (by|with)|AI[- ]assist", README, re.I)
+    # AI tools are named in "How this was built" (an event rule) and nowhere else.
+    built = section("How this was built")
+    assert not re.search(r"Claude|ChatGPT|Copilot|Anthropic|GPT-|generated (by|with)|AI[- ]assist",
+                         README.replace(built, ""), re.I)
     assert "**" not in README
     assert "illustrative" in section("Press release")  # the household quote is not presented as real
 
@@ -128,3 +133,53 @@ def test_confirm_before_finding_is_said_plainly_and_accuracy_is_what_was_measure
     assert "36 of the 82 printed values" in readme and "English quotes only" in readme
     for claim in ("never wrong", "never guesses", "always right", "100% accurate"):
         assert claim not in readme.lower() and claim not in index.lower()
+
+
+def test_how_this_was_built_lists_each_ai_tool_and_its_role():
+    rows = dict(re.findall(r"^\| ([^|]+?) \| ([^|]+?) \|$", section("How this was built"), re.M)[1:])
+    assert rows == {"Claude Code": "Wrote the code under our direction.", "Claude chat": "Planning and prompts.",
+                    "Claude in Chrome": "AWS console and spreadsheet tasks.",
+                    "GPT-6 Astra": "External reviews and adversarial test cases.",
+                    "ChatGPT agent": "Finding public quotes."}
+
+
+def test_credits_cover_every_pinned_dependency_and_pdfjs():
+    credits = section("Credits and licences")
+    names = {"boto3": "boto3", "botocore": "botocore", "aws-xray-sdk": "X-Ray SDK", "pytest": "pytest",
+             "jsonschema": "jsonschema", "moto": "moto", "cfn-lint": "cfn-lint", "aws-sam-translator": "SAM translator",
+             "PyMuPDF": "PyMuPDF", "rapidocr-onnxruntime": "rapidocr-onnxruntime", "onnxruntime": "ONNX Runtime",
+             "opencv-python": "opencv-python", "numpy": "NumPy"}
+    for req in ROOT.glob("requirements*.txt"):
+        for line in req.read_text(encoding="utf-8").splitlines():
+            name = re.split(r"[=<>\[ ]", line.strip())[0]
+            if name and not name.startswith("#"):
+                assert names[name] in credits, name
+    for line in (ROOT / "src" / "requirements.txt").read_text(encoding="utf-8").splitlines():
+        name = re.split(r"[=<>\[ ]", line.strip())[0]
+        if name and not name.startswith("#"):
+            assert names[name] in credits, name
+    version = re.search(r"pdf\.js/([\d.]+)/", (ROOT / "web" / "index.html").read_text(encoding="utf-8")).group(1)
+    assert f"[pdf.js](https://github.com/mozilla/pdf.js) {version}, from cdnjs" in credits and "Apache-2.0" in credits
+    assert "AGPL-3.0" in credits  # PyMuPDF, used only by tools outside the deployed app
+
+
+def test_the_test_sample_s4_is_described_as_deliberately_wrong():
+    assert "#sample=S4" in README and "deliberately wrong reading" in README
+
+
+def test_the_labelled_data_finding_uses_the_agreed_wording():
+    assert ("In our hand-labelled data for these 17 quotes, a DCR declaration, a vendor registration number and "
+            "net-meter charges were each unrecorded in 16. These are information gaps to clarify, not evidence of "
+            "non-DCR panels, unregistered vendors or unavailable net metering. This small collection does not "
+            "establish market prevalence.") in section("Results")
+    assert "never pooled" not in README
+
+
+def test_typed_checks_and_traces_are_described_as_they_are():
+    assert "with nothing stored" not in README and "stores nothing" not in README
+    assert "a random id, a counter and a keyed hash of the values" in README and "15 minutes" in README
+    privacy = section("Privacy and safety")
+    assert "operation, HTTP status and timing only" in privacy
+    for line in privacy.splitlines():
+        if "X-Ray" in line or "trace" in line:
+            assert "never" not in line, line  # trace claims are only those a test backs

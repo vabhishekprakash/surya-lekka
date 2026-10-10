@@ -42,7 +42,7 @@ A calculator needs you to find each number, know which figure is the DC panel ca
 
 ![Surya Lekka architecture on AWS](docs/surya-lekka-architecture.svg)
 
-1. In the browser, pdf.js turns each page of a PDF into a JPEG (at most 20 pages, each under 3,750,000 bytes and 8,000 pixels a side). Photos are scaled down to fit the same limits. Nothing leaves the device at this step.
+1. In the browser, pdf.js turns each page of a PDF into a JPEG (at most 20 pages, each under 3,750,000 bytes and 8,000 pixels a side). Photos are scaled down to fit the same limits. Nothing leaves the device at this step. Every page keeps its number in the original quote; a page over the 20-page limit, too large to send or unreadable is listed as left out, and the server marks that reading incomplete, so the checks that need the whole quote ask first.
 2. The page asks the API for a job. It gets back a secret job token and presigned POSTs, and uploads the page images straight to a private S3 bucket, then a small manifest.
 3. The manifest's S3 event starts the worker Lambda. It claims the job with a conditional write, so a duplicate event does nothing, and reads the pages with the stack's reading engine:
    - Amazon Textract (`ReadingEngine=textract`): one AnalyzeDocument call per page with the page bytes, asking for tables and 15 fixed questions (`src/extract/textract_queries.py`). Each answer keeps its own text, the full lines it sits on and its page. An answer below the confidence threshold (50 out of 100, chosen on our development quotes), one that doesn't parse as its field's type, or one on no line of the page is dropped. Every remaining answer is kept page by page, so two pages that disagree reach the household as a conflict to resolve. A table gives several options only when two or more of its rows each have a different system size and a price. The same reply is also read for lines that name their own value ("Grand total Rs. 1,65,850/-", "No. of modules: 5") and for bill-of-materials rows that tie a panel count to its wattage and make. A line that names no role, or two, gives nothing, a percentage is never an amount, and one printed amount never fills two fields. Values the sources disagree on stay a conflict for the household. A valid GSTIN's state code shows where the vendor is registered for GST, as information only; it never fills in the household's state.
@@ -53,10 +53,10 @@ A calculator needs you to find each number, know which figure is the DC panel ca
 5. The review screen shows every value next to its source text and a thumbnail of the user's own page, with the line or table cells behind it outlined on the page (only page numbers and box coordinates are stored beside the evidence). The user corrects anything wrong, can add a charge the reading missed, says whether every charge on the quote is listed, and answers the questions the rules need. The checks run again on the corrected values, and each correction is stored as the user's.
    Some values are marked "Check this": two parts of the quote disagree on them, they couldn't be read cleanly, the reading was less than 80% sure, or they come from a kind of reading that got a value wrong on our development quotes (`src/rules/check_this.json`). Every check that uses such a value waits at "needs confirmation" until the household ticks that one value as right, or types the right one. There is no button that accepts them all.
    A number the household types is asked about when it looks unusual for a home system: panels outside 100 to 800 W, a system outside 0.5 to 20 kW, more than 100 panels, an amount outside a household range, or a figure about 10, 100 or 1,000 times what the other numbers imply (`src/rules/entry_guards.json`). Nothing is changed. Until the household confirms the number, the checks that use it say "Please check the number you entered".
-   A finding only appears after you confirm the numbers it uses. No check says "matches" or "doesn't match" before then. The results screen lists them, each with the quote line it came from or "you typed this", and asks "Are these the numbers on your quote?" with Yes or Fix a number. The confirmation holds only for those numbers in that option: a correction, a switch to another option, or the same number typed in a different format asks again. The server enforces this, not only the page. Each confirmation is a token the server issued, signed with HMAC-SHA256 under a per-stack secret that CloudFormation generates in AWS Secrets Manager. It covers the job, the review revision, the option, the fields and their values. Every change of corrections or answers, an option switch included, moves the job's review revision on, so an edit that is later undone, or a switch from option A to B and back, needs a fresh confirmation; a token from another job, an older revision or one computed outside the server is refused. "Type the numbers instead" stores nothing, so its first answer carries a challenge signed over the exact typed values, valid for 15 minutes, and only that challenge's tokens confirm them.
+   A finding only appears after you confirm the numbers it uses. No check says "matches" or "doesn't match" before then. The results screen lists them, each with the quote line it came from or "you typed this", and asks "Are these the numbers on your quote?" with Yes or Fix a number. The confirmation holds only for those numbers in that option: a correction, a switch to another option, or the same number typed in a different format asks again. The server enforces this, not only the page. Each confirmation is a token the server issued, signed with HMAC-SHA256 under a per-stack secret that CloudFormation generates in AWS Secrets Manager. It covers the job, the review revision, the option, the fields and their values. Every change of corrections or answers, an option switch included, moves the job's review revision on, so an edit that is later undone, or a switch from option A to B and back, needs a fresh confirmation; a token from another job, an older revision or one computed outside the server is refused. "Type the numbers instead" stores no numbers. Its first answer carries a challenge with a random id, and only that challenge's tokens confirm the typed values. To make an edit that is later undone ask again, it keeps a short-lived session record holding only that random id, a counter and a keyed hash of the values (no numbers), which expires after 15 minutes.
 6. The results screen groups the findings by outcome and offers the vendor questions with Copy and Send on WhatsApp buttons.
 
-There are two other ways in. The three samples are made-up quotes with saved readings, so trying one never calls the model. "Type the numbers instead" sends the figures the user types straight to the checks, with nothing stored. Every result carries a label saying where its values came from: "Read by Amazon Textract", "Read by Amazon Nova", "Sample (saved reading)" or "Entered by you".
+There are two other ways in. The three samples are made-up quotes with saved readings, so trying one never calls the model. While user tests run, a fourth sample, S4, opens only from the link `#sample=S4`. It is a test sample with a deliberately wrong reading: it reads the panel wattage as 550 W where its page prints 500 W, to see whether testers catch it at the confirm step. "Type the numbers instead" sends the figures the user types straight to the checks. Only the short-lived session record described above is stored: a random id, a counter and a keyed hash of the values, no numbers, expiring after 15 minutes. Every result carries a label saying where its values came from: "Read by Amazon Textract", "Read by Amazon Nova", "Sample (saved reading)" or "Entered by you".
 
 The stack is defined in `template.yaml` (AWS SAM): an HTTP API on API Gateway, seven Lambda functions on Python 3.12, a private S3 bucket for uploads, DynamoDB for jobs, an SQS queue for worker events that failed, CloudWatch logs kept for 7 days, X-Ray tracing, and the web app in a second private bucket behind CloudFront.
 
@@ -125,12 +125,24 @@ Sources:
 - The worker deletes a job's pages after a successful reading, or after a failure that can't be retried. It retries objects S3 reports as not deleted and logs only counts. A lifecycle rule removes anything left under `uploads/` after a day, and job records in DynamoDB expire after 24 hours.
 - Logs hold job ids, timings, statuses, token counts or pages read, a cost estimate and reason codes. The logging helper refuses any other field. Tests check that error paths never log document text, evidence or job tokens. The worker never logs or stores Textract's raw reply, only the facts mapped from it.
 - Each job has a random secret token. Only its SHA-256 hash is stored, and every read or change needs the token.
-- Abuse and cost limits: a kill switch, a daily cap on new checks, a daily cap on pages (counted from each check's declared page count when it is created, live samples included), a per-address daily cap (the address is stored only as a keyed hash), and API throttling of 5 requests a second with bursts of 10. Requests are validated before they take a slot. Budget alerts are set on the AWS account by hand; the template has none.
-- Both buckets block public access and refuse plain HTTP. Only the CloudFront distribution can read the site bucket, through origin access control. The API and the upload bucket accept requests from one origin: the CloudFront domain, or with hosting off the local address set in `SiteOrigin`.
-- The secret that signs confirmation tokens is created by CloudFormation in AWS Secrets Manager. Only the four functions that sign tokens may read it, and only that one secret; they read it once per cold start. It is never in the repo, `config.js`, a response or the logs, and X-Ray records no secret value (a test checks this).
-- Each Lambda function has its own role with only the actions it needs. The worker's Bedrock permission exists only while Nova reads, and names the exact model or inference profile and the Regions that profile lists. Its `textract:AnalyzeDocument` permission exists only while Textract reads. That action has no resource-level permissions, so the statement uses `"*"`. The worker sends page bytes, so Textract needs no access to the bucket.
+- Abuse and cost limits: a kill switch that pauses uploads, saved samples and typed checks alike; daily caps on new checks and on pages (counted from each check's declared page count when it is created, live samples included); separate daily caps for saved samples and for typed checks; a per-address daily cap for each kind (the address is stored only as a keyed hash); and API throttling of 5 requests a second with bursts of 10. Requests are validated before they take a slot, and a request's address slot and day slot are taken in one transaction, so a refused day slot uses no address slot. Budget alerts are set on the AWS account by hand; the CloudWatch alarms below come with the template.
+- Both buckets block public access and refuse plain HTTP. Only the CloudFront distribution can read the site bucket, through origin access control. The API and the upload bucket accept requests from the CloudFront domain, or with hosting off from the address set in `SiteOrigin` and, when given, a second one (`SecondSiteOrigin`, the Amplify Hosting domain). `deploy.ps1` refuses `-Pages` or `-Amplify` with hosting on, because the template would then not let that site call the API.
+- The secret that signs confirmation tokens is created by CloudFormation in AWS Secrets Manager. Only the four functions that sign tokens may read it, and only that one secret; they read it once per cold start. It is not in the repo, `config.js`, any response or the logs. A test checks that no secret value reaches an X-Ray trace.
+- Each Lambda function has its own IAM role with only the actions it needs and no AWS managed policy. It may write logs only to its own log group (create streams and put events, but not create groups) and send X-Ray traces. The worker's Bedrock permission exists only while Nova reads, and names the exact model or inference profile and the Regions that profile lists. Its `textract:AnalyzeDocument` permission exists only while Textract reads. That action has no resource-level permissions, so the statement uses `"*"`. The worker sends page bytes, so Textract needs no access to the bucket.
 - The web app places every piece of quote text with `textContent`, never as HTML. pdf.js is pinned to one version on cdnjs and checked against its SRI hash before it runs.
-- X-Ray traces each Lambda invocation and, through the AWS X-Ray SDK's botocore patch, each AWS call it makes (Textract, S3, DynamoDB), so the service map shows them. A traced call records its operation, Region, request id, status and a few parameters (table names, bucket names and object keys, which hold job ids but never tokens). No request or response body is recorded, so no page image, quote text or token reaches a trace; a test checks this.
+- X-Ray traces each Lambda invocation and, through the AWS X-Ray SDK's botocore patch, each AWS call it makes (Textract, S3, DynamoDB, Secrets Manager), so the service map shows them. Our own recorder replaces the SDK's: a traced call records its operation, HTTP status and timing only, with no parameters, bodies, exception messages or stacks. Tests put marker text into page bytes, a token hash, an object key, the confirmation secret and an AWS error message, and check that none of it reaches a trace.
+- A review is checked in full before anything is written, and its corrections, result and review revision are written together, only if the revision is still the one the request read. A rejected or stale request changes nothing.
+
+## Alarms
+
+`deploy.ps1 -AlarmEmail <address>` subscribes that address to the stack's SNS topic (the address confirms the subscription from its inbox; the address is never stored in this repo). Each alarm fires on one occurrence in five minutes:
+
+| Alarm | What it means | What to do |
+|---|---|---|
+| FailedJobsAlarm | The worker logged `job_failed`: a quote couldn't be read. | Look up the job's reason code in the worker's log group. Throttling or a quota means waiting or lowering the caps; a bad page means nothing is wrong on our side. |
+| FailureQueueAlarm | A worker event failed twice and is waiting in the failure queue. | Read the queue message for the job id, check the worker's log for that job, then delete the message. The household can retry from the page. |
+| LambdaErrorsAlarm | One of the stack's functions ended in an error. | Find the function and time in CloudWatch metrics, then read its log group around that time. |
+| LambdaThrottlesAlarm | A function was throttled (account concurrency is 10). | Usually a burst of use. If it repeats, lower the daily caps or pause with the kill switch. |
 
 ## Run it locally
 
@@ -244,7 +256,7 @@ GitHub Actions runs the tests and the lint on every push (`.github/workflows/tes
 
 ## Results
 
-The method: 17 real quotes, hand-labelled by us, 8 for development and 9 held out. The labels were written and frozen before any reading of the held-out quotes, and the scoring, the reader and the safety harness were frozen at the tag `reader-safe-2` (3fa34d6). The held-out set was read once, all nine quotes together, from that tag, on 10 Oct 2026: 61 pages, about $1.22 of Amazon Textract. A second run is refused. The quotes and labels stay outside this repo, and only aggregate numbers are published here. Development and held-out numbers are never pooled.
+The method: 17 real quotes, hand-labelled by us, 8 for development and 9 held out. The labels were written and frozen before any reading of the held-out quotes, and the scoring, the reader and the safety harness were frozen at the tag `reader-safe-2` (3fa34d6). The held-out set was read once, all nine quotes together, from that tag, on 10 Oct 2026: 61 pages, about $1.22 of Amazon Textract. A second run is refused. The quotes and labels stay outside this repo, and only aggregate numbers are published here. Reader performance is reported separately for development and held-out sets; any combined missing-field count describes only this 17-quote collection.
 
 Reading, before the household confirms or corrects anything (printed fields only):
 
@@ -257,9 +269,9 @@ Reading, before the household confirms or corrects anything (printed fields only
 | Judgement fields filled in wrongly | 0 of 40 | 0 of 45 |
 | Wrong or filled-in values marked "Check this" | 10 of 10 | 4 of 7 |
 
-The "Check this" rule was built from the development errors, so its 10 of 10 there is in-sample; on the held-out quotes it caught 4 of 7, and the other 3 rely on the household confirming the numbers before any finding appears.
+We evaluated the frozen `reader-safe-2` reader once on nine held-out quotes. It correctly recovered 27 of 92 printed values (29% recall); 27 of 34 filled values were correct (79% precision). The corresponding development results were 36 of 82 (44%) and 36 of 46 (78%). Held-out errors comprised four wrong values and three unsupported fills, against nine and one on development. There were no judgement-field false fills in 45 held-out or 40 development opportunities; these are observations, not a zero-risk guarantee. "Check this" flagged 4 of the 7 held-out errors. Its 10 of 10 development result was measured on the errors used to build that rule. The other 3 held-out errors rely on the household confirming the numbers before any finding appears.
 
-Findings on the raw reading: under every household scenario (S-A to S-E), with nothing confirmed and with every value accepted as shown, the checks gave no "matches" and no "doesn't match" on any of the 17 quotes. With no definitive findings there were no false ones to count, and no error rate can be estimated from them. The reader misses too many of the values the checks need (panel wattage, the base price, which subsidy a figure is) for a check to complete without the household's corrections.
+Findings on the raw reading: across scenarios S-A to S-E, neither the untouched run nor the separate accept-all-without-corrections run produced a definitive finding on any of the 17 quotes. Both use scenario inputs and the label-derived answers about the quote where the labels have them. Zero definitive findings means no definitive-finding error rate or bound can be estimated. It also means this evaluation demonstrated no completed checks from the uncorrected readings: the reader misses too many of the values the checks need (panel wattage, the base price, which subsidy a figure is).
 
 Findings on the labelled values (the hand-made labels as the quote's values, every number confirmed), scenario S-A:
 
@@ -279,6 +291,10 @@ Findings on the labelled values (the hand-made labels as the quote's values, eve
 | Inverter make and model not found | 1 | 1 |
 | Inverter rating not found, or unclear | 4 | 4 |
 
+Using our hand-labelled values and confirming every operand under scenario S-A, central subsidy amounts matched the implemented rule in one development and three held-out cases. This is not reader accuracy or verified eligibility. One development capacity calculation disagreed with the stated capacity; that alone does not establish vendor misconduct.
+
+In our hand-labelled data for these 17 quotes, a DCR declaration, a vendor registration number and net-meter charges were each unrecorded in 16. These are information gaps to clarify, not evidence of non-DCR panels, unregistered vendors or unavailable net metering. This small collection does not establish market prevalence.
+
 No total check completed: none of the 17 labels states a base price that the total can be checked against. Each definitive finding on labelled values is listed, with its numbers and rule, in a file outside this repo for us to check by hand. Positive controls (made-up quotes with hand-worked findings, `eval/positive_controls.txt`) still give every expected "matches" and "doesn't match" at the tag, so the absence of findings on the raw reading is not a harness that can't see them.
 
 Evaluation notes:
@@ -286,6 +302,44 @@ Evaluation notes:
 - Vendor name: when a label lists several names printed on the quote, separated by semicolons, the reading counts as correct if it matches any one of them. A note in square brackets at the end of a label is ours, not part of a name. This rule was set before the held-out run.
 - Page limit: the held-out run keeps the product's 20-page limit. One held-out quote has 43 pages, so only pages 1 to 20 are read and its result is marked as processing incomplete, as it would be for a user.
 
+## How this was built
+
+We built Surya Lekka with these AI tools, each in a set role:
+
+| Tool | Role |
+|---|---|
+| Claude Code | Wrote the code under our direction. |
+| Claude chat | Planning and prompts. |
+| Claude in Chrome | AWS console and spreadsheet tasks. |
+| GPT-6 Astra | External reviews and adversarial test cases. |
+| ChatGPT agent | Finding public quotes. |
+
+The quotes were labelled by hand by us, never by an AI tool.
+
+## Credits and licences
+
+Surya Lekka's own code is under the MIT License (`LICENSE`). It uses:
+
+| Dependency | Where | Licence |
+|---|---|---|
+| [pdf.js](https://github.com/mozilla/pdf.js) 4.10.38, from cdnjs | web app, renders PDF pages in the browser | Apache-2.0 |
+| [boto3](https://github.com/boto/boto3) and [botocore](https://github.com/boto/botocore) 1.43.109 | Lambda functions | Apache-2.0 |
+| [AWS X-Ray SDK for Python](https://github.com/aws/aws-xray-sdk-python) 2.15.0 | Lambda functions | Apache-2.0 |
+| [wrapt](https://github.com/GrahamDumpleton/wrapt), used by the X-Ray SDK | Lambda functions | BSD-2-Clause |
+| [pytest](https://docs.pytest.org/) | tests | MIT |
+| [jsonschema](https://github.com/python-jsonschema/jsonschema) | tests | MIT |
+| [moto](https://github.com/getmoto/moto) 5.2.3 | tests | Apache-2.0 |
+| [cfn-lint](https://github.com/aws-cloudformation/cfn-lint) 1.57.2 | template lint | MIT-0 |
+| [AWS SAM translator](https://github.com/awslabs/serverless-application-model) 1.113.0 | template lint | Apache-2.0 |
+| [PyMuPDF](https://github.com/pymupdf/pymupdf) 1.28.2 | redaction tools, sample rendering and the extraction spike, not the deployed app | AGPL-3.0 or Artifex commercial |
+| [RapidOCR](https://github.com/RapidAI/RapidOCR) (rapidocr-onnxruntime) 1.4.4 | redaction tools | Apache-2.0 |
+| [ONNX Runtime](https://onnxruntime.ai) 1.30.0 | redaction tools | MIT |
+| [OpenCV](https://github.com/opencv/opencv-python) (opencv-python) 5.0.0.93 | redaction tools | Apache-2.0 |
+| [NumPy](https://numpy.org) 2.5.3 | redaction tools | BSD-3-Clause, with parts under 0BSD, MIT, Zlib and CC0-1.0 |
+| GitHub Actions: [checkout](https://github.com/actions/checkout), [setup-python](https://github.com/actions/setup-python), [configure-pages](https://github.com/actions/configure-pages), [upload-pages-artifact](https://github.com/actions/upload-pages-artifact), [deploy-pages](https://github.com/actions/deploy-pages) | CI and the GitHub Pages mirror | MIT |
+
+The architecture diagram (`docs/surya-lekka-architecture.svg`) and the made-up sample quotes are our own. Licence names are as each project publishes them; the versions are the ones pinned in the requirements files.
+
 ## Team
 
-TEAM: to be filled in by the authors
+TEAM: to be filled in by the authors. This section is a placeholder; we write it ourselves.

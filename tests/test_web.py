@@ -284,3 +284,9 @@ def test_the_privacy_note_sits_beside_the_upload_button():
     upload = INDEX[INDEX.index('id="view-upload"'):INDEX.index('id="view-wait"')]
     assert 'id="privacy-upload"' in upload
     assert '$("#privacy-upload").textContent = privacy' in APP
+
+
+def test_the_typed_numbers_screen_says_exactly_what_is_kept():
+    manual = INDEX[INDEX.index('id="view-manual"'):INDEX.index('id="manual-form"')]
+    assert "only a random id, a counter and a hash of the values (no numbers)" in manual
+    assert "15 minutes" in manual
