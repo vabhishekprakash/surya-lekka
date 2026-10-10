@@ -80,8 +80,14 @@ def test_documented_four_read_limit_survives_hard_timeouts(aws, monkeypatch):
         if attempt:
             assert retry(job)[0] == 202
         for delivery in range(2):  # first delivery and its one Lambda retry
-            with pytest.raises(SystemExit):
+            # adapted: once the persisted read budget is spent, a run ends without reading
+            # (and so without the synthetic hard stop) instead of raising SystemExit
+            try:
                 run_worker(job['job_id'])
+            except SystemExit:
+                pass
             clock[0] += 961  # 900 second Lambda timeout plus retry delay
     assert len(client.calls) == len(reads)
     assert len(reads) <= 4, f'{len(reads)} successful mocked AnalyzeDocument calls are allowed'
+    item = common.table().get_item(Key={'job_id': job['job_id']})['Item']
+    assert item['status'] == 'failed' and item['reason'] == 'read_limit' and int(item['paid_reads']) == 4

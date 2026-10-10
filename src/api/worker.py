@@ -37,6 +37,7 @@ from .common import (
     MAX_RETRIES,
     RETRYABLE_REASONS,
     claim,
+    conditional_update,
     ITEM_MAX_BYTES,
     error_code,
     item_size,
@@ -53,6 +54,10 @@ from .common import (
 )
 
 MANIFEST = re.compile(r"uploads/([0-9a-f-]{36})/manifest\.json")
+# Paid reads a job may make per batch, counted in its record before each one: the first run,
+# Lambda's one retry and the two retries the page offers. A reading that is saved is never
+# read again, so the budget only matters when saving keeps failing.
+READS_PER_BATCH = 1 + 1 + MAX_RETRIES
 DEFAULT_MODEL = "global.amazon.nova-2-lite-v1:0"
 RESULT_MAX_BYTES = 350_000
 BATCH_SAVE_MAX_BYTES = 100_000
@@ -278,6 +283,7 @@ def _extract(job_id, pages, item, omitted, context):
         if left is not None and left < engine.call_budget_ms:
             log("out_of_time", job_id=job_id, batches=n)
             raise OutOfTime()
+        _take_read(job_id, len(batches))
         try:
             result = engine.read(batch, n)
         except ExtractionFailure as f:
@@ -304,6 +310,13 @@ def _extract(job_id, pages, item, omitted, context):
     quote = merge_batches(records, failures, sorted(set(rejected) | set(omitted)))
     boxes.attach(quote, [b for r in records for b in r.get("boxes") or []])
     return quote, stats
+
+
+def _take_read(job_id, batch_count):
+    """Counts one paid read in the job's record, or stops the job once its budget is spent."""
+    if not conditional_update(job_id, "ADD #r :one", "attribute_not_exists(#r) OR #r < :max", {"#r": "paid_reads"},
+                              {":one": 1, ":max": READS_PER_BATCH * batch_count}):
+        raise JobFailed("read_limit")
 
 
 def _save(job_id, item, quote, stats):

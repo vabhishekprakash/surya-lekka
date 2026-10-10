@@ -107,6 +107,7 @@ const AMOUNTS = [
 
 const FAILURES = {
   timed_out: "Reading took too long and was stopped.",
+  read_limit: "This quote was read as many times as allowed, but its reading couldn't be saved.",
   model_busy: "The reading service was busy.",
   model_unavailable: "The reading service wasn't available.",
   extraction_failed: "The pages couldn't be read.",
