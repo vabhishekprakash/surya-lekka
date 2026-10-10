@@ -8,12 +8,14 @@ entered by the user and never as quoted from a document.
 import hashlib
 import hmac
 import json
+import secrets
 import time
 
 from checks import run_checks
 from checks.contract import AMOUNT_FIELDS
 
-from .common import ApiError, body_json, confirm_key, error_response, guarded, log, response
+from .common import (ApiError, body_json, conditional_update, confirm_key, error_response, guarded, log,
+                     response, table)
 
 CHALLENGE_SECONDS = 900  # how long a challenge for one set of typed values lasts
 
@@ -101,24 +103,48 @@ def _digest(fields, answers):
                           .encode("utf-8")).hexdigest()
 
 
-def _signed(digest, expires):
-    return hmac.new(confirm_key(), f"{expires}|{digest}".encode("utf-8"), hashlib.sha256).hexdigest()
+SESSION_PREFIX = "typed-"  # session records share the jobs table; job ids are UUIDs, so never clash
+
+
+def _keyed(text):
+    return hmac.new(confirm_key(), text.encode("utf-8"), hashlib.sha256).hexdigest()
+
+
+def _session_key(session_id):
+    return {"job_id": SESSION_PREFIX + session_id}
 
 
 def challenge_for(fields, answers, offered=None, clock=None):
-    """The challenge every token in this response is bound to. Nothing is stored for typed-in
-    numbers, so the first response carries a challenge signed over the exact typed values and
-    answers; it lasts CHALLENGE_SECONDS. An offered challenge is kept only while it is for these
-    same values and unexpired; otherwise a new one is issued, and tokens bound to the old one no
-    longer confirm anything."""
+    """The challenge every token in this response is bound to: "<session id>.<counter>.<signature>".
+
+    Typed-in numbers keep a short-lived session record holding only a random id, a counter and a
+    keyed hash of the values (no numbers), expiring after CHALLENGE_SECONDS. A challenge counts
+    only for its own session, at its current counter, for the same values. Whoever holds the
+    session and sends changed values moves the counter on, so tokens issued before (even for
+    values later changed back) no longer confirm anything. A missing, altered or expired
+    challenge starts a new session with a new random id: nothing is derived from the clock."""
     clock = clock or time.time
-    digest = _digest(fields, answers)
-    if isinstance(offered, str) and offered.count(".") == 1:
-        expires, signature = offered.split(".")
-        if expires.isdigit() and int(expires) > clock() and hmac.compare_digest(signature, _signed(digest, expires)):
+    values = _keyed("values|" + _digest(fields, answers))
+    now_s = int(clock())
+    parts = offered.split(".") if isinstance(offered, str) else []
+    if len(parts) == 3 and len(parts[0]) == 32 and parts[1].isdigit():
+        session_id, counter = parts[0], int(parts[1])
+        record = table().get_item(Key=_session_key(session_id), ConsistentRead=True).get("Item") or {}
+        held = record.get("values_hash")
+        owner = (held is not None and int(record.get("expires_at", 0)) > now_s and int(record["counter"]) == counter
+                 and hmac.compare_digest(parts[2], _keyed(f"{session_id}|{counter}|{held}")))
+        if owner and hmac.compare_digest(held, values):
             return offered
-    expires = str(int(clock()) + CHALLENGE_SECONDS)
-    return f"{expires}.{_signed(digest, expires)}"
+        if owner and conditional_update(
+                SESSION_PREFIX + session_id, "SET #c = :next, #v = :values, #e = :expires", "#c = :counter",
+                {"#c": "counter", "#v": "values_hash", "#e": "expires_at"},
+                {":next": counter + 1, ":values": values, ":expires": now_s + CHALLENGE_SECONDS, ":counter": counter}):
+            return f"{session_id}.{counter + 1}.{_keyed(f'{session_id}|{counter + 1}|{values}')}"
+    session_id = secrets.token_hex(16)
+    table().put_item(Item={**_session_key(session_id), "counter": 0, "values_hash": values,
+                           "expires_at": now_s + CHALLENGE_SECONDS},
+                     ConditionExpression="attribute_not_exists(job_id)")
+    return f"{session_id}.0.{_keyed(f'{session_id}|0|{values}')}"
 
 
 @guarded("manual")
@@ -128,8 +154,9 @@ def handler(event, context):
 
     verified holds the tokens of typed numbers the household confirmed after a guard asked
     about them; confirmed_operands the tokens of operand sets the household confirmed. Both
-    come from an earlier response and are signed for its challenge, which covers the exact typed
-    values: a changed number gets a new challenge and needs confirming again."""
+    come from an earlier response and are signed for its challenge, which belongs to one
+    short-lived session of typed values: a changed number moves the session on and needs
+    confirming again, even if it is later changed back."""
     try:
         body = body_json(event)
         fields, answers = body.get("fields"), body.get("answers")

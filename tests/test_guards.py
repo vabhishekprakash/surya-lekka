@@ -11,6 +11,7 @@ import pytest
 from api import manual
 from checks import guards, run_checks
 from conftest import run_confirmed
+from test_api import aws  # noqa: F401
 
 ROOT = Path(__file__).resolve().parent.parent
 ANSWERS = {"state": "Telangana", "consumer_type": "individual_household", "portal_application_on_or_after_cutoff": True,
@@ -123,7 +124,7 @@ def test_values_read_from_the_quote_are_never_guarded():
     assert run_checks(quote, {"confirmations": ANSWERS})["entry_checks"] == []
 
 
-def test_the_manual_api_takes_confirmed_entries():
+def test_the_manual_api_takes_confirmed_entries(aws):  # noqa: F811
     body = {"fields": {**GOOD, "stated_capacity": "33 kWp"}, "answers": ANSWERS}
     held = manual.handler({"body": json.dumps(body)}, None)
     view = json.loads(held["body"])

@@ -4,6 +4,9 @@ from pathlib import Path
 import pytest
 
 from api import common, manual
+from test_api import aws  # noqa: F401  (typed checks keep a short-lived session record)
+
+pytestmark = pytest.mark.usefixtures("aws")
 
 ROOT = Path(__file__).resolve().parent.parent
 S1 = json.loads((ROOT / "samples" / "expected" / "S1.json").read_text(encoding="utf-8"))
@@ -65,9 +68,7 @@ def evidence(body):
     return [e for f in body["findings"] for e in f["evidence"]]
 
 
-def test_typed_s1_matches_the_sample_findings(monkeypatch):
-    for name in ("TABLE_NAME", "BUCKET_NAME"):
-        monkeypatch.delenv(name, raising=False)  # nothing is stored
+def test_typed_s1_matches_the_sample_findings():
     status, held = post({"fields": S1_TYPED, "answers": S1_ANSWERS})
     assert status == 200 and not [f for f in held["findings"] if f["status"] in ("consistent", "inconsistent")]
     status, body = post_confirmed({"fields": S1_TYPED, "answers": S1_ANSWERS})
@@ -134,3 +135,30 @@ def test_logs_hold_no_typed_values(caplog):
     events = [json.loads(r.getMessage()) for r in caplog.records if r.name == "surya_lekka"]
     assert {e["event"] for e in events} == {"manual_checked", "manual_refused"}
     assert all(set(e) <= common.LOG_FIELDS | {"event"} for e in events)
+
+
+def test_typed_checks_keep_only_a_short_lived_session_record_with_no_numbers(monkeypatch):
+    clock = [1_700_123_456.0]
+    monkeypatch.setattr(manual.time, "time", lambda: clock[0])
+    status, first = post({"fields": S1_TYPED, "answers": S1_ANSWERS})
+    edited = post({"fields": {**S1_TYPED, "base_price": "1,80,001"}, "answers": S1_ANSWERS,
+                   "challenge": first["challenge"]})[1]
+    items = common.table().scan()["Items"]
+    assert len(items) == 1  # one session, moved on by the edit; no job, no values
+    (record,) = items
+    assert set(record) == {"job_id", "counter", "values_hash", "expires_at"}
+    assert record["job_id"].startswith(manual.SESSION_PREFIX) and int(record["counter"]) == 1
+    assert int(record["expires_at"]) == int(clock[0]) + manual.CHALLENGE_SECONDS
+    stored = json.dumps(items, default=str)
+    for value in ("1,80,000", "180000", "1,80,001", "Telangana", "16,020"):
+        assert value not in stored
+    session_id = record["job_id"][len(manual.SESSION_PREFIX):]
+    assert len(session_id) == 32 and first["challenge"].startswith(session_id + ".0.")
+    assert edited["challenge"].startswith(session_id + ".1.")
+
+
+def test_challenges_are_random_even_in_the_same_second(monkeypatch):
+    monkeypatch.setattr(manual.time, "time", lambda: 1_800_000_000.0)
+    one = post({"fields": S1_TYPED, "answers": S1_ANSWERS})[1]["challenge"]
+    two = post({"fields": S1_TYPED, "answers": S1_ANSWERS})[1]["challenge"]
+    assert one.split(".")[0] != two.split(".")[0]
