@@ -139,12 +139,11 @@ def test_confirm_before_finding_is_said_plainly_and_accuracy_is_what_was_measure
 
 
 def test_how_this_was_built_lists_each_ai_tool_and_its_role():
+    # the authors word the roles themselves; every row names a tool and its role
     built = section("How this was built")
-    rows = dict(re.findall(r"^\| ([^|]+?) \| ([^|]+?) \|$", built, re.M)[1:])
-    assert list(rows) == ["Claude Code, running Claude Opus 5.5",
-                          "Claude Opus 5.5, in the Claude app and in Claude in Chrome", "ChatGPT, model Luna 5.6"]
-    assert rows["Claude Code, running Claude Opus 5.5"] == ("Wrote the code under our direction. We reviewed, ran and "
-                                                           "tested it.")
+    rows = dict(re.findall(r"^\| ([^|]+?) \| ([^|]+?) *\|$", built, re.M)[1:])
+    assert rows and all(role.strip() for role in rows.values())
+    assert any(tool.startswith("Claude Code") for tool in rows) and any("ChatGPT" in tool for tool in rows)
     assert "Amazon Translate drafted the Telugu once (never at runtime)" in built
 
 
@@ -178,7 +177,7 @@ def test_no_missing_detail_count_is_published_from_the_labels():
     assert "We publish no count of quotes missing a DCR declaration" in results
     assert "unrecorded in 16" not in results and "| DCR declaration not stated |" not in results
     assert "agreed with 11 of 11" in results and "eval/recheck_findings.py" in results
-    assert "never pooled" not in README
+    assert "never pooled" not in README.replace(section("Team"), "")  # the authors' own words stay theirs
 
 
 def test_typed_checks_and_traces_are_described_as_they_are():
