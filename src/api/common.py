@@ -283,73 +283,68 @@ def source_ip(event):
     return ((event.get("requestContext") or {}).get("http") or {}).get("sourceIp") or "unknown"
 
 
-def _ip_counter_key(day, ip):
+def _ip_counter_key(day, ip, prefix="ipcount"):
     """The address is kept only as a keyed hash, and only for the day's counter."""
     key = os.environ.get("IP_HASH_KEY", "").encode("utf-8")
     digest = hmac.new(key, f"{day}|{ip}".encode("utf-8"), hashlib.sha256).hexdigest()[:32]
-    return f"ipcount#{day}#{digest}"
+    return f"{prefix}#{day}#{digest}"
 
 
-def take_slots(event, pages):
-    """One of the source address's daily slots, then one of the day's jobs together
-    with the job's declared pages from the day's page allowance. Call only once the
-    request is valid. A cap of 0 refuses before anything is written."""
+# Each kind of request has its own daily quota, per source address and overall: uploads read
+# by the model (with a page allowance), saved samples, and typed-in checks.
+KINDS = {
+    "upload": {"ip": ("ipcount", "IP_DAILY_JOB_CAP", "10"), "day": ("counter", "DAILY_JOB_CAP", "200")},
+    "sample": {"ip": ("ipsample", "IP_SAMPLE_DAILY_CAP", "50"), "day": ("samplecount", "SAMPLE_DAILY_CAP", "1000")},
+    "typed": {"ip": ("iptyped", "IP_TYPED_DAILY_CAP", "200"), "day": ("typedcount", "TYPED_DAILY_CAP", "5000")},
+}
+
+
+def take_slots(event, kind="upload", pages=0):
+    """One of the source address's daily slots and one of the day's slots for this kind of
+    request (and, for uploads, the job's pages from the day's page allowance), all in one
+    transaction: all or nothing, so a refused day slot never uses up an address slot. Call
+    only once the request is valid. A cap of 0 refuses before anything is written."""
     ip_limit = ApiError(429, "ip_limit", "You have reached today's limit of checks. Please try again tomorrow.")
     day_limit = ApiError(429, "daily_limit", "Today's limit of checks has been reached. Please try again tomorrow.")
-    ip_cap, cap, page_cap = ip_daily_cap(), daily_cap(), daily_page_cap()
+    (ip_prefix, ip_env, ip_default), (day_prefix, day_env, day_default) = KINDS[kind]["ip"], KINDS[kind]["day"]
+    ip_cap, cap = _cap(ip_env, ip_default), _cap(day_env, day_default)
+    page_cap = daily_page_cap() if kind == "upload" else None
     if ip_cap <= 0:
         raise ip_limit
-    if cap <= 0 or page_cap < pages:
+    if cap <= 0 or (page_cap is not None and page_cap < pages):
         raise day_limit
     day = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    if not _take_slot(_ip_counter_key(day, source_ip(event)), ip_cap):
-        raise ip_limit
-    if not _take_day_slots(day, cap, pages, page_cap):
-        raise day_limit
+    counters = [(_ip_counter_key(day, source_ip(event), ip_prefix), "job_count", 1, ip_cap - 1),
+                (f"{day_prefix}#{day}", "job_count", 1, cap - 1)]
+    if page_cap is not None:
+        counters.append((f"pagecount#{day}", "pages_taken", pages, page_cap - pages))
+    refused = _take_together(counters)
+    if refused is not None:
+        raise ip_limit if refused == 0 else day_limit
 
 
-def _take_slot(key, cap):
-    """Conditional increment of a counter item. False once it reaches cap."""
-    from botocore.exceptions import ClientError
-
-    try:
-        table().update_item(
-            Key={"job_id": key},
-            UpdateExpression="ADD job_count :one SET expires_at = :expires",
-            ConditionExpression="attribute_not_exists(job_count) OR job_count < :cap",
-            ExpressionAttributeValues={":one": 1, ":cap": cap, ":expires": now() + 2 * 86400},
-        )
-    except ClientError as e:
-        if error_code(e) == "ConditionalCheckFailedException":
-            return False
-        raise
-    return True
-
-
-def _take_day_slots(day, cap, pages, page_cap):
-    """The day's job slot and the job's pages in one transaction: both or neither.
-    False once either counter would pass its cap. (The table resource's client
-    converts plain values to DynamoDB types.)"""
+def _take_together(counters):
+    """Add to every counter in one transaction, each only while it stays within its limit.
+    None when all were taken; otherwise the index of the first counter that refused. (The table
+    resource's client converts plain values to DynamoDB types.)"""
     from botocore.exceptions import ClientError
 
     expires = now() + 2 * 86400
-
-    def update(key, attribute, amount, limit):
-        return {"Update": {
-            "TableName": table_name(), "Key": {"job_id": key},
-            "UpdateExpression": "ADD #count :amount SET expires_at = :expires",
-            "ConditionExpression": "attribute_not_exists(#count) OR #count <= :limit",
-            "ExpressionAttributeNames": {"#count": attribute},
-            "ExpressionAttributeValues": {":amount": amount, ":limit": limit, ":expires": expires}}}
+    items = [{"Update": {
+        "TableName": table_name(), "Key": {"job_id": key},
+        "UpdateExpression": "ADD #count :amount SET expires_at = :expires",
+        "ConditionExpression": "attribute_not_exists(#count) OR #count <= :limit",
+        "ExpressionAttributeNames": {"#count": attribute},
+        "ExpressionAttributeValues": {":amount": amount, ":limit": limit, ":expires": expires}}}
+        for key, attribute, amount, limit in counters]
     try:
-        table().meta.client.transact_write_items(TransactItems=[
-            update(f"counter#{day}", "job_count", 1, cap - 1),
-            update(f"pagecount#{day}", "pages_taken", pages, page_cap - pages)])
+        table().meta.client.transact_write_items(TransactItems=items)
     except ClientError as e:
-        if error_code(e) == "TransactionCanceledException":
-            return False
-        raise
-    return True
+        if error_code(e) != "TransactionCanceledException":
+            raise
+        reasons = [r.get("Code") for r in e.response.get("CancellationReasons") or []]
+        return next((i for i, code in enumerate(reasons) if code == "ConditionalCheckFailed"), 1)
+    return None
 
 
 ITEM_MAX_BYTES = 380_000  # DynamoDB's limit is 400 KB for the whole item; keep a margin

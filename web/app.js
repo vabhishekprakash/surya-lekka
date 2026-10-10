@@ -334,7 +334,7 @@ function showApiError(error) {
   } else if (error.status === 429) {
     showProblem("Daily limit reached", error.message, { sample: true });
   } else if (error.status === 503) {
-    showProblem("New checks are paused", error.message, { sample: true });
+    showProblem("New checks are paused", error.message);  // samples and typed checks pause too
   } else if (error.code === "network") {
     showProblem("The checker couldn't be reached", error.message);
   } else if (error.status === 404 && error.code === "not_found") {

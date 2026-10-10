@@ -625,13 +625,13 @@ def put_sample(s3, sample_id="S1", pages=2):
 
 
 def test_sample_route_serves_the_saved_reading_by_default(aws, monkeypatch):
-    monkeypatch.setenv("UPLOADS_ENABLED", "false")  # no model call, so the kill switch and caps don't apply
-    monkeypatch.setenv("DAILY_JOB_CAP", "0")
+    monkeypatch.setenv("DAILY_JOB_CAP", "0")  # samples have their own quotas, apart from model-read uploads
     put_sample(aws)
     status, job = call(jobs.create_sample_job, path={"sample_id": "S1"})
     assert status == 201 and set(job) == {"job_id", "token", "mode"} and job["mode"] == "saved"
     assert uploads(aws, job["job_id"]) == [] and worker.bedrock_client().calls == 0
-    assert [i["job_id"] for i in scan()] == [job["job_id"]]  # no counters touched
+    counters = sorted(i["job_id"].split("#")[0] for i in scan() if "#" in i["job_id"])
+    assert counters == ["ipsample", "samplecount"]  # the sample's own quotas, not the upload ones
     assert item(job["job_id"])["source"] == "sample:S1"
     reading = json.loads(saved_reading("S1"))
     body = get(job)[1]
@@ -993,3 +993,38 @@ def test_the_worker_refuses_a_result_whose_whole_item_would_be_too_large(aws, mo
     monkeypatch.setattr(worker, "ITEM_MAX_BYTES", 2_000)
     run_worker(job["job_id"])
     assert item(job["job_id"])["reason"] == "result_too_large"
+
+
+# --- admission: one transaction, a quota per kind ------------------------------------------------
+
+def ip_counters(prefix):
+    return {i["job_id"]: int(i["job_count"]) for i in scan() if i["job_id"].startswith(prefix + "#")}
+
+
+def test_a_refused_day_slot_uses_up_no_address_slot(aws, monkeypatch):
+    monkeypatch.setenv("DAILY_JOB_CAP", "1")
+    assert call(jobs.create_job, {"page_count": 1}, ip="198.51.100.1")[0] == 201
+    status, body = call(jobs.create_job, {"page_count": 1}, ip="198.51.100.2")
+    assert status == 429 and body["error"] == "daily_limit"
+    assert len(ip_counters("ipcount")) == 1  # the refused address took no slot
+
+
+def test_the_address_cap_names_itself_when_it_refuses(aws, monkeypatch):
+    monkeypatch.setenv("IP_DAILY_JOB_CAP", "1")
+    assert call(jobs.create_job, {"page_count": 1})[0] == 201
+    status, body = call(jobs.create_job, {"page_count": 1})
+    assert status == 429 and body["error"] == "ip_limit"
+    assert int(next(i for i in scan() if i["job_id"].startswith("counter#"))["job_count"]) == 1
+
+
+def test_typed_checks_have_their_own_quota_and_the_kill_switch_pauses_them(aws, monkeypatch):
+    from api import manual
+    typed = {"fields": {"base_price": "1,00,000"}, "answers": {}}
+    monkeypatch.setenv("IP_TYPED_DAILY_CAP", "1")
+    assert call(manual.handler, typed)[0] == 200
+    status, body = call(manual.handler, typed)
+    assert status == 429 and body["error"] == "ip_limit"
+    assert not ip_counters("ipcount")  # the upload quota is untouched
+    monkeypatch.setenv("UPLOADS_ENABLED", "false")
+    status, body = call(manual.handler, typed, ip="198.51.100.9")
+    assert status == 503 and body["error"] == "uploads_disabled"

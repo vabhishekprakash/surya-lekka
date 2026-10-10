@@ -143,13 +143,15 @@ def test_typed_checks_keep_only_a_short_lived_session_record_with_no_numbers(mon
     status, first = post({"fields": S1_TYPED, "answers": S1_ANSWERS})
     edited = post({"fields": {**S1_TYPED, "base_price": "1,80,001"}, "answers": S1_ANSWERS,
                    "challenge": first["challenge"]})[1]
-    items = common.table().scan()["Items"]
+    everything = common.table().scan()["Items"]
+    items = [i for i in everything if i["job_id"].startswith(manual.SESSION_PREFIX)]
     assert len(items) == 1  # one session, moved on by the edit; no job, no values
+    assert all("#" in i["job_id"] for i in everything if i not in items)  # the rest are the day's counters
     (record,) = items
     assert set(record) == {"job_id", "counter", "values_hash", "expires_at"}
     assert record["job_id"].startswith(manual.SESSION_PREFIX) and int(record["counter"]) == 1
     assert int(record["expires_at"]) == int(clock[0]) + manual.CHALLENGE_SECONDS
-    stored = json.dumps(items, default=str)
+    stored = json.dumps(everything, default=str)
     for value in ("1,80,000", "180000", "1,80,001", "Telangana", "16,020"):
         assert value not in stored
     session_id = record["job_id"][len(manual.SESSION_PREFIX):]

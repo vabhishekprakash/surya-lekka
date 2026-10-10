@@ -99,7 +99,7 @@ def create_job(event, context):
         if isinstance(pages, bool) or not isinstance(pages, int) or not 1 <= pages <= MAX_PAGES:
             raise ApiError(400, "bad_page_count", f"page_count must be a whole number from 1 to {MAX_PAGES}.")
         numbers, total, omitted = _page_plan(body, pages)
-        take_slots(event, pages)
+        take_slots(event, "upload", pages)
         job_id, token = new_job(pages, "upload", mode=reading_engine(), page_numbers=numbers, total_pages=total,
                                 omitted_pages=omitted)
         reply = {
@@ -286,7 +286,8 @@ def sample_ids():
 @guarded("sample")
 def create_sample_job(event, context):
     """POST /samples/{sample_id}: a done job holding the sample's saved reading
-    (samples/<id>/reading.json in the bucket). No model call, so no cap applies.
+    (samples/<id>/reading.json in the bucket). No model call; saved samples have their own daily
+    quotas (per address and overall), and the kill switch pauses them too.
 
     POST /samples/{sample_id}?live=1 copies the synthetic sample pages under
     samples/ in the bucket into a new upload, which runs the same worker and
@@ -295,6 +296,7 @@ def create_sample_job(event, context):
     sample_id = path_param(event, "sample_id")
     live = query_param(event, "live") == "1"
     try:
+        check_kill_switch()
         if sample_id not in sample_ids():
             raise ApiError(404, "no_such_sample", "There is no sample with that name.")
         job_id, token, pages = (_live_sample if live else _saved_sample)(event, sample_id)
@@ -327,6 +329,7 @@ def _saved_sample(event, sample_id):
     quote, pages = reading.get("quote"), reading.get("pages")
     if reading.get("reading") != "saved" or not isinstance(quote, dict) or not isinstance(pages, dict):
         raise ApiError(404, *SAMPLE_MISSING)
+    take_slots(event, "sample")
     job_id = str(uuid.uuid4())  # the findings' tokens are signed for this job, revision 0
     result = run_checks(quote, binding=job_binding(job_id, 0))
     checked = {k: result[k] for k in ("findings", "questions", "vendor_message", "vendor_message_lines", "check_this", "entry_checks")}
@@ -344,7 +347,7 @@ def _live_sample(event, sample_id):
     pages = _sample_object(sample_id, "manifest.json", MANIFEST_MAX_BYTES).get("pages")
     if isinstance(pages, bool) or not isinstance(pages, int) or not 1 <= pages <= MAX_PAGES:
         raise ApiError(404, *SAMPLE_MISSING)
-    take_slots(event, pages)
+    take_slots(event, "upload", pages)
     job_id, token = new_job(pages, f"sample:{sample_id}", mode=reading_engine())
     bucket = bucket_name()
     for n in range(1, pages + 1):

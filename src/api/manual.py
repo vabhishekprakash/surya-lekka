@@ -14,8 +14,8 @@ import time
 from checks import run_checks
 from checks.contract import AMOUNT_FIELDS
 
-from .common import (ApiError, body_json, conditional_update, confirm_key, error_response, guarded, log,
-                     response, table)
+from .common import (ApiError, body_json, check_kill_switch, conditional_update, confirm_key, error_response,
+                     guarded, log, response, table, take_slots)
 
 CHALLENGE_SECONDS = 900  # how long a challenge for one set of typed values lasts
 
@@ -158,6 +158,7 @@ def handler(event, context):
     short-lived session of typed values: a changed number moves the session on and needs
     confirming again, even if it is later changed back."""
     try:
+        check_kill_switch()
         body = body_json(event)
         fields, answers = body.get("fields"), body.get("answers")
         fields, answers = {} if fields is None else fields, {} if answers is None else answers
@@ -171,6 +172,7 @@ def handler(event, context):
             if not isinstance(tokens[key], list) or not all(isinstance(t, str) for t in tokens[key]):
                 raise ApiError(400, "bad_inputs", f"{key} must be a list of tokens.")
         charges, corrections = typed_corrections(fields)
+        take_slots(event, "typed")  # typed-in checks have their own daily quotas
         # The user typed one set of figures, so there is one option.
         confirmations = {"multiple_options": False, **answers}
         try:

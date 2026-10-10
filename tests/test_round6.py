@@ -166,7 +166,7 @@ def test_saved_samples_respect_zero_caps_and_the_kill_switch(aws, monkeypatch): 
     monkeypatch.setenv("IP_DAILY_JOB_CAP", "100")
     monkeypatch.setenv("UPLOADS_ENABLED", "false")
     status, body = call(jobs.create_sample_job, path={"sample_id": "S1"})
-    assert status == 503 and body["error"] == "paused"  # required: the kill switch covers samples
+    assert status == 503 and body["error"] == "uploads_disabled"  # required: the kill switch covers samples
     assert not [i for i in common.table().scan()["Items"] if i.get("source") == "sample:S1"]
 
 
