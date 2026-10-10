@@ -209,3 +209,20 @@ def test_the_add_the_unit_messages_render_in_telugu(rendered):
     keys = {f["message_key"] for f in case["result"]["findings"]}
     assert {"C1.size_unit", "C4.inverter_rating.add_unit"} <= keys
     assert "error" not in row and any("యూనిట్" in text for text in row["shown"])
+
+
+def test_telugu_never_drops_vendor_questions_english_has(tmp_path):
+    case = next(c for c in corpus() if c["result"]["vendor_message"])
+    full = case["result"]
+    variants = {"no_lines": {**full, "vendor_message_lines": None}, "short": {**full,
+                "vendor_message_lines": full["vendor_message_lines"][:-1]}, "complete": full}
+    data = tmp_path / "v.json"
+    data.write_text(json.dumps(variants, default=str), encoding="utf-8")
+    code = ("import { readFileSync } from 'node:fs'; import * as R from './web/results.js'; import pack from './web/te.js';"
+            "const TE = R.language(pack); const v = JSON.parse(readFileSync(process.argv[1], 'utf-8')); const out = {};"
+            "for (const [k, r] of Object.entries(v)) { try { R.vendorMessage(r, TE); out[k] = 'ok'; }"
+            " catch (e) { out[k] = e.constructor.name; } } console.log(JSON.stringify(out));")
+    run = subprocess.run([NODE, "--input-type=module", "-e", code, str(data)], capture_output=True, text=True, cwd=ROOT,
+                         encoding="utf-8", timeout=60)
+    assert run.returncode == 0, run.stderr
+    assert json.loads(run.stdout) == {"no_lines": "MissingText", "short": "MissingText", "complete": "ok"}

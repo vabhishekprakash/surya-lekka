@@ -670,38 +670,38 @@ function boxesFor(pageNumber, evidenceText) {
   return state.boxIndex.get(`${pageNumber}|${evidenceText}`) || [];
 }
 
-function pageButton(pageNumber, evidenceText, boxes) {
+function pageButton(pageNumber, evidenceText, boxes, lang = viewLang()) {
   if (!pageNumber) return null;
   const found = boxes || boxesFor(pageNumber, evidenceText);
   const image = pageImage(pageNumber);
   if (image) {
-    return el("button", { type: "button", class: "thumb", "aria-label": t(viewLang(), "page.show", { n: pageNumber }),
-      onclick: () => openPage(pageNumber, evidenceText, found) },
+    return el("button", { type: "button", class: "thumb", "aria-label": t(lang, "page.show", { n: pageNumber }),
+      onclick: () => openPage(pageNumber, evidenceText, found, lang) },
     el("img", { src: image, alt: "" }));
   }
   if (state.pageText && state.pageText[String(pageNumber)]) {
     return el("button", { type: "button", class: "button secondary text-thumb",
-      onclick: () => openPage(pageNumber, evidenceText, found) }, t(viewLang(), "page.text", { n: pageNumber }));
+      onclick: () => openPage(pageNumber, evidenceText, found, lang) }, t(lang, "page.text", { n: pageNumber }));
   }
   return null;
 }
 
 // The quoted line itself is a button: tapping it opens the page at the line's box.
-function quoteButton(pageNumber, evidenceText, boxes) {
+function quoteButton(pageNumber, evidenceText, boxes, lang = viewLang()) {
   const found = boxes || boxesFor(pageNumber, evidenceText);
   if (!pageNumber || (!pageImage(pageNumber) && !(state.pageText && state.pageText[String(pageNumber)]))) {
     return el("q", { text: evidenceText });
   }
   return el("button", { type: "button", class: "quote-link",
-    "aria-label": t(viewLang(), "page.where", { n: pageNumber }),
-    onclick: () => openPage(pageNumber, evidenceText, found) }, el("q", { text: evidenceText }));
+    "aria-label": t(lang, "page.where", { n: pageNumber }),
+    onclick: () => openPage(pageNumber, evidenceText, found, lang) }, el("q", { text: evidenceText }));
 }
 
-function openPage(pageNumber, evidenceText, boxes = []) {
+function openPage(pageNumber, evidenceText, boxes = [], lang = viewLang()) {
   const dialog = $("#page-viewer");
-  $("#page-viewer-title").textContent = t(viewLang(), "viewer.title", { n: pageNumber });
-  $("#page-viewer-close").textContent = t(viewLang(), "viewer.close");
-  setLang($("#page-viewer"), viewLang());
+  $("#page-viewer-title").textContent = t(lang, "viewer.title", { n: pageNumber });
+  $("#page-viewer-close").textContent = t(lang, "viewer.close");
+  setLang($("#page-viewer"), lang);
   const body = $("#page-viewer-body");
   const image = pageImage(pageNumber);
   if (image) {
@@ -1316,7 +1316,9 @@ function resultsContext(lang) {
   return {
     el, lang, mode: state.mode, modeKey: MODE_LABELS[state.mode] ? state.mode : "", option: state.option,
     entryChecks: state.entryChecks.length, readingField,
-    quoteButton, pageButton, onConfirm: confirmOperands, onFix: () => go(state.editView || "home"),
+    quoteButton: (page, text, boxes) => quoteButton(page, text, boxes, lang),
+    pageButton: (page, text, boxes) => pageButton(page, text, boxes, lang),
+    onConfirm: confirmOperands, onFix: () => go(state.editView || "home"),
     copyText: (message) => navigator.clipboard.writeText(message),
   };
 }
@@ -1330,12 +1332,12 @@ function renderResults() {
   let built;
   state.shownLang = lang;  // the page buttons built below speak this language
   try {
-    built = buildResults(state.result, resultsContext(lang));
+    built = { ...buildResults(state.result, resultsContext(lang)), fixed: fixedTexts(lang) };
   } catch (error) {
     if (!(error instanceof MissingText) || lang === ENGLISH) throw error;
     lang = ENGLISH;
     state.shownLang = lang;
-    built = buildResults(state.result, resultsContext(lang));
+    built = { ...buildResults(state.result, resultsContext(lang)), fixed: fixedTexts(lang) };
   }
   $("#results-summary").textContent = built.summary;
   $("#results-groups").replaceChildren(...built.groups);
@@ -1352,13 +1354,21 @@ function setLang(node, lang) {
   else node.setAttribute("lang", lang.code);
 }
 
-// The fixed words on the results screen and in the footer, in lang.
+// The fixed words on the results screen and in the footer, in lang; throws MissingText if any
+// is missing, so renderResults can choose English before anything is drawn.
+function fixedTexts(lang) {
+  return {
+    labels: $$("[data-i18n]").map((node) => [node, t(lang, node.dataset.i18n)]),
+    privacy: lang.code === "en" ? privacyLine(...privacySettings()) : privacyText(lang, ...privacySettings()),
+  };
+}
+
 function applyLanguage(lang) {
-  for (const node of $$("[data-i18n]")) node.textContent = t(lang, node.dataset.i18n);
+  const fixed = fixedTexts(lang);  // a language renderResults has already checked
+  for (const [node, text] of fixed.labels) node.textContent = text;
   setLang($("#view-results"), lang);
   setLang($("footer.foot"), lang);
-  $("#privacy-line").textContent = lang.code === "en" ? privacyLine(...privacySettings())
-    : privacyText(lang, ...privacySettings());
+  $("#privacy-line").textContent = fixed.privacy;
   for (const button of $$("[data-lang]")) button.setAttribute("aria-pressed", String(button.dataset.lang === state.lang));
 }
 

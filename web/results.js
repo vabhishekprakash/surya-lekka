@@ -243,7 +243,14 @@ export function questionText(q, lang) {
 
 export function vendorMessage(result, lang) {
   if (lang.code === "en") return result.vendor_message;
-  return (result.vendor_message_lines || []).map((line) => renderKeyed(line.key,
+  // Every line the English message has must come keyed, or the whole result stays English:
+  // never a Telugu screen that drops the vendor questions.
+  const lines = result.vendor_message_lines || [];
+  if (!Array.isArray(result.vendor_message_lines)
+      || (result.vendor_message && lines.length !== result.vendor_message.split("\n").length)) {
+    throw new MissingText("vendor lines");
+  }
+  return lines.map((line) => renderKeyed(line.key,
     line.parts || Object.fromEntries(Object.entries(line.params || {}).map(([k, v]) => [k, { text: String(v) }])),
     lang)).join("\n");
 }
@@ -427,7 +434,13 @@ export function findingGroups(result, ctx) {
 
 export function vendorBlock(result, ctx) {
   const { el, lang } = ctx;
-  if (!result.vendor_message) return [el("p", { text: t(lang, "vendor.none") })];
+  if (!result.vendor_message) {
+    // In Telugu, "no questions" needs the keyed lines to say so too (an older result has none).
+    if (lang.code !== "en" && ((result.questions || []).length || !Array.isArray(result.vendor_message_lines))) {
+      throw new MissingText("vendor message");
+    }
+    return [el("p", { text: t(lang, "vendor.none") })];
+  }
   const message = vendorMessage(result, lang);
   const copyStatus = el("span", { class: "status", role: "status", "aria-live": "polite" });
   const area = el("textarea", { class: "message", rows: 6, readonly: true, hidden: true,
