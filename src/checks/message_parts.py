@@ -15,6 +15,8 @@ English one it gives back exactly the message the check wrote (tests check every
 
 import re
 
+from rules import load_cfa_rules
+
 from .common import FIELD_WORDS
 from .messages import TEMPLATES, VENDOR_LINES
 from .questions import TEMPLATES as QUESTIONS
@@ -47,6 +49,30 @@ WORDS = {
     "date": "{day} {month} {year}", **{f"month.{m.lower()}": m for m in MONTHS},
     **GAPS,
 }
+# The notes under a finding and the working shown beside a computed number.
+NOTES = {
+    "note.dcr": ("The central subsidy also requires DCR (domestic content) panels and cells. "
+                 "This was not verified from the quote."),
+    "note.pending": "Some rule values used here are pending verification against the MNRE sources.",
+    "note.rules_checked": "The rule values were checked against the MNRE guidelines on {date}.",
+    "note.charges_not_added": "Charges listed outside the total were not added: {charges}.",
+}
+FORMULAS = {
+    "formula.stated_dc": "stated DC capacity",
+    "formula.slab_first": "{rate} per kWp up to {high} kWp",
+    "formula.slab_next": "{rate} per kWp from {low} to {high} kWp",
+    "formula.then": ", then ",
+    "formula.cap": "{slabs}, at most {cap}",
+    "formula.rule_for": "{rule} ({category} category, {state})",
+    "category.general": "general", "category.special": "special",
+    "formula.first": "{words}", "formula.plus": " + {words}", "formula.minus": " minus {words}",
+}
+WORDS.update(NOTES)
+WORDS.update(FORMULAS)
+_RULES = load_cfa_rules()
+STATE_NAMES = sorted({name for category in ("general_category", "special_category")
+                      for kind in ("states", "union_territories") for name in _RULES[category][kind]})
+WORDS.update({f"state.{name}": name for name in STATE_NAMES})
 ENGLISH = {**{k: t for k, (_, t) in TEMPLATES.items()}, **{f"question.{k}": v for k, v in QUESTIONS.items()},
            **VENDOR_LINES, **WORDS}
 _BY_WORDS = {}
@@ -153,10 +179,11 @@ def charges(value):
     nodes = []
     for item in items:
         m = _CHARGE.match(item)
+        label = keyed("field.extra_charge") if m.group(1) == WORDS["field.extra_charge"] else text(m.group(1))
         amount = keyed("charge.no_amount") if m.group(2) == WORDS["charge.no_amount"] else text(m.group(2))
         state = keyed("charge.outside" if m.group(3) == WORDS["charge.outside"] else "charge.unclear")
         where = keyed("charge.where", total_label=text(m.group(4))) if m.group(4) is not None else text("")
-        nodes.append(keyed("charge.item", label=text(m.group(1)), amount=amount, state=state, where=where))
+        nodes.append(keyed("charge.item", label=label, amount=amount, state=state, where=where))
     return nodes[0] if len(nodes) == 1 else {"join": nodes, "sep": "join.semicolon", "last": "join.semicolon"}
 
 
@@ -201,6 +228,64 @@ def node(name, value, key=None):
 def message_parts(params, key=None):
     """{placeholder: node} for one message's parameters (key: the message's key)."""
     return {name: node(name, value, key) for name, value in (params or {}).items()}
+
+
+_RULES_CHECKED = re.compile(r"^The rule values were checked against the MNRE guidelines on (.+)\.$")
+_NOT_ADDED = re.compile(r"^Charges listed outside the total were not added: (.+)\.$", re.S)
+_SLAB_FIRST = re.compile(r"^(₹[0-9,]+) per kWp up to ([0-9.]+) kWp$")
+_SLAB_NEXT = re.compile(r"^(₹[0-9,]+) per kWp from ([0-9.]+) to ([0-9.]+) kWp$")
+_RULE_FOR = re.compile(r"^(.*) \((general|special) category, (.+)\)$")
+
+
+def note_node(note):
+    """A finding's note as a node, or None for a note with no key (shown only in English)."""
+    for key in ("note.dcr", "note.pending"):
+        if note == WORDS[key]:
+            return keyed(key)
+    if m := _RULES_CHECKED.match(note):
+        return keyed("note.rules_checked", date=cutoff(m.group(1)))
+    if m := _NOT_ADDED.match(note):
+        return keyed("note.charges_not_added", charges=fields(m.group(1)))
+    return None
+
+
+def _rule(formula):
+    slabs, cap = formula.rsplit(", at most ", 1)
+    nodes = []
+    for part in slabs.split(", then "):
+        if m := _SLAB_FIRST.match(part):
+            nodes.append(keyed("formula.slab_first", rate=text(m.group(1)), high=text(m.group(2))))
+        else:
+            m = _SLAB_NEXT.match(part)
+            nodes.append(keyed("formula.slab_next", rate=text(m.group(1)), low=text(m.group(2)),
+                               high=text(m.group(3))))
+    joined = nodes[0] if len(nodes) == 1 else {"join": nodes, "sep": "formula.then", "last": "formula.then"}
+    return keyed("formula.cap", slabs=joined, cap=text(cap))
+
+
+def formula_node(name, formula):
+    """The working beside a computed number as a node, or None when it has no key."""
+    if name in ("dc_kwp", "dc_kwp_range"):
+        if formula == WORDS["formula.stated_dc"]:
+            return keyed("formula.stated_dc")
+        return text(formula) if re.fullmatch(r"[0-9.xW+() /-]+", formula) else None
+    if name in ("central_cfa_rule", "cfa_range"):
+        m = _RULE_FOR.match(formula)
+        if m:
+            return keyed("formula.rule_for", rule=_rule(m.group(1)), category=keyed(f"category.{m.group(2)}"),
+                         state=keyed(f"state.{m.group(3)}"))
+        return _rule(formula)
+    if name in ("gross total", "net cost"):
+        items, used = _split(formula, (" + ", " minus "))
+        nodes = []
+        for i, item in enumerate(items):
+            key = "formula.first" if i == 0 else ("formula.plus" if used[i - 1] == " + " else "formula.minus")
+            node = keyed(key, words=field(item))
+            if i == 0 and item[:1] != item[:1].lower():
+                node["capitalize"] = True
+            nodes.append(node)
+        return {"join": nodes, "sep": "join.none", "last": "join.none"}
+    return None
 
 
 def render_node(n, vocabulary):

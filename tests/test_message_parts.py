@@ -85,3 +85,28 @@ def test_parsing_never_falls_back_to_plain_text_on_the_corpus():
             for param, value in f["message_params"].items():
                 if param in mp.PARSERS or param in mp._KEYS_OF:
                     assert "text" not in f["message_parts"][param] or param in ("dc_kwp", "cutoff"), (name, param)
+
+
+def test_every_note_and_computed_working_rebuilds_exactly_from_its_parts():
+    notes = formulas = 0
+    for name, _, _, result in RUNS:
+        for f in result["findings"]:
+            assert len(f["notes_parts"]) == len(f["notes"]), name
+            for note, part in zip(f["notes"], f["notes_parts"]):
+                assert part is not None, (name, note)
+                assert mp.render_node(part, mp.ENGLISH) == note
+                notes += 1
+            for e in f["evidence"]:
+                if e.get("kind") == "computed":
+                    assert e["formula_parts"] is not None, (name, e["name"], e["formula"])
+                    assert mp.render_node(e["formula_parts"], mp.ENGLISH) == e["formula"], (name, e["name"])
+                    formulas += 1
+    assert notes and formulas
+
+
+def test_an_unlabelled_charge_is_named_as_an_extra_charge_never_by_its_path():
+    for name, _, _, result in RUNS:
+        for f in result["findings"]:
+            assert "extra_charges[" not in f["message"], name
+        for q in result["questions"]:
+            assert "extra_charges[" not in q["text"], name

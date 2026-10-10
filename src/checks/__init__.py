@@ -34,6 +34,18 @@ def _add_keys(findings):
             f["message_parts"] = message_parts.message_parts(f["message_params"], f["message_key"])
         except (AttributeError, KeyError, StopIteration, ValueError):
             f["message_parts"] = {k: message_parts.text(v) for k, v in f["message_params"].items()}
+        # notes and computed working as keyed parts too; None where there is no key (English only)
+        f["notes_parts"] = [_or_none(message_parts.note_node, note) for note in f.get("notes") or []]
+        for e in f.get("evidence") or []:
+            if e.get("kind") == "computed":
+                e["formula_parts"] = _or_none(message_parts.formula_node, e["name"], e["formula"])
+
+
+def _or_none(build, *args):
+    try:
+        return build(*args)
+    except (AttributeError, KeyError, StopIteration, ValueError, IndexError):
+        return None
 
 
 def _annotate(findings, page_texts):

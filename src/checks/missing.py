@@ -198,7 +198,7 @@ def _gst(quote, out):
 def _extras(quote, out):
     outside, evidence, net_meter_seen = [], [], False
     for i, e in enumerate(quote.get("extra_charges") or []):
-        label = e.get("label") or f"extra_charges[{i}]"
+        label = e.get("label") or "an extra charge"  # never the raw path, which no reader can follow
         if NET_METER.search(str(label)):
             net_meter_seen = True
         if "included_in_total" not in e:
