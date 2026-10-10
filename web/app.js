@@ -1,6 +1,8 @@
 // Surya Lekka web app. Plain JavaScript, no build step.
 // Every piece of text from a quote is placed with textContent, never as HTML.
 
+import { PagePlan, REASONS } from "./pages.js";
+
 const CONFIG = window.SURYA_CONFIG || {};
 const API_BASE = String(CONFIG.API_BASE || "").replace(/\/+$/, "");
 // pdf.js is pinned to one version and checked against these hashes before it runs.
@@ -176,6 +178,7 @@ const state = {
   job: null,
   extraction: null,
   pages: [],
+  plan: null,
   pageText: null,
   option: "",
   result: null,
@@ -465,23 +468,32 @@ async function pdfPageToJpeg(page) {
   return null;
 }
 
-async function renderPdf(file, room, onPage) {
+// Every page of the PDF goes into the plan: kept with its image, or left out with a reason
+// (over the page limit, too large to send, or unreadable), keeping the quote's own page numbers.
+async function renderPdf(file, plan, onPage) {
   const pdfjs = await loadPdfjs();
   const data = new Uint8Array(await file.arrayBuffer());
   const doc = await pdfjs.getDocument({ data, isEvalSupported: false }).promise;
-  const blobs = [];
-  const total = doc.numPages;
   try {
-    for (let n = 1; n <= Math.min(total, room); n += 1) {
-      onPage(n, Math.min(total, room));
-      const page = await doc.getPage(n);
-      blobs.push(await pdfPageToJpeg(page));
-      page.cleanup();
+    for (let n = 1; n <= doc.numPages; n += 1) {
+      if (plan.room() === 0) {
+        plan.omit("over_limit");
+        continue;
+      }
+      onPage(n, doc.numPages);
+      try {
+        const page = await doc.getPage(n);
+        const blob = await pdfPageToJpeg(page);
+        page.cleanup();
+        if (blob) plan.keep(blob);
+        else plan.omit("too_large");
+      } catch {
+        plan.omit("unreadable");
+      }
     }
   } finally {
     await doc.destroy();
   }
-  return { blobs, total };
 }
 
 async function photoToJpeg(file) {
@@ -508,37 +520,38 @@ async function photoToJpeg(file) {
 async function prepareFiles(files) {
   resetUpload();
   const notes = [];
-  const blobs = [];
+  const plan = new PagePlan(MAX_PAGES);
   for (const file of files) {
-    const room = MAX_PAGES - blobs.length;
-    if (room <= 0) {
-      notes.push(`Only the first ${MAX_PAGES} pages are read. ${file.name} was left out.`);
+    const isPdf = file.type === "application/pdf" || /\.pdf$/i.test(file.name);
+    if (!isPdf && plan.room() === 0) {
+      plan.omit("over_limit");
       continue;
     }
-    const isPdf = file.type === "application/pdf" || /\.pdf$/i.test(file.name);
     try {
       if (isPdf) {
-        const { blobs: pdfPages, total } = await renderPdf(file, room, (n, of) => {
-          uploadStatus(`Preparing page ${n} of ${of} from ${file.name}`);
-        });
-        if (total > room) notes.push(`Only the first ${MAX_PAGES} pages are read. Pages after that were left out.`);
-        pdfPages.forEach((blob, i) => {
-          if (blob) blobs.push(blob);
-          else notes.push(`Page ${i + 1} of ${file.name} was too large to send and was left out.`);
-        });
+        await renderPdf(file, plan, (n, of) => uploadStatus(`Preparing page ${n} of ${of} from ${file.name}`));
       } else {
         uploadStatus(`Preparing ${file.name}`);
         const blob = await photoToJpeg(file);
-        if (blob) blobs.push(blob);
-        else notes.push(`${file.name} was too large to send and was left out.`);
+        if (blob) plan.keep(blob);
+        else plan.omit("too_large");
       }
     } catch {
+      plan.omit("unreadable");  // a file that can't be opened at all counts as one page left out
       notes.push(isPdf
         ? `${file.name} couldn't be opened here. Try photos of each page, or type the numbers instead.`
         : `${file.name} couldn't be opened here. Use a PDF, JPEG or PNG, or type the numbers instead.`);
     }
   }
-  state.pages = blobs.map((blob, i) => ({ page: i + 1, blob, url: URL.createObjectURL(blob) }));
+  for (const [reason, words] of Object.entries(REASONS)) {
+    const pages = plan.omitted.filter((o) => o.reason === reason).map((o) => o.page);
+    if (pages.length) {
+      notes.push(`${pages.length === 1 ? "Page" : "Pages"} ${pages.join(", ")} ${pages.length === 1 ? "was" : "were"} left out `
+        + `(${words}). The checks that need the whole quote will ask you to confirm.`);
+    }
+  }
+  state.plan = plan;
+  state.pages = plan.pages.map(({ page, blob }) => ({ page, blob, url: URL.createObjectURL(blob) }));
   $("#upload-notes").replaceChildren(...notes.map((note) => el("li", { text: note })));
   $("#page-previews").replaceChildren(...state.pages.map((p) => el("figure", {},
     el("img", { src: p.url, alt: `Page ${p.page}` }), el("figcaption", { text: `Page ${p.page}` }))));
@@ -569,10 +582,10 @@ async function sendPages() {
   const pages = state.pages;
   try {
     uploadStatus("Starting the check");
-    const job = await api("POST", "/jobs", { page_count: pages.length });
+    const job = await api("POST", "/jobs", state.plan.request());
     newJob(job, job.mode || "nova");
-    for (const target of job.uploads) {
-      uploadStatus(`Uploading page ${target.page} of ${pages.length}`);
+    for (const target of job.uploads) {  // upload slot n holds the nth page kept
+      uploadStatus(`Uploading page ${pages[target.page - 1].page} (${target.page} of ${pages.length})`);
       await postForm(target, pages[target.page - 1].blob);
     }
     const manifest = new Blob([JSON.stringify(job.manifest_body)], { type: "application/json" });
@@ -642,7 +655,7 @@ async function retryJob() {
 // The page image for a page: the household's own (never uploaded for viewing), or a short-lived
 // link the API gives for a made-up sample's page.
 function pageImage(pageNumber) {
-  const own = state.pages[pageNumber - 1];
+  const own = state.pages.find((p) => p.page === pageNumber);
   return own ? own.url : (state.pageImages || [])[pageNumber - 1] || null;
 }
 

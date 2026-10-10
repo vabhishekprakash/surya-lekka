@@ -234,3 +234,12 @@ def test_values_are_highlighted_on_their_page():
     assert "Read from the quote: ${valueText(read.value)}" in APP
     css = (ROOT / "web" / "style.css").read_text(encoding="utf-8")
     assert ".page-frame .hl { position: absolute;" in css and ".page-frame { position: relative;" in css
+
+
+def test_uploads_send_the_page_plan_with_original_numbers_and_left_out_pages():
+    assert 'import { PagePlan, REASONS } from "./pages.js";' in APP
+    assert 'api("POST", "/jobs", state.plan.request())' in APP
+    pdf = APP[APP.index("async function renderPdf("):APP.index("async function photoToJpeg(")]
+    for reason in ('plan.omit("over_limit")', 'plan.omit("too_large")', 'plan.omit("unreadable")'):
+        assert reason in pdf
+    assert "state.pages.find((p) => p.page === pageNumber)" in APP  # page images by their own number
