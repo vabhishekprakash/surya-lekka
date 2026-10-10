@@ -44,3 +44,21 @@ def test_a_wrong_operand_is_found_against_the_labels():
     other = harness.labelled(LABELS["P2"], harness.answers("S-A", LABELS["P2"]))
     gross = harness.by_check(other)[("C3_gross_total", None)]
     assert harness.wrong_operands(gross, truth) == ["gross_total"]
+
+
+@pytest.mark.parametrize("text,amount", [("Rs.78000 for 3 Kw", "78000"), ("78,000; Rs. 78,000/-", "78000"),
+                                         ("Rs 78,000", "78000"), ("78,000; 60,000", None), ("not stated", None)])
+def test_label_amounts_read_the_one_amount_a_label_states(text, amount):
+    assert harness.label_amount(text) == amount
+
+
+@pytest.mark.parametrize("text,value", [('Proposal - 3 KW"', "3 KW"), ("3.3 kWp (DC)", "3.3 kWp"),
+                                        ("total 5 KW; 3 KW on page 2", "5 KW"), ("no size", None)])
+def test_label_capacities_read_the_first_size_in_the_first_mention(text, value):
+    assert harness.label_capacity(text) == value
+
+
+@pytest.mark.parametrize("text,count", [("6", 6), ("6 Nos", 6), ("6 No.s", 6), ("6 panels", 6), ("six", None),
+                                        ("6 x 2", None)])
+def test_label_counts_read_a_number_with_only_a_unit_word(text, count):
+    assert harness.label_count(text) == count

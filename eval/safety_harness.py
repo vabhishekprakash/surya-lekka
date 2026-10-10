@@ -18,6 +18,7 @@ from decimal import Decimal
 from checks import run_checks
 from checks.recheck import _parsed_value
 from extract import scoring
+from extract.textract_sources import amounts_in
 
 DEFINITIVE = ("consistent", "inconsistent")
 CHECKS = ("C1_capacity", "C2_central_subsidy", "C3_gross_total", "C3_net_cost")
@@ -60,12 +61,47 @@ def answers(scenario, truth):
 
 # --- the labelled quote -----------------------------------------------------------------------
 
+# Labels carry notes ("Rs.78,000 for 3 kW", "3 KW (DC)", "6 No.s"). These read the one value a
+# label states and nothing else: a label with two different values gives none.
+_CAPACITY = re.compile(r"(\d+(?:\.\d+)?)\s*(kwp|kva|kw|wp|watts?|w)\b", re.I)
+_COUNT = re.compile(r"^\s*(\d{1,3})\s*(?:nos?\.?s?|numbers?|pcs\.?|panels?|modules?)?\s*$", re.I)
+
+
+def label_amount(text):
+    """The one rupee amount a label states, as text, or None."""
+    if not text:
+        return None
+    found = {value.normalize() for part in str(text).split(";") for _, value in amounts_in(part)}
+    return format(found.pop(), "f") if len(found) == 1 else None
+
+
+def label_capacity(text):
+    """The first number with a unit in a label's first mention, as "3.3 kWp", or None."""
+    if not text:
+        return None
+    first = [p.strip() for p in str(text).replace("\n", ";").split(";") if p.strip()][0]
+    m = _CAPACITY.search(first)
+    return f"{m.group(1)} {m.group(2)}" if m else None
+
+
+def label_count(text):
+    c = scoring.count_value(text)
+    if isinstance(c, int):
+        return c
+    m = _COUNT.match(str(text))
+    return int(m.group(1)) if m else None
+
+
+def _wattage(text):
+    return text if re.search(r"\d\s*\w*\s*-\s*\d", text) else label_capacity(text) or text
+
+
 def _field(kind, text, name):
     return {"value": _parsed_value(kind, text), "evidence_text": f"label:{name}", "page": None, "batch": 1}
 
 
 def _first_capacity(text):
-    return [p.strip() for p in str(text).replace("\n", ";").split(";") if p.strip()][0].split(",")[0]
+    return label_capacity(text) or [p.strip() for p in str(text).replace("\n", ";").split(";") if p.strip()][0]
 
 
 def labelled_quote(truth):
@@ -77,13 +113,14 @@ def labelled_quote(truth):
     amounts = ("base_price", "gst_amount", "discount", "gross_total", "net_cost", "subsidy_central", "subsidy_state",
                "subsidy_combined", "subsidy_unspecified")
     for name in amounts:
-        q[name] = _field("amount", _val(truth, name), name) if _val(truth, name) else None
+        text = label_amount(_val(truth, name)) or _val(truth, name)
+        q[name] = _field("amount", text, name) if text else None
     if _val(truth, "subsidy") and not any(q[n] for n in amounts[5:]):
         kind = scoring.truth_key("enum", _val(truth, "subsidy_type"), "subsidy_type")[1] \
             if _val(truth, "subsidy_type") else None
         target = {"central": "subsidy_central", "state": "subsidy_state", "combined": "subsidy_combined"}.get(
             kind, "subsidy_unspecified")
-        q[target] = _field("amount", _val(truth, "subsidy"), "subsidy")
+        q[target] = _field("amount", label_amount(_val(truth, "subsidy")) or _val(truth, "subsidy"), "subsidy")
     if _val(truth, "stated_capacity"):
         q["stated_capacity"] = _field("capacity", _first_capacity(_val(truth, "stated_capacity")), "stated_capacity")
 
@@ -91,12 +128,12 @@ def labelled_quote(truth):
         return scoring._split(_val(truth, key)) if _val(truth, key) else []
     counts, watts, makes = parts("panel_count"), parts("panel_wattage"), parts("module_make_model")
     for i in range(max(len(counts), len(watts), len(makes))):
-        count = scoring.count_value(counts[i]) if i < len(counts) else None
+        count = label_count(counts[i]) if i < len(counts) else None
         q["module_groups"].append({
             "group_id": f"G{i + 1}", "option_id": None, "make_model_alternatives": [],
             "count": {"value": count, "evidence_text": "label:panel_count", "page": None, "batch": 1}
             if isinstance(count, int) else None,
-            "wattage": _field("capacity", watts[i], "panel_wattage") if i < len(watts) else None,
+            "wattage": _field("capacity", _wattage(watts[i]), "panel_wattage") if i < len(watts) else None,
             "make_model": {"value": makes[i], "evidence_text": "label:module_make_model", "page": None, "batch": 1}
             if i < len(makes) else None})
     ratings, inv_makes = parts("inverter_rating"), parts("inverter_make_model")
@@ -178,8 +215,8 @@ def truth_number(truth, name, index):
     if name in ("base_price", "gst_amount", "discount", "gross_total", "net_cost", "subsidy_central", "subsidy_state",
                 "subsidy_combined", "subsidy_unspecified"):
         text = _val(truth, name) or (_val(truth, "subsidy") if name.startswith("subsidy") else None)
-        key = scoring._amount_key_of_text(text) if text else None
-        return key[1] if key else None
+        amount = label_amount(text)
+        return Decimal(amount) if amount else None
     to_kw = {"kW": 1, "kWp": 1, "W": Decimal("0.001"), "Wp": Decimal("0.001")}
     to_w = {"W": 1, "Wp": 1, "kW": 1000, "kWp": 1000}
     if name == "stated_capacity_kw" and _val(truth, "stated_capacity"):
@@ -192,9 +229,9 @@ def truth_number(truth, name, index):
         if index is None or index >= len(items):
             return None
         if name == "count":
-            c = scoring.count_value(items[index])
+            c = label_count(items[index])
             return Decimal(c) if isinstance(c, int) else None
-        r = _parsed_value("capacity", items[index])
+        r = _parsed_value("capacity", _wattage(items[index]))
         n = _num(r.get("parsed")) if r.get("parse_status") == "ok" else None
         scale = to_w if name == "wattage_w" else to_kw
         return None if n is None or r.get("unit") not in scale else n * scale[r["unit"]]
