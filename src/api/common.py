@@ -64,19 +64,37 @@ def job_binding(job_id, revision):
     return {"key": confirm_key(), "job": job_id, "revision": int(revision)}
 
 
+def _operation_and_status(wrapped, instance, args, kwargs, return_value, exception, subsegment, stack):
+    """What an AWS call's X-Ray subsegment records: the operation and the HTTP status, and the
+    subsegment's own start and end times. No request parameters, no response, no exception
+    message and no stack, so no quote text, page image, token or error text reaches a trace."""
+    subsegment.set_aws({"operation": kwargs.get("operation_name") or (args[0] if args else None)})
+    meta = (return_value or {}).get("ResponseMetadata") or (getattr(exception, "response", None) or {}).get(
+        "ResponseMetadata") or {}
+    status = meta.get("HTTPStatusCode")
+    if isinstance(status, int):
+        subsegment.put_http_meta("status", status)
+        subsegment.apply_status_code(status)
+    elif exception is not None:
+        subsegment.add_fault_flag()
+
+
 def trace_aws_calls():
-    """In Lambda, record each AWS SDK call (Textract, S3, DynamoDB) as an X-Ray subsegment,
-    so traces and the service map show them. The SDK's botocore patch records the
-    operation, Region, request id, HTTP status and a short list of request parameters
-    (DynamoDB table names, S3 bucket names and object keys, which hold job ids but never
-    tokens). It records no request or response bodies, so no page image, quote text or job
-    token reaches a trace; tests/test_xray.py checks this. Local runs and tests are not
-    patched."""
+    """In Lambda, record each AWS SDK call (Textract, S3, DynamoDB, Secrets Manager) as an X-Ray
+    subsegment, so traces and the service map show them, with only its operation, HTTP status
+    and timing (_operation_and_status replaces the SDK's own recorder of parameters and
+    exceptions; tests/test_xray.py and tests/test_round6.py check this). Local runs and tests
+    are not patched."""
     if not os.environ.get("AWS_LAMBDA_FUNCTION_NAME"):
         return
+    import importlib
+
     from aws_xray_sdk.core import patch, xray_recorder
 
+    # The package re-exports a function named patch, so the module is taken by its full name.
+    botocore_patch = importlib.import_module("aws_xray_sdk.ext.botocore.patch")
     xray_recorder.configure(context_missing="LOG_ERROR")
+    botocore_patch.aws_meta_processor = _operation_and_status
     patch(["botocore"])
 
 
