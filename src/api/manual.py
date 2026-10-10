@@ -121,7 +121,7 @@ def handler(event, context):
         log("manual_refused", reason=e.code, http_status=e.status)
         return error_response(e)
     log("manual_checked", http_status=200)
-    view = {k: result[k] for k in ("findings", "questions", "vendor_message", "check_this")}
+    view = {k: result[k] for k in ("findings", "questions", "vendor_message", "vendor_message_lines", "check_this")}
     names = {path: name for name, path in TEXT_FIELDS.items()}
     view["entry_checks"] = [{**e, "field": names.get(e["path"], e["path"])} for e in result["entry_checks"]]
     return response(200, {"mode": "manual", **view})

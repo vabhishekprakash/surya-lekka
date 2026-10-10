@@ -3,7 +3,7 @@ import copy
 from .arithmetic import check_gross_total, check_net_cost
 from .capacity import check_capacity
 from .common import NEEDS_CONFIRMATION, USER_KINDS, field_words, join_words
-from . import check_this, guards
+from . import check_this, guards, messages
 from .contract import effective_option, normalise
 from .evidence import verify_evidence
 from .missing import check_missing_details
@@ -20,6 +20,16 @@ def _ask_for_typed_numbers(findings, view):
         if held:
             f["status"] = NEEDS_CONFIRMATION
             f["message"] = f"Please check the number you entered for {join_words(field_words(n, view) for n in held)}."
+
+
+def _add_keys(findings):
+    """Each finding's message key and parameters. A message no template matches is keyed
+    "unkeyed" with its text, so a household still gets its result; tests allow none."""
+    for f in findings:
+        try:
+            f["message_key"], f["message_params"] = messages.identify(f["check_id"], f["message"])
+        except LookupError:
+            f["message_key"], f["message_params"] = "unkeyed", {"text": f["message"]}
 
 
 def _annotate(findings, page_texts):
@@ -52,16 +62,19 @@ def run_checks(quote, user_inputs=None, page_texts=None, rules=None):
         *check_missing_details(view),
     ]
     _ask_for_typed_numbers(findings, view)
+    _add_keys(findings)
     if page_texts is not None:
         _annotate(findings, page_texts)
+    questions = messages.keyed_questions(vendor_questions(findings), findings)
     return {
         "contract_version": view["contract_version"],
         "findings": findings,
         "corrected_fields": corrected,
         "check_this": to_check,
         "entry_checks": entries,
-        "questions": vendor_questions(findings),
+        "questions": questions,
         "vendor_message": vendor_message(findings),
+        "vendor_message_lines": messages.vendor_message_lines(questions),
         "quote": effective,
         "original_quote": original,
     }

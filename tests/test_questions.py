@@ -65,7 +65,7 @@ def test_capacity_mismatch_question(quote_v1):
     quote_v1["net_cost"] = amount_field("Rs. 1,28,000")
     r = run_checks(quote_v1)
     assert r["findings"][0]["status"] == "inconsistent"
-    assert r["questions"][0] == {
+    assert {k: r["questions"][0][k] for k in ("id", "text")} == {
         "id": "capacity_mismatch",
         "text": "The panels listed add up to 2.5 kWp, but the quote says 3 kW. "
                 "Could you confirm the panel count and wattage?"}

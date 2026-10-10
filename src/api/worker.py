@@ -297,7 +297,7 @@ def _extract(job_id, pages, saved, context):
 def _save(job_id, quote, stats):
     result = run_checks(quote)
     extraction = json.dumps(quote, default=str)
-    checked = json.dumps({k: result[k] for k in ("findings", "questions", "vendor_message", "check_this", "entry_checks")}, default=str)
+    checked = json.dumps({k: result[k] for k in ("findings", "questions", "vendor_message", "vendor_message_lines", "check_this", "entry_checks")}, default=str)
     if len(extraction) + len(checked) > RESULT_MAX_BYTES:
         raise JobFailed("result_too_large")
     if not transition(job_id, "processing", "done", remove=("batches", "reason"), extraction=extraction,
