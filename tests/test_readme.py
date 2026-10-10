@@ -25,7 +25,7 @@ def section(title):
 def test_sections_in_order():
     titles = re.findall(r"^## (.+)$", README, re.M)
     assert titles == ["Press release", "FAQ", "How it works", "What it checks", "Privacy and safety", "Alarms",
-                      "Run it locally", "Deploy", "Tests", "Limits", "Results", "How this was built",
+                      "Run it locally", "Deploy", "Tests", "Limits", "Results", "Usability testing", "How this was built",
                       "Credits and licences", "Team"]
 
 
@@ -86,9 +86,10 @@ def test_plain_text_rules():
     # AI tools are named in "How this was built" (an event rule) and nowhere else.
     built = section("How this was built")
     # ...and in the agreed sentence on who reviewed the Telugu (Limits)
-    telugu = ("Claude Opus 5.5 reviewed it, and a second independent Claude check back-translated it.")
+    telugu = "Claude Opus 5.5 reviewed it, with a second independent back-translation check"
+    personas = "AI personas, made with Claude, to find usability problems"  # the Usability testing note
     assert not re.search(r"Claude|ChatGPT|Copilot|Anthropic|GPT-|generated (by|with)|AI[- ]assist",
-                         README.replace(built, "").replace(telugu, ""), re.I)
+                         README.replace(built, "").replace(telugu, "").replace(personas, ""), re.I)
     assert "**" not in ours
     assert "illustrative" in section("Press release")  # the household quote is not presented as real
 
@@ -181,7 +182,9 @@ def test_no_missing_detail_count_is_published_from_the_labels():
     # the labels record DCR wording in a field the evaluation didn't read, and have no field for the others
     assert "We publish no count of quotes missing a DCR declaration" in results
     assert "unrecorded in 16" not in results and "| DCR declaration not stated |" not in results
-    assert "agreed with 11 of 11" in results and "eval/recheck_findings.py" in results
+    assert ("All 11 definitive labelled findings were recomputed by an independent script that shares no code with "
+            "the app (11 of 11 agree), and rechecked by hand by a team member, also 11 of 11.") in results
+    assert "being checked by eye" not in README
     assert "never pooled" not in README.replace(section("Team"), "")  # the authors' own words stay theirs
 
 
@@ -197,10 +200,17 @@ def test_typed_checks_and_traces_are_described_as_they_are():
 
 def test_the_telugu_limit_is_stated_as_agreed():
     assert ("The results screen and the vendor message can be shown in Telugu. Amazon Translate drafted it; Claude "
-            "Opus 5.5 reviewed it, and a second independent Claude check back-translated it. No professional "
-            "translator has reviewed it. Other screens are in English.") in section("Limits")
+            "Opus 5.5 reviewed it, with a second independent back-translation check; the later wording changes came "
+            "from an AI review and were approved by a native Telugu speaker on our team. No professional translator "
+            "has reviewed it. Other screens are in English.") in section("Limits")
     assert "Hindi isn't offered." in section("Limits")
+    assert README.count("native") == 1  # nowhere else says a native speaker reviewed the Telugu
 
+
+def test_usability_testing_note_is_marked_as_simulated():
+    note = section("Usability testing")
+    assert "simulated dry run with AI personas, made with Claude" in note
+    assert "Simulated results are not reported as user evidence." in note
 
 def test_round7_claims_are_stated_as_built():
     assert "at most four" not in README and "never publishes stale settings" not in README
