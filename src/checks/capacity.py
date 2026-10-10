@@ -9,6 +9,7 @@ from .common import (
     NEEDS_CONFIRMATION,
     UnusableNumber,
     computed,
+    without_unit,
     field_words,
     finding,
     format_number,
@@ -97,6 +98,10 @@ def check_capacity(quote):
     try:
         stated = to_decimal(value_of(stated_field))
     except UnusableNumber:
+        if without_unit(stated_field):
+            return finding(CHECK_ID, NEEDS_CONFIRMATION,
+                           "Please add the unit to the system size, for example 3 kWp.", evidence,
+                           question="dc_capacity")
         return finding(CHECK_ID, NEEDS_CONFIRMATION, "Please check the system size on the quote.", evidence,
                        question="dc_capacity")
     if stated is None:

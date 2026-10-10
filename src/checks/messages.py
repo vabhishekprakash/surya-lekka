@@ -29,6 +29,7 @@ TEMPLATES = {
 
     "C1.no_panels": (("C1_capacity",), "The number of panels and their wattage weren't found on the quote."),
     "C1.single_number": (("C1_capacity",), "Please check {fields}: a single number is needed."),
+    "C1.size_unit": (("C1_capacity",), "Please add the unit to the system size, for example 3 kWp."),
     "C1.kva": (("C1_capacity",), "The quote gives the system size as {stated_raw}. kVA measures the inverter's "
                                  "output, not the panels, so it wasn't compared with the {kwp} kWp the panels make."),
     "C1.check_size": (("C1_capacity",), "Please check the system size on the quote."),
@@ -121,6 +122,8 @@ TEMPLATES = {
                                                           "which one will be installed."),
     "C4.inverter_rating.missing": (("C4_missing_details",), "Inverter rating: not found on the quote."),
     "C4.inverter_rating.confirm": (("C4_missing_details",), "Please confirm the inverter rating."),
+    "C4.inverter_rating.add_unit": (("C4_missing_details",),
+                                    "Please add the unit to the inverter rating, for example 3 kW."),
     "C4.vendor_registration.confirm": (("C4_missing_details",), "Please confirm the vendor registration number on "
                                                                 "the quote."),
     "C4.vendor_registration.missing": (("C4_missing_details",), "Vendor registration number: not found on the "

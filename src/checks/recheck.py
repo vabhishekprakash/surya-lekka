@@ -29,7 +29,8 @@ AMOUNT_PATHS = {"base_price", "gst_amount", "discount", "gross_total", "subsidy_
 CAPACITY_PATHS = {"stated_capacity"}
 PLAIN_PATHS = {"dcr_declaration", "vendor_registration"}
 ITEM_LISTS = {
-    "module_groups": ("group_id", {"count": "plain", "wattage": "capacity", "make_model": "plain"}),
+    # The wattage box only ever holds a panel's watts, so a bare number typed there is watts.
+    "module_groups": ("group_id", {"count": "plain", "wattage": "watts", "make_model": "plain"}),
     "inverters": ("inverter_id", {"make_model": "plain", "rating": "capacity"}),
     "extra_charges": ("charge_id", {"label": "plain", "amount": "amount", "included_in_total": "plain"}),
 }
@@ -38,6 +39,7 @@ CONFIRMABLE = {"selected_option", "state", "consumer_type", "portal_application_
                "multiple_options", "capacity_basis", "gst_treatment", "extra_charges_complete",
                "net_cost_subsidy_basis"}
 _ITEM_PATH = re.compile(r"^(\w+)\[([^\]]+)\]\.(\w+)$")
+_BARE_NUMBER = re.compile(r"^\s*[0-9]+(?:\.[0-9]+)?\s*$")
 _ADDED_CHARGE = re.compile(r"U(?:[1-9]|10)")
 
 
@@ -50,6 +52,8 @@ def _parsed_value(kind, value):
         out = {"raw": raw, "parsed": r["parsed"], "parse_status": r["parse_status"]}
     else:
         r = parse_capacity(raw)
+        if kind == "watts" and raw is not None and _BARE_NUMBER.match(raw):
+            r = parse_capacity(f"{raw.strip()} W")  # typed by the household, never read from the quote
         out = {"raw": raw, "parsed": r["parsed"], "unit": r["unit"], "parse_status": r["parse_status"]}
     return jsonable(out)
 

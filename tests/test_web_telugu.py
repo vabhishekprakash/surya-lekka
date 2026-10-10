@@ -113,6 +113,12 @@ def corpus():
                                            copy.deepcopy(inputs))})
         cases.append({"name": name, "mode": mode, "quote": quote,
                       "result": mc.confirmed_run({k: v for k, v in quote.items() if k != "typed_by_household"}, inputs)})
+    s4 = json.loads((ROOT / "samples" / "cached" / "S4.json").read_text(encoding="utf-8"))
+    s4 = s4.get("quote", s4)
+    bare = {"confirmations": mc.FULL, "corrections": {"stated_capacity": "3", "module_groups[G1].wattage": "500",
+                                                      f"inverters[{s4['inverters'][0]['inverter_id']}].rating": "3"}}
+    cases.append({"name": "bare_units", "mode": "saved", "quote": {**s4, "typed_by_household": bare["corrections"]},
+                  "result": run_checks(copy.deepcopy(s4), copy.deepcopy(bare))})
     for doc, truth in labels.items():
         quote = harness["labelled_quote"](truth)
         result = harness["labelled"](truth, harness["answers"]("S-A", truth))
@@ -196,3 +202,10 @@ def test_every_dcr_rules_and_charges_note_is_keyed(rendered):
             for part in f["notes_parts"]:
                 seen.add(part["key"])
     assert {"note.dcr", "note.rules_checked", "note.charges_not_added"} <= seen
+
+
+def test_the_add_the_unit_messages_render_in_telugu(rendered):
+    case, row = rendered["bare_units"]
+    keys = {f["message_key"] for f in case["result"]["findings"]}
+    assert {"C1.size_unit", "C4.inverter_rating.add_unit"} <= keys
+    assert "error" not in row and any("యూనిట్" in text for text in row["shown"])

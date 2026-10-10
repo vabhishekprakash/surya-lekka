@@ -13,6 +13,7 @@ from .common import (
     NEEDS_CONFIRMATION,
     UnusableNumber,
     finding,
+    without_unit,
     format_inr,
     rupees,
     options_finding,
@@ -133,6 +134,7 @@ def _inverters(quote, out):
     invs = quote.get("inverters") or []
     model_ev, rating_ev = [], []
     model_missing, rating_missing, rating_unsure, choices = not invs, not invs, False, []
+    rating_unitless = False
     model_unsure = False
     for i, inv in enumerate(invs):
         name = f"inverters[{i}]"
@@ -154,6 +156,8 @@ def _inverters(quote, out):
         rating = value_of(rating_f)
         if rating is None:
             rating_missing = True
+        elif without_unit(rating_f):
+            rating_unsure = rating_unitless = True
         elif not isinstance(rating, (Decimal, dict)):
             rating_unsure = True
     if model_missing:
@@ -169,6 +173,10 @@ def _inverters(quote, out):
     if rating_missing:
         out.append(_item("inverter_rating", MISSING, "Inverter rating: not found on the quote.",
                          rating_ev, "inverter_rating"))
+    elif rating_unitless:
+        out.append(_item("inverter_rating", NEEDS_CONFIRMATION,
+                         "Please add the unit to the inverter rating, for example 3 kW.", rating_ev,
+                         "inverter_rating"))
     elif rating_unsure:
         out.append(_item("inverter_rating", NEEDS_CONFIRMATION, "Please confirm the inverter rating.",
                          rating_ev, "inverter_rating"))

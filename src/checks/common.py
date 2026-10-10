@@ -128,6 +128,17 @@ def value_of(field):
     return field.get("value")
 
 
+_BARE = re.compile(r"^\s*[0-9]+(?:\.[0-9]+)?\s*$")
+
+
+def without_unit(field):
+    """True when a capacity or rating is a bare number with no unit, e.g. "3", so the unit to
+    add can be named instead of asking for "a single number"."""
+    value = value_of(field)
+    return (getattr(value, "parse_status", None) == "ambiguous"
+            and bool(_BARE.match(str(getattr(value, "raw", "") or ""))))
+
+
 def unresolved(field):
     """True when a field is present but its value could not be read, for example
     because extraction batches disagreed."""
