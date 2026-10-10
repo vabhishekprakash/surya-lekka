@@ -16,8 +16,8 @@ ROOT = Path(__file__).resolve().parent.parent
 def test_render_samples_writes_the_layout_the_sample_route_reads(tmp_path):
     pytest.importorskip("pymupdf")
     render = runpy.run_path(str(ROOT / "scripts" / "render_samples.py"))["render_samples"]
-    assert render(tmp_path) == {"S1": 2, "S2": 2, "S3": 2}
-    for sid in ("S1", "S2", "S3"):
+    assert render(tmp_path) == {"S1": 2, "S2": 2, "S3": 2, "S4": 2}  # S4: hidden tester sample on S2's pages
+    for sid in ("S1", "S2", "S3", "S4"):
         folder = tmp_path / sid
         pages = json.loads((folder / "manifest.json").read_text(encoding="utf-8"))["pages"]
         images = sorted(folder.glob("page-*.jpg"))
