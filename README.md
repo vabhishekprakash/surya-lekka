@@ -309,7 +309,7 @@ We used these AI tools while building Surya Lekka:
 
 | Tool | Role |
 |---|---|
-| Claude Code, running Claude Opus 5.5 | Wrote the code under our direction. We reviewed, ran and tested it. |
+| Claude Code, running Claude Opus 5.5 | Wrote the code from our block-by-block instructions. We checked each block’s results, ran it and tested it. |
 | Claude Opus 5.5, in the Claude app  | Planning; reviewed the Telugu text, with a second independent back-translation check. |
 | ChatGPT, model Luna 5.6 | Finding public example quotes. |
 
@@ -341,10 +341,6 @@ The architecture diagram (`docs/surya-lekka-architecture.svg`) and the made-up s
 
 ## Team
 
-- **Abhishek — Development and AWS deployment:** Application
-  implementation, quote-reading pipeline, calculation and subsidy
-  checks, web interface, AWS infrastructure, automated tests,
-  evaluation tooling and technical documentation.
+- **Abhishek: data, evaluation, product decisions and AWS.** Collected 17 real rooftop-solar quotes, redacted them on his own machine with our local redaction tool, and hand-labelled every value before any reading of the held-out set. Ran the evaluation under rules fixed in advance: labels frozen first, nine quotes held out and read exactly once, development and held-out numbers never pooled. Made the product calls: no finding until the household confirms its numbers, every value shown with the line it came from, and no tuning of the reader to hit a target. Owns the AWS account and the deployment in ap-south-1, including the AI services opt-out, cost caps and budgets. Directed the AI coding agent block by block, reviewed its reports and test results, and ran outside reviews whose findings became fixes and regression tests. Wrote some of the code himself.
 
-- **Arya — Website testing and demo:** Responsible for end-to-end
-  testing of the household journey and preparing the demo video.
+- **Arya: team lead, vendor outreach, testing and demo.** Arranged the vendor's consent to use a real quote in the demo. Responsible for end-to-end testing of the household journey with people who hadn't seen the app, and for preparing the demo video.
