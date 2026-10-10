@@ -115,3 +115,13 @@ def test_the_site_is_on_github_pages_while_cloudfront_is_blocked():
     assert "-SiteOrigin https://<your-user>.github.io -Pages" in deploy
     assert ".github/workflows/pages.yml" in deploy and "gh variable set" in deploy
     assert "https://vabhishekprakash.github.io/surya-lekka/" in README
+
+
+def test_confirm_before_finding_is_said_plainly_and_accuracy_is_what_was_measured():
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    index = (ROOT / "web" / "index.html").read_text(encoding="utf-8")
+    phrase = "a finding only appears after"
+    assert phrase in readme.lower() and phrase in index.lower()
+    assert "36 of the 82 printed values" in readme and "English quotes only" in readme
+    for claim in ("never wrong", "never guesses", "always right", "100% accurate"):
+        assert claim not in readme.lower() and claim not in index.lower()
