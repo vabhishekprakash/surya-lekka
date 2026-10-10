@@ -2,6 +2,8 @@
 
 Surya Lekka checks a household's rooftop solar quote before they sign. It reads the quote, shows the line each number came from, checks the sums and the central subsidy against the government rule, and lists what to ask the vendor.
 
+Site: https://main.d2sqhcgne0nq26.amplifyapp.com/ (AWS Amplify Hosting). Mirror: https://vabhishekprakash.github.io/surya-lekka/ (GitHub Pages).
+
 ## Press release
 
 This is a Working Backwards press release, written before launch to describe the product we are building.
@@ -58,7 +60,7 @@ There are two other ways in. The three samples are made-up quotes with saved rea
 
 The stack is defined in `template.yaml` (AWS SAM): an HTTP API on API Gateway, seven Lambda functions on Python 3.12, a private S3 bucket for uploads, DynamoDB for jobs, an SQS queue for worker events that failed, CloudWatch logs kept for 7 days, X-Ray tracing, and the web app in a second private bucket behind CloudFront.
 
-While our AWS account is blocked from creating CloudFront distributions, the public site is served from GitHub Pages instead, at https://vabhishekprakash.github.io/surya-lekka/, and talks to the same API. The same files are also on AWS Amplify Hosting in ap-south-1, at https://main.d2sqhcgne0nq26.amplifyapp.com/, published by a manual deployment (no Git connection); the API accepts both addresses. The template still supports CloudFront: `HostingEnabled` is only switched off until the account is verified.
+The public site is on AWS Amplify Hosting in ap-south-1, at https://main.d2sqhcgne0nq26.amplifyapp.com/, published by manual deployments (a zip of the built web app, no Git connection). GitHub Pages serves the same files as a mirror, at https://vabhishekprakash.github.io/surya-lekka/. Both talk to the same API, which accepts both addresses. The template's own CloudFront hosting is switched off (`HostingEnabled=false`) while our account is blocked from creating CloudFront distributions. The template still supports CloudFront: `HostingEnabled` is only switched off until the account is verified.
 
 ## What it checks
 

@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 720" width="1200" height="720" font-family="Arial, Helvetica, sans-serif">
   <title>Surya Lekka architecture on AWS</title>
-  <desc>A household's browser loads the website from CloudFront and S3, renders quote pages with pdf.js, uploads page images directly to a private S3 bucket and talks to an HTTP API on API Gateway. Lambda functions create jobs, return results, run the deterministic checks and handle manual entry and samples. An S3 event triggers the Worker Lambda, which sends each page to Amazon Textract in ap-south-1 to read it and stores results in DynamoDB. Amazon Bedrock (Nova) is an optional reader if quota is granted. Failed jobs go to SQS. Everything logs to CloudWatch without document text, and the stack is deployed with AWS SAM.</desc>
+  <desc>A household's browser loads the website from AWS Amplify Hosting (manual deploys; GitHub Pages serves a mirror), renders quote pages with pdf.js, uploads page images directly to a private S3 bucket and talks to an HTTP API on API Gateway. Lambda functions create jobs, return results, run the deterministic checks and handle manual entry and samples. An S3 event triggers the Worker Lambda, which sends each page to Amazon Textract in ap-south-1 to read it and stores results in DynamoDB. Amazon Bedrock (Nova) is an optional reader if quota is granted. Failed jobs go to SQS. Everything logs to CloudWatch without document text, and the stack is deployed with AWS SAM.</desc>
   <defs>
     <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
       <path d="M1 1 L9 5 L1 9" fill="none" stroke="#444" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
@@ -30,10 +30,11 @@
   <text x="117" y="376" text-anchor="middle" class="s">findings and vendor</text>
   <text x="117" y="392" text-anchor="middle" class="s">questions (WhatsApp)</text>
 
-  <!-- CloudFront + S3 site -->
-  <rect x="255" y="125" width="190" height="70" rx="10" fill="#f3edff" stroke="#8c4fff" stroke-width="1.4"/>
-  <text x="350" y="153" text-anchor="middle" class="t">CloudFront + S3</text>
-  <text x="350" y="174" text-anchor="middle" class="s">static website (HTTPS)</text>
+  <!-- Amplify Hosting site (GitHub Pages mirror) -->
+  <rect x="255" y="125" width="190" height="80" rx="10" fill="#f3edff" stroke="#8c4fff" stroke-width="1.4"/>
+  <text x="350" y="153" text-anchor="middle" class="t">AWS Amplify Hosting</text>
+  <text x="350" y="174" text-anchor="middle" class="s">site, manual deploys</text>
+  <text x="350" y="192" text-anchor="middle" class="s">mirror: GitHub Pages</text>
 
   <!-- API Gateway -->
   <rect x="255" y="325" width="190" height="70" rx="10" fill="#f3edff" stroke="#8c4fff" stroke-width="1.4"/>
