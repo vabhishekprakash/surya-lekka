@@ -310,8 +310,8 @@ We used these AI tools while building Surya Lekka:
 | Tool | Role |
 |---|---|
 | Claude Code, running Claude Opus 5.5 | Wrote the code under our direction. We reviewed, ran and tested it. |
-| Claude Opus 5.5, in the Claude app and in Claude in Chrome | Planning, prompts and reviews; carried out the AWS console steps for the AI services opt-out policy; reviewed the Telugu text, with a second independent back-translation check. |
-| ChatGPT, model Luna 5.6 | Outside reviews, adversarial test cases, and finding public example quotes. |
+| Claude Opus 5.5, in the Claude app  | Planning; reviewed the Telugu text, with a second independent back-translation check. |
+| ChatGPT, model Luna 5.6 | Finding public example quotes. |
 
 Inside the product, Amazon Textract reads the pages, and Amazon Translate drafted the Telugu once (never at runtime).
 
