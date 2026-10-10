@@ -2,6 +2,7 @@
 // Every piece of text from a quote is placed with textContent, never as HTML.
 
 import { PagePlan, REASONS } from "./pages.js";
+import { ENGLISH, MissingText, NOT_IN_TELUGU, buildResults, language, privacyText, t } from "./results.js";
 
 const CONFIG = window.SURYA_CONFIG || {};
 const API_BASE = String(CONFIG.API_BASE || "").replace(/\/+$/, "");
@@ -104,58 +105,6 @@ const AMOUNTS = [
   ["net_cost", "Net cost after subsidy"],
 ];
 
-const STATUS_ORDER = ["inconsistent", "needs_confirmation", "missing", "out_of_scope", "consistent"];
-const STATUS_WORDS = {
-  inconsistent: ["Doesn't match", "These don't match"],
-  needs_confirmation: ["Needs checking", "These need checking or an answer from you"],
-  missing: ["Missing", "These are missing from the quote"],
-  out_of_scope: ["Not checked", "These are outside what this tool checks"],
-  consistent: ["Matches", "These match"],
-};
-const CHECK_TITLES = {
-  C1_capacity: "System size",
-  C2_central_subsidy: "Central subsidy",
-  C3_gross_total: "Total price",
-  C3_net_cost: "Net cost after subsidy",
-  C4_missing_details: "Details on the quote",
-};
-const ITEM_TITLES = {
-  panel_wattage: "Panel wattage", panel_count: "Number of panels", module_make_model: "Panel make and model",
-  dcr_declaration: "DCR declaration", inverter_make_model: "Inverter make and model",
-  inverter_rating: "Inverter rating", vendor_registration: "Vendor registration number", gst_basis: "GST",
-  extras_outside_total: "Charges outside the total", net_meter: "Net-meter charges",
-};
-const FIELD_LABELS = {
-  "module_groups.count": "Number of panels", "module_groups.wattage_w": "Panel wattage",
-  "module_groups.wattage": "Panel wattage", "module_groups.make_model": "Panel make and model",
-  "inverters.make_model": "Inverter make and model", "inverters.rating_kw": "Inverter rating",
-  "inverters.rating_kva": "Inverter rating", "inverters.rating": "Inverter rating",
-  stated_capacity_kw: "System size", stated_capacity: "System size", capacity_basis: "What the size measures",
-  dcr_declaration: "DCR declaration", vendor_registration: "Vendor registration number",
-  gst_treatment: "GST basis", extra_charges_complete: "No other charges",
-  "extra_charges.amount": "Extra charge", "extra_charges.label": "Extra charge",
-  "extra_charges.included_in_total": "Extra charge inside the total", net_cost_subsidy_basis: "Subsidy the net cost takes off",
-  multiple_options: "More than one option", consumer_type: "Who the system is for", give_it_up: "Give It Up",
-  state: "State", selected_option: "Option",
-  ...Object.fromEntries(AMOUNTS),
-};
-const VALUE_WORDS = Object.fromEntries([
-  ...FLAGS.flatMap((f) => f.options),
-  ...QUESTIONS[0].options,
-  ["yes", "Inside the total"], ["no", "Outside the total"], ["unclear", "Not clear"],
-]);
-const COMPUTED = {
-  dc_kwp: ["Panel capacity worked out", "kwp"],
-  dc_kwp_range: ["Panel capacity worked out", "kwp"],
-  central_cfa_rule: ["Central subsidy under the rule", "inr"],
-  cfa_range: ["Central subsidy under the rule", "inr"],
-  "gross total": ["Total worked out", "inr"],
-  "net cost": ["Net cost worked out", "inr"],
-};
-const RULES = {
-  "CFA-RES-GENERAL": "central subsidy (CFA) rates for an individual household in a general-category state or UT, from the MNRE PM Surya Ghar guidelines",
-  "CFA-RES-SPECIAL": "central subsidy (CFA) rates for an individual household in a special-category state or UT, from the MNRE PM Surya Ghar guidelines",
-};
 const FAILURES = {
   timed_out: "Reading took too long and was stopped.",
   model_busy: "The reading service was busy.",
@@ -194,6 +143,9 @@ const state = {
   boxIndex: new Map(),
   challenge: null,
   seq: 0,          // the latest request whose answer may still change the screen
+  lang: "en",      // the results screen's language: "en" or "te" (the household's choice)
+  telugu: null,    // the Telugu pack (te.js), loaded when first chosen
+  shownLang: ENGLISH,  // the language the results screen was last built in
   upload: null,    // { job, done: Set of upload slots sent, until: ms } while a check's pages go up
 };
 
@@ -285,43 +237,6 @@ function jobPath(suffix = "") {
   return `/jobs/${encodeURIComponent(state.job.job_id)}${suffix}?t=${encodeURIComponent(state.job.token)}`;
 }
 
-function formatInr(text) {
-  const n = Number(text);
-  if (text === null || text === "" || !Number.isFinite(n)) return String(text);
-  return "₹" + n.toLocaleString("en-IN", { maximumFractionDigits: 2 });
-}
-
-function formatNumber(text) {
-  const n = Number(text);
-  return Number.isFinite(n) ? n.toLocaleString("en-IN", { maximumFractionDigits: 3 }) : String(text);
-}
-
-function formatDate(iso) {
-  const d = new Date(`${iso}T00:00:00Z`);
-  if (Number.isNaN(d.getTime())) return iso;
-  return d.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
-}
-
-function fieldLabel(name) {
-  const key = String(name).replace(/\[[^\]]*\]/g, "");
-  return FIELD_LABELS[key] || key.replace(/_/g, " ");
-}
-
-// A price, subsidy or charge amount, whose value shows as ₹ with Indian grouping.
-function isAmountField(field) {
-  const name = String(field || "");
-  return name.endsWith(".amount") || AMOUNTS.some(([amount]) => amount === name);
-}
-
-function valueText(value, raw) {
-  if (raw !== undefined && raw !== null && raw !== "") return String(raw);
-  if (value === true) return "Yes";
-  if (value === false) return "No";
-  if (value === null || value === undefined) return "not found";
-  if (typeof value === "object") return value.raw ? String(value.raw) : "unclear";
-  return VALUE_WORDS[String(value)] || String(value);
-}
-
 // ---------------------------------------------------------------- views
 
 function show(view) {
@@ -329,6 +244,7 @@ function show(view) {
   state.view = view;
   for (const section of $$("[data-view]")) section.hidden = section.dataset.view !== view;
   for (const label of $$("[data-mode-label]")) label.textContent = MODE_LABELS[state.mode] || "";
+  applyLanguage(view === "results" ? state.shownLang : ENGLISH);
   window.scrollTo(0, 0);
   const heading = $(`[data-view="${view}"] h1, [data-view="${view}"] h2`);
   if (heading && state.started) heading.focus({ preventScroll: true });
@@ -756,13 +672,13 @@ function pageButton(pageNumber, evidenceText, boxes) {
   const found = boxes || boxesFor(pageNumber, evidenceText);
   const image = pageImage(pageNumber);
   if (image) {
-    return el("button", { type: "button", class: "thumb", "aria-label": `Show page ${pageNumber}`,
+    return el("button", { type: "button", class: "thumb", "aria-label": t(viewLang(), "page.show", { n: pageNumber }),
       onclick: () => openPage(pageNumber, evidenceText, found) },
     el("img", { src: image, alt: "" }));
   }
   if (state.pageText && state.pageText[String(pageNumber)]) {
     return el("button", { type: "button", class: "button secondary text-thumb",
-      onclick: () => openPage(pageNumber, evidenceText, found) }, `Page ${pageNumber}`);
+      onclick: () => openPage(pageNumber, evidenceText, found) }, t(viewLang(), "page.text", { n: pageNumber }));
   }
   return null;
 }
@@ -773,13 +689,16 @@ function quoteButton(pageNumber, evidenceText, boxes) {
   if (!pageNumber || (!pageImage(pageNumber) && !(state.pageText && state.pageText[String(pageNumber)]))) {
     return el("q", { text: evidenceText });
   }
-  return el("button", { type: "button", class: "quote-link", "aria-label": `Show where page ${pageNumber} says this`,
+  return el("button", { type: "button", class: "quote-link",
+    "aria-label": t(viewLang(), "page.where", { n: pageNumber }),
     onclick: () => openPage(pageNumber, evidenceText, found) }, el("q", { text: evidenceText }));
 }
 
 function openPage(pageNumber, evidenceText, boxes = []) {
   const dialog = $("#page-viewer");
-  $("#page-viewer-title").textContent = `Page ${pageNumber}`;
+  $("#page-viewer-title").textContent = t(viewLang(), "viewer.title", { n: pageNumber });
+  $("#page-viewer-close").textContent = t(viewLang(), "viewer.close");
+  setLang($("#page-viewer"), viewLang());
   const body = $("#page-viewer-body");
   const image = pageImage(pageNumber);
   if (image) {
@@ -1330,31 +1249,6 @@ function clearInvalid(form) {
 
 // ---------------------------------------------------------------- results
 
-function evidenceItem(e) {
-  if (e.kind === "computed") {
-    const [label, unit] = COMPUTED[e.name] || [e.name, ""];
-    const value = unit === "inr" ? (String(e.value).includes("-") ? `₹${e.value}` : formatInr(e.value))
-      : unit === "kwp" ? `${String(e.value).includes("-") ? e.value : formatNumber(e.value)} kWp` : e.value;
-    return el("li", {}, `${label}: ${value} `, el("span", { class: "note", text: `(${e.formula})` }));
-  }
-  const label = fieldLabel(e.field);
-  if (e.kind === "user_corrected") {
-    const was = e.original_value !== undefined && e.original_value !== null && state.mode !== "manual"
-      ? `; the reading was ${valueText(e.original_value)}` : "";
-    const shown = isAmountField(e.field) && e.value !== null && e.value !== "" && Number.isFinite(Number(e.value))
-      ? formatInr(e.value) : valueText(e.value, e.raw);
-    if (!e.evidence_text || state.mode === "manual") return el("li", { text: `${label}: ${shown} (entered by you${was})` });
-    return el("li", {}, `${label}: ${shown} (entered by you${was}). Read from the quote: `,
-      e.page ? `page ${e.page}, ` : "", quoteButton(e.page, e.evidence_text), " ", pageButton(e.page, e.evidence_text));
-  }
-  if (e.kind === "user_confirmed") {
-    return el("li", { text: `${label}: ${valueText(e.value)} (your answer)` });
-  }
-  if (!e.evidence_text) return el("li", { text: `${label}: ${valueText(e.value, e.raw)}` });
-  return el("li", {}, `${label}: `, e.page ? `page ${e.page}, ` : "", quoteButton(e.page, e.evidence_text), " ",
-    pageButton(e.page, e.evidence_text));
-}
-
 // The reading's own field behind an operand ("module_groups[0].wattage_w" -> the first panel
 // line's wattage for the option being checked), to show what the quote said beside a typed number.
 function readingField(field) {
@@ -1367,24 +1261,6 @@ function readingField(field) {
     return found ? found[key] : null;
   }
   return pick(q, field === "stated_capacity_kw" ? "stated_capacity" : field);
-}
-
-// A check holds its result until the household says the numbers it used are the ones on the
-// quote. "Yes" confirms exactly these numbers for this option; any later change asks again.
-function operandItem(o) {
-  const label = fieldLabel(o.field);
-  const shown = isAmountField(o.field) && o.value !== null && o.value !== "" && Number.isFinite(Number(o.value))
-    ? formatInr(o.value) : valueText(o.value, o.raw);
-  if (o.source === "you typed this") {
-    const read = state.mode === "manual" ? null : readingField(o.field);
-    if (!read || !read.evidence_text) return el("li", { text: `${label}: ${shown} (you typed this)` });
-    return el("li", {}, `${label}: ${shown} (you typed this). Read from the quote: ${valueText(read.value)}, `,
-      read.page ? `page ${read.page}, ` : "", quoteButton(read.page, read.evidence_text, read.boxes), " ",
-      pageButton(read.page, read.evidence_text, read.boxes));
-  }
-  if (!o.source) return el("li", { text: `${label}: ${shown}` });
-  return el("li", {}, `${label}: ${shown}, from `, o.source.page ? `page ${o.source.page}, ` : "",
-    quoteButton(o.source.page, o.source.text), " ", pageButton(o.source.page, o.source.text));
 }
 
 async function confirmOperands(token, button) {
@@ -1407,85 +1283,12 @@ async function confirmOperands(token, button) {
   }
 }
 
-function operandQuestion(f) {
-  if (!f.confirm_token || f.operands_confirmed !== false) return null;
-  const yes = el("button", { type: "button", class: "button", text: "Yes" });
-  yes.addEventListener("click", () => confirmOperands(f.confirm_token, yes));
-  const fix = el("button", { type: "button", class: "button secondary", text: "Fix a number",
-    onclick: () => go(state.editView || "home") });
-  return el("div", { class: "operands" },
-    el("ul", {}, (f.operands || []).map(operandItem)),
-    el("div", { class: "actions" }, yes, fix));
-}
-
-function findingCard(f) {
-  const title = f.item ? (ITEM_TITLES[f.item] || f.item) : (CHECK_TITLES[f.check_id] || f.check_id);
-  const evidence = (f.evidence || []).map(evidenceItem);
-  const rule = f.rule_id && RULES[f.rule_id]
-    ? el("p", { class: "rule",
-      text: `Rule: ${RULES[f.rule_id]}. It applies to applications on the National Portal from ${formatDate(f.rule_date)}.` })
-    : f.rule_id ? el("p", { class: "rule", text: `Rule: ${f.rule_id}${f.rule_date ? `, dated ${formatDate(f.rule_date)}` : ""}.` })
-      : null;
-  return el("article", { class: `finding status-${f.status}`, "data-check": `${f.check_id}|${f.item || ""}` },
-    el("h4", {}, title, " ", el("span", { class: `badge status-${f.status}`, text: STATUS_WORDS[f.status][0] })),
-    el("p", { text: f.message }),
-    operandQuestion(f) || (evidence.length ? el("ul", {}, evidence) : null),
-    rule,
-    (f.notes || []).map((note) => el("p", { class: "note", text: note })));
-}
-
-function renderVendor(result) {
-  const box = $("#vendor-questions");
-  if (!result.vendor_message) {
-    box.replaceChildren(el("p", { text: "These checks didn't raise any questions for the vendor." }));
-    return;
-  }
-  const copyStatus = el("span", { class: "status", role: "status", "aria-live": "polite" });
-  const copy = el("button", { type: "button", class: "button secondary", onclick: async () => {
-    try {
-      await navigator.clipboard.writeText(result.vendor_message);
-      copyStatus.textContent = "Copied.";
-    } catch {
-      const area = $("textarea", box);
-      area.hidden = false;
-      area.select();
-      copyStatus.textContent = "Select the message and copy it.";
-    }
-  } }, "Copy");
-  const whatsapp = el("a", { class: "button", target: "_blank", rel: "noopener noreferrer",
-    href: `https://wa.me/?text=${encodeURIComponent(result.vendor_message)}` }, "Send on WhatsApp");
-  box.replaceChildren(
-    el("ol", {}, (result.questions || []).map((q) => el("li", { text: q.text }))),
-    el("p", { class: "hint", text: "The message below asks these questions politely. Send it to your vendor." }),
-    el("div", { class: "message", text: result.vendor_message }),
-    el("textarea", { class: "message", rows: 6, readonly: true, hidden: true, "aria-label": "Message for your vendor" },
-      result.vendor_message),
-    el("div", { class: "actions" }, copy, whatsapp, copyStatus));
-}
-
 function openResults(result, { keepPlace = false, focusCheck = null } = {}) {
   state.result = result;
   if (result.challenge) state.challenge = result.challenge;  // typed-in numbers: tokens are signed for it
   state.entryChecks = result.entry_checks || [];
   if (state.mode === "manual") showManualEntryChecks();
-  const findings = result.findings || [];
-  const counts = Object.fromEntries(STATUS_ORDER.map((s) => [s, findings.filter((f) => f.status === s).length]));
-  const phrases = {
-    inconsistent: ["doesn't match", "don't match"], needs_confirmation: ["needs checking", "need checking"],
-    missing: ["missing", "missing"], out_of_scope: ["not checked", "not checked"], consistent: ["matches", "match"],
-  };
-  const parts = STATUS_ORDER.filter((s) => counts[s])
-    .map((s) => `${counts[s]} ${phrases[s][counts[s] === 1 ? 0 : 1]}`);
-  const toCheck = (result.check_this || []).filter((c) => !c.option_id || c.option_id === state.option).length;
-  $("#results-summary").textContent = (parts.length ? `Results: ${parts.join(", ")}.` : "")
-    + (toCheck ? ` ${toCheck === 1 ? "One value still needs" : `${toCheck} values still need`} checking against the quote.`
-      : "")
-    + (state.entryChecks.length ? " Some numbers you entered look unusual. Please check them." : "");
-  $("#results-groups").replaceChildren(...STATUS_ORDER.filter((s) => counts[s]).map((status) =>
-    el("section", { class: "finding-group" },
-      el("h3", { text: STATUS_WORDS[status][1] }),
-      findings.filter((f) => f.status === status).map(findingCard))));
-  renderVendor(result);
+  renderResults();
   if (keepPlace && state.view === "results") {
     // After "Yes" the screen stays where it was; focus moves to the same check's updated card.
     const card = focusCheck && $(`article[data-check="${CSS.escape(focusCheck)}"] h4`);
@@ -1498,10 +1301,106 @@ function openResults(result, { keepPlace = false, focusCheck = null } = {}) {
   go("results");
 }
 
+// ---------------------------------------------------------------- language
+
+const LANG_KEY = "surya-lekka-lang";
+
+function viewLang() {
+  return state.view === "results" ? state.shownLang : ENGLISH;
+}
+
+function resultsContext(lang) {
+  return {
+    el, lang, mode: state.mode, modeKey: MODE_LABELS[state.mode] ? state.mode : "", option: state.option,
+    entryChecks: state.entryChecks.length, readingField,
+    quoteButton, pageButton, onConfirm: confirmOperands, onFix: () => go(state.editView || "home"),
+    copyText: (message) => navigator.clipboard.writeText(message),
+  };
+}
+
+// Builds the whole results screen in the chosen language, or in English with a notice when any
+// piece of this result has no Telugu words: never a mix.
+function renderResults() {
+  if (!state.result) return;
+  const wanted = state.lang === "te" && state.telugu ? state.telugu : ENGLISH;
+  let lang = wanted;
+  let built;
+  state.shownLang = lang;  // the page buttons built below speak this language
+  try {
+    built = buildResults(state.result, resultsContext(lang));
+  } catch (error) {
+    if (!(error instanceof MissingText) || lang === ENGLISH) throw error;
+    lang = ENGLISH;
+    state.shownLang = lang;
+    built = buildResults(state.result, resultsContext(lang));
+  }
+  $("#results-summary").textContent = built.summary;
+  $("#results-groups").replaceChildren(...built.groups);
+  $("#vendor-questions").replaceChildren(...built.vendor);
+  $("#results-mode").textContent = built.mode;
+  const notice = $("#lang-notice");
+  notice.textContent = wanted !== lang ? NOT_IN_TELUGU : "";
+  notice.hidden = wanted === lang;
+  if (state.view === "results") applyLanguage(lang);
+}
+
+function setLang(node, lang) {
+  if (lang.code === "en") node.removeAttribute("lang");
+  else node.setAttribute("lang", lang.code);
+}
+
+// The fixed words on the results screen and in the footer, in lang.
+function applyLanguage(lang) {
+  for (const node of $$("[data-i18n]")) node.textContent = t(lang, node.dataset.i18n);
+  setLang($("#view-results"), lang);
+  setLang($("footer.foot"), lang);
+  $("#privacy-line").textContent = lang.code === "en" ? privacyLine(...privacySettings())
+    : privacyText(lang, ...privacySettings());
+  for (const button of $$("[data-lang]")) button.setAttribute("aria-pressed", String(button.dataset.lang === state.lang));
+}
+
+async function loadTelugu() {
+  if (!state.telugu) state.telugu = language((await import("./te.js")).default);
+  return state.telugu;
+}
+
+async function chooseLanguage(code) {
+  state.lang = code;
+  try {
+    localStorage.setItem(LANG_KEY, code);
+  } catch {
+    // the choice just isn't remembered
+  }
+  if (code === "te") {
+    try {
+      await loadTelugu();
+    } catch {
+      state.lang = "en";
+      const notice = $("#lang-notice");
+      notice.textContent = "తెలుగు లోడ్ కాలేదు. Telugu couldn't be loaded. Please try again.";
+      notice.hidden = false;
+    }
+  }
+  renderResults();
+  if (state.view === "results") applyLanguage(state.shownLang);
+}
+
+function rememberedLanguage() {
+  try {
+    return localStorage.getItem(LANG_KEY) === "te" ? "te" : "en";
+  } catch {
+    return "en";
+  }
+}
+
 // ---------------------------------------------------------------- start
 
 // With Textract, the opt-out sentence shows only when deploy.ps1 confirmed the
 // account's opt-out policy covers Textract.
+function privacySettings() {
+  return [String(CONFIG.REGION || ""), CONFIG.CROSS_REGION === true, String(CONFIG.ENGINE || ""), CONFIG.AI_OPT_OUT === true];
+}
+
 function privacyLine(region, crossRegion, engine, optOut) {
   if (!region) return PRIVACY.local;
   const where = REGION_NAMES[region] || `AWS's ${region} region`;
@@ -1510,7 +1409,7 @@ function privacyLine(region, crossRegion, engine, optOut) {
 }
 
 function init() {
-  const privacy = privacyLine(String(CONFIG.REGION || ""), CONFIG.CROSS_REGION === true, String(CONFIG.ENGINE || ""), CONFIG.AI_OPT_OUT === true);
+  const privacy = privacyLine(...privacySettings());
   $("#privacy-line").textContent = privacy;
   $("#privacy-upload").textContent = privacy;  // the same notice, beside the upload button
   document.addEventListener("click", (event) => {
@@ -1532,6 +1431,9 @@ function init() {
   $("#add-charge").addEventListener("click", () => addCharge());
   $("#results-edit").addEventListener("click", () => go(state.editView || "home"));
   $("#page-viewer-close").addEventListener("click", closePage);
+  for (const button of $$("[data-lang]")) button.addEventListener("click", () => chooseLanguage(button.dataset.lang));
+  state.lang = rememberedLanguage();
+  if (state.lang === "te") loadTelugu().then(renderResults, () => { state.lang = "en"; });
   renderQuestions($("[data-questions=review]"), "review");
   renderQuestions($("[data-questions=manual]"), "manual");
   addCharge();

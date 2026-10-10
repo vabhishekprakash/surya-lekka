@@ -7,8 +7,8 @@ This sends them, as one HTML document per language, to Amazon Translate in ap-so
 amounts, numbers, units, "GST", "DCR" and other fixed terms are marked translate="no" so they come
 back exactly as written. It writes:
 
-  web/i18n/<lang>.json      the draft for languages listed in --ship (Telugu), never loaded by the
-                            app until a reviewer's corrections are applied and the switch is turned on
+  web/i18n/<lang>.json      the draft for languages listed in --ship (Telugu); the app loads only the
+                            reviewed pack that scripts/build_telugu.py builds from it (web/te.js)
   <csv-dir>/<lang>_review.csv   key | English | <language> draft | correction | problems, outside the repo
 
 Translate is never called at runtime. Each string is checked: every placeholder, number and ₹

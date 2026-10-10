@@ -75,12 +75,14 @@ def test_strings_that_fill_in_english_words_are_flagged_for_the_reviewer():
     assert T["notes"]("Total is {stated}.") == []
 
 
-def test_the_telugu_draft_covers_every_key_and_the_app_does_not_load_it_yet():
-    draft = json.loads((ROOT / "web" / "i18n" / "te.json").read_text(encoding="utf-8"))
-    assert set(draft["strings"]) == set(T["strings"]()) and all(draft["strings"].values())
-    assert "not yet reviewed" in draft["_status"]
-    assert "i18n/" not in (ROOT / "web" / "app.js").read_text(encoding="utf-8")  # the switch stays hidden
-    assert not (ROOT / "web" / "i18n" / "hi.json").exists()
+def test_the_reviewed_telugu_covers_every_word_and_ships_only_as_te_js():
+    pack = json.loads((ROOT / "web" / "i18n" / "te.json").read_text(encoding="utf-8"))
+    assert set(T["strings"]()) <= set(pack["strings"]) and all(pack["strings"].values())
+    assert pack["_status"].startswith("reviewed")
+    build = runpy.run_path(str(ROOT / "scripts" / "build_telugu.py"))
+    assert (ROOT / "web" / "te.js").read_text(encoding="utf-8") == build["te_js"]()  # rebuilt, not hand-edited
+    assert set(pack["ui"]) == set(build["ui_english"]())
+    assert not (ROOT / "web" / "i18n" / "hi.json").exists() and not (ROOT / "web" / "hi.js").exists()
 
 
 def test_every_filled_in_word_is_sent_but_punctuation_is_not():

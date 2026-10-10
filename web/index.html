@@ -195,24 +195,30 @@
     </section>
 
     <section id="view-results" data-view="results" hidden>
-      <p class="mode" data-mode-label></p>
-      <h2 tabindex="-1">What the checks found</h2>
-      <p class="hint">A finding only appears after you confirm the numbers it uses.</p>
+      <div class="lang-switch" role="group" aria-label="Language / భాష">
+        <button type="button" class="button link" data-lang="te" lang="te" aria-pressed="false">తెలుగు</button>
+        <span aria-hidden="true">/</span>
+        <button type="button" class="button link" data-lang="en" lang="en" aria-pressed="true">English</button>
+      </div>
+      <p id="lang-notice" class="note" hidden></p>
+      <p class="mode" id="results-mode"></p>
+      <h2 tabindex="-1" data-i18n="results.heading">What the checks found</h2>
+      <p class="hint" data-i18n="results.hint">A finding only appears after you confirm the numbers it uses.</p>
       <p id="results-summary"></p>
       <div id="results-groups"></div>
       <section class="vendor" aria-labelledby="vendor-title">
-        <h3 id="vendor-title">Questions for your vendor</h3>
+        <h3 id="vendor-title" data-i18n="vendor.heading">Questions for your vendor</h3>
         <div id="vendor-questions"></div>
       </section>
       <div class="actions">
-        <button type="button" id="results-edit" class="button secondary">Change answers or values</button>
-        <button type="button" class="button link" data-go="home">Check another quote</button>
+        <button type="button" id="results-edit" class="button secondary" data-i18n="results.edit">Change answers or values</button>
+        <button type="button" class="button link" data-go="home" data-i18n="results.another">Check another quote</button>
       </div>
     </section>
   </main>
 
   <footer class="foot">
-    <p>This is not financial or legal advice. Eligibility (DCR panels, registration, inspection) is not verified.</p>
+    <p data-i18n="foot.advice">This is not financial or legal advice. Eligibility (DCR panels, registration, inspection) is not verified.</p>
     <p id="privacy-line"></p>
   </footer>
 

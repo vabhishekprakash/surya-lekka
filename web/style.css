@@ -241,3 +241,7 @@ dialog::backdrop { background: rgba(0, 0, 0, 0.55); }
 .candidates { margin: 6px 0 0; padding-left: 18px; }
 .read-from { margin: 4px 0 0; overflow-wrap: anywhere; }
 .operands ul { padding-left: 18px; overflow-wrap: anywhere; }
+
+/* Language switch on the results screen */
+.lang-switch { display: flex; gap: 0.25rem; align-items: center; justify-content: flex-end; }
+.lang-switch [aria-pressed="true"] { font-weight: 700; text-decoration: none; }

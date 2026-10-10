@@ -1,6 +1,5 @@
-{
- "_status": "reviewed: Amazon Translate draft corrected by a reviewer, checked by an independent back-translation",
- "_source": "scripts/build_telugu.py --apply (te_review_reviewed.csv and te_results_screen.csv)",
+// Built by scripts/build_telugu.py from web/i18n/te.json; edit that file, then rebuild.
+export default {
  "language": "te",
  "strings": {
   "C1.basis_unclear": "{panels}. కొటేషన్‌లో {stated_kw} kW సిస్టమ్ సైజు అని ఉంది, కానీ అది ప్యానెళ్ల (DC) సామర్థ్యమో కాదో చెప్పలేదు. అందుకే ఈ రెండింటినీ పోల్చలేదు.",
@@ -67,10 +66,13 @@
   "amounts.unusable": "దయచేసి {fields} చెక్ చేయండి: దీన్ని అమౌంట్‌గా లెక్కలోకి తీసుకోలేం.",
   "category.general": "సాధారణ",
   "category.special": "ప్రత్యేక",
+  "charge.item": "{label}: {amount}, {state}{where}",
   "charge.no_amount": "అమౌంట్ ఇవ్వలేదు",
   "charge.outside": "మొత్తం ధరలో కలపలేదు",
   "charge.unclear": "మొత్తం ధరలో కలిపారో లేదో స్పష్టంగా లేదు",
+  "charge.where": " ({total_label})",
   "confirm.operands": "మీ కొటేషన్‌లో ఉన్న సంఖ్యలు ఇవేనా?",
+  "date": "{day} {month} {year}",
   "entry.check_number": "{fields} కోసం మీరు ఎంటర్ చేసిన సంఖ్యను దయచేసి చెక్ చేయండి.",
   "field.amount": "అమౌంట్",
   "field.base_price": "బేస్ ధర",
@@ -85,6 +87,7 @@
   "field.line": "{words} ({n}వ లైన్)",
   "field.make_model": "బ్రాండ్, మోడల్",
   "field.net_cost": "సబ్సిడీ తర్వాత ఖర్చు",
+  "field.quoted": "\"{label}\"",
   "field.rating": "రేటింగ్",
   "field.rating_kva": "ఇన్వర్టర్ రేటింగ్",
   "field.rating_kw": "ఇన్వర్టర్ రేటింగ్",
@@ -112,7 +115,10 @@
   "hint.check_amounts": "దయచేసి ఈ మొత్తాల గురించి వెండర్‌ను అడిగి చెక్ చేసుకోండి.",
   "hint.missing_charge": "జాబితాలో ఏదైనా ఛార్జీ మిస్ అయిందా?",
   "join.and": " మరియు ",
+  "join.comma": ", ",
+  "join.none": "",
   "join.or": " లేదా ",
+  "join.semicolon": "; ",
   "month.apr": "ఏప్రిల్",
   "month.aug": "ఆగస్టు",
   "month.dec": "డిసెంబర్",
@@ -194,9 +200,14 @@
   "state.Uttar Pradesh": "ఉత్తరప్రదేశ్",
   "state.Uttarakhand": "ఉత్తరాఖండ్",
   "state.West Bengal": "పశ్చిమ బెంగాల్",
+  "sum.equals": "{terms} = {total}",
   "sum.minus": " మైనస్ {words} {amount}",
+  "sum.plus": " + {words} {amount}",
+  "sum.term": "{words} {amount}",
+  "vendor.blank": "",
   "vendor.intro": "నమస్కారం, కొటేషన్ పంపినందుకు ధన్యవాదాలు. మేము నిర్ణయం తీసుకునే ముందు, కొన్ని ప్రశ్నలకు సమాధానాలు చెప్పి సహాయం చేయగలరా?",
   "vendor.outro": "ధన్యవాదాలు.",
+  "vendor.question": "{number}. {text}",
   "word.less": "తక్కువ",
   "word.more": "ఎక్కువ",
   "word.net_cost": "సబ్సిడీ తర్వాత ఖర్చు",
@@ -362,4 +373,4 @@
   "viewer.close": "మూసివేయండి",
   "viewer.title": "పేజీ {n}"
  }
-}
+};

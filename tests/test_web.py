@@ -8,6 +8,7 @@ ROOT = Path(__file__).resolve().parent.parent
 WEB = ROOT / "web"
 INDEX = (WEB / "index.html").read_text(encoding="utf-8")
 APP = (WEB / "app.js").read_text(encoding="utf-8")
+RES = (WEB / "results.js").read_text(encoding="utf-8")  # the results screen, in English or Telugu
 CONFIG = (WEB / "config.js").read_text(encoding="utf-8")
 
 
@@ -61,8 +62,8 @@ def test_textract_privacy_lines_depend_on_the_confirmed_opt_out():
         "Your pages are read by Amazon Textract in AWS's Mumbai region (India) and deleted from our storage after "
         "reading. AWS may keep and use them to improve its AI services and may store some of that content in "
         "another AWS region. If reading fails, they're removed automatically, usually within two days.")
-    assert ('privacyLine(String(CONFIG.REGION || ""), CONFIG.CROSS_REGION === true, String(CONFIG.ENGINE || ""), '
-            'CONFIG.AI_OPT_OUT === true)') in APP
+    assert ('return [String(CONFIG.REGION || ""), CONFIG.CROSS_REGION === true, String(CONFIG.ENGINE || ""), '
+            'CONFIG.AI_OPT_OUT === true];') in APP and "privacyLine(...privacySettings())" in APP
     body = APP[APP.index("function privacyLine("):APP.index("function init()")]
     assert 'engine === "textract"' in body and "optOut ? PRIVACY.textractOptedOut : PRIVACY.textract" in body
 
@@ -85,7 +86,9 @@ def test_every_result_has_a_mode_label():
     from api.common import READING_ENGINES
 
     assert all(re.search(rf"\b{engine}: \"", labels) for engine in READING_ENGINES)
-    assert INDEX.count("data-mode-label") == 2  # review and results
+    assert INDEX.count("data-mode-label") == 1 and 'id="results-mode"' in INDEX  # review; results in its language
+    for engine in ("saved", "nova", "textract", "manual"):
+        assert re.search(rf'"mode.{engine}": "', RES)
 
 
 def test_api_base_comes_from_the_config_file():
@@ -150,7 +153,7 @@ def test_review_lets_the_household_add_a_missed_charge():
     collect = APP[APP.index("function collectReview()"):APP.index("async function submitReview(")]
     assert "extra_charges[U${++added}]" in collect  # the ids the backend accepts for added charges
     assert "answers.extra_charges_complete = answerValue(complete.value)" in collect
-    assert "(entered by you${was})" in APP
+    assert '"(entered by you{was})"' in RES.replace("{label}: {value} ", "")
 
 
 def test_every_charge_question_sits_beside_the_charges_and_is_never_prefilled():
@@ -163,8 +166,8 @@ def test_every_charge_question_sits_beside_the_charges_and_is_never_prefilled():
 
 
 def test_amounts_on_the_page_use_the_rupee_sign_without_a_space():
-    assert 'return "₹" + n.toLocaleString("en-IN", { maximumFractionDigits: 2 });' in APP
-    assert "Rs " not in APP.replace("Rs ${", "") and 'placeholder="Rs"' not in INDEX
+    assert 'return "₹" + n.toLocaleString("en-IN", { maximumFractionDigits: 2 });' in RES
+    assert "Rs " not in APP.replace("Rs ${", "") and "Rs " not in RES and 'placeholder="Rs"' not in INDEX
 
 
 def test_the_suppliers_gst_state_is_shown_as_information_only():
@@ -175,9 +178,10 @@ def test_the_suppliers_gst_state_is_shown_as_information_only():
 
 
 def test_amounts_the_household_enters_show_in_rupees():
-    branch = APP[APP.index('if (e.kind === "user_corrected") {'):APP.index('if (e.kind === "user_confirmed") {')]
-    assert "isAmountField(e.field)" in branch and "formatInr(e.value)" in branch
-    assert "function isAmountField(" in APP
+    branch = RES[RES.index('if (e.kind === "user_corrected") {'):RES.index('if (e.kind === "user_confirmed") {')]
+    assert "shownValue(e.field, e.value, e.raw, ctx)" in branch
+    shown = RES[RES.index("function shownValue("):RES.index("function evidenceItem(")]
+    assert "isAmountField(field)" in shown and "formatInr(value)" in shown and "export function isAmountField(" in RES
 
 
 def test_values_to_check_each_have_their_own_tick_and_no_bulk_accept():
@@ -207,9 +211,10 @@ def test_typed_numbers_the_guards_ask_about_get_their_own_tick():
 
 
 def test_a_held_finding_asks_about_its_numbers_with_yes_or_fix():
-    card = APP[APP.index("function operandItem(o)"):APP.index("function renderVendor(")]
-    assert 'text: "Yes"' in card and 'text: "Fix a number"' in card and "(you typed this)" in card
-    assert "f.operands_confirmed !== false" in card and "state.confirmedOperands.add(token)" in card
+    card = RES[RES.index("function operandItem(o, ctx)"):RES.index("function ruleLine(")]
+    assert 't(lang, "op.yes")' in card and 't(lang, "op.fix")' in card and '"op.typed"' in card
+    assert '"op.yes": "Yes"' in RES and '"op.fix": "Fix a number"' in RES and "(you typed this)" in RES
+    assert "f.operands_confirmed !== false" in card and "state.confirmedOperands.add(token)" in APP
     # a fresh form submission starts with nothing confirmed; "Yes" sends what was confirmed since,
     # and the server decides which still apply
     assert APP.count("state.confirmedOperands = new Set();") >= 3 and APP.count("confirmed_operands: []") == 2
@@ -226,12 +231,12 @@ def test_values_are_highlighted_on_their_page():
     assert 'class: "hl"' in viewer and "left:${left * 100}%" in viewer and "scrollIntoView" in viewer
     assert "state.boxIndex = indexBoxes(view.extraction)" in APP and "state.pageImages = view.page_images || []" in APP
     # tapping a quoted value opens its page at its box, in the review, the results and the confirm step
-    assert APP.count("quoteButton(") >= 6
+    assert APP.count("quoteButton(") >= 3 and RES.count("ctx.quoteButton(") >= 3
     # conflicting evidence shows each candidate with its own box
     assert "c.boxes" in APP[APP.index("function evidenceLine("):APP.index("function readFromQuote(")]
     # after a correction, what the quote said stays visible with its source
     assert "Read from the quote: ${input.dataset.original}" in APP
-    assert "Read from the quote: ${valueText(read.value)}" in APP
+    assert '"op.typed_read": "{label}: {value} (you typed this). Read from the quote: {read}, "' in RES
     css = (ROOT / "web" / "style.css").read_text(encoding="utf-8")
     assert ".page-frame .hl { position: absolute;" in css and ".page-frame { position: relative;" in css
 
@@ -290,3 +295,25 @@ def test_the_typed_numbers_screen_says_exactly_what_is_kept():
     manual = INDEX[INDEX.index('id="view-manual"'):INDEX.index('id="manual-form"')]
     assert "only a random id, a counter and a hash of the values (no numbers)" in manual
     assert "15 minutes" in manual
+
+
+def test_the_results_screen_has_a_telugu_english_switch_remembered_safely():
+    results = INDEX[INDEX.index('id="view-results"'):INDEX.index("</main>")]
+    assert 'data-lang="te" lang="te"' in results and ">తెలుగు</button>" in results
+    assert 'data-lang="en" lang="en" aria-pressed="true">English</button>' in results  # English by default
+    remember = APP[APP.index("async function chooseLanguage("):APP.index("function rememberedLanguage()")]
+    assert "try {\n    localStorage.setItem(LANG_KEY, code);\n  } catch {" in remember
+    read = APP[APP.index("function rememberedLanguage()"):]
+    assert "try {\n    return localStorage.getItem(LANG_KEY)" in read and "} catch {\n    return \"en\";" in read
+    # Telugu text carries lang="te"; a result with any piece lacking Telugu is shown wholly in English
+    assert 'node.setAttribute("lang", lang.code)' in APP and "NOT_IN_TELUGU" in APP
+    render = APP[APP.index("function renderResults()"):APP.index("function setLang(")]
+    assert "error instanceof MissingText" in render and "lang = ENGLISH;" in render
+    # the upload and review screens stay English
+    assert 'applyLanguage(view === "results" ? state.shownLang : ENGLISH)' in APP
+    assert 'await import("./te.js")' in APP and "translate" not in APP.lower().replace("translated", "")
+
+
+def test_only_telugu_ships_and_hindi_is_not_offered():
+    names = {p.name for p in WEB.iterdir() if p.is_file()}
+    assert "te.js" in names and not any(n.startswith("hi") for n in names)
