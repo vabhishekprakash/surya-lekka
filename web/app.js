@@ -288,6 +288,8 @@ function showApiError(error) {
     showProblem("The checker couldn't be reached", error.message);
   } else if (error.code === "timeout") {
     showProblem("The checker didn't answer in time", error.message);
+  } else if (error.code === "numbers_changed" || error.code === "review_changed") {
+    showProblem("The numbers changed", error.message);  // another request moved on; confirm again
   } else if (error.status === 404 && error.code === "not_found") {
     showProblem("This check is no longer available", "Please start again.");
   } else {

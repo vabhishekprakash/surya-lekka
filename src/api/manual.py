@@ -147,6 +147,31 @@ def challenge_for(fields, answers, offered=None, clock=None):
     return f"{session_id}.0.{_keyed(f'{session_id}|0|{values}')}"
 
 
+def still_current(challenge, fields, answers, clock=None):
+    """True if the session is still at the counter and values this challenge was issued for: a
+    conditional write, so a request that overlapped and moved the session on wins."""
+    session_id, counter = challenge.split(".")[:2]
+    values = _keyed("values|" + _digest(fields, answers))
+    return conditional_update(
+        SESSION_PREFIX + session_id, "SET #e = #e", "#c = :counter AND #v = :values AND #e > :now",
+        {"#c": "counter", "#v": "values_hash", "#e": "expires_at"},
+        {":counter": int(counter), ":values": values, ":now": int((clock or time.time)())})
+
+
+def numbers_changed():
+    return ApiError(409, "numbers_changed", "These numbers were changed in another request. Please confirm them again.")
+
+
+def _checks(charges, corrections, confirmations, tokens=None, binding=None):
+    try:
+        return run_checks(blank_quote(charges), {"corrections": corrections, "confirmations": confirmations,
+                                                 **(tokens or {})}, binding=binding)
+    except KeyError as e:
+        raise ApiError(400, "unknown_field", str(e).strip("'\"")) from None
+    except (TypeError, ValueError, AttributeError):
+        raise ApiError(400, "bad_inputs", "An answer has the wrong type.") from None
+
+
 @guarded("manual")
 def handler(event, context):
     """POST /checks {"fields": {...}, "answers": {...}, "challenge": "...", "verified": [token],
@@ -172,17 +197,15 @@ def handler(event, context):
             if not isinstance(tokens[key], list) or not all(isinstance(t, str) for t in tokens[key]):
                 raise ApiError(400, "bad_inputs", f"{key} must be a list of tokens.")
         charges, corrections = typed_corrections(fields)
-        take_slots(event, "typed")  # typed-in checks have their own daily quotas
         # The user typed one set of figures, so there is one option.
         confirmations = {"multiple_options": False, **answers}
-        try:
-            challenge = challenge_for(fields, answers, body.get("challenge"))
-            result = run_checks(blank_quote(charges), {"corrections": corrections, "confirmations": confirmations,
-                                                       **tokens}, binding={"key": confirm_key(), "challenge": challenge})
-        except KeyError as e:
-            raise ApiError(400, "unknown_field", str(e).strip("'\"")) from None
-        except (TypeError, ValueError, AttributeError):
-            raise ApiError(400, "bad_inputs", "An answer has the wrong type.") from None
+        # The whole request is checked first: a 400 spends no quota and leaves the session alone.
+        _checks(charges, corrections, confirmations)
+        take_slots(event, "typed")  # typed-in checks have their own daily quotas
+        challenge = challenge_for(fields, answers, body.get("challenge"))
+        result = _checks(charges, corrections, confirmations, tokens, {"key": confirm_key(), "challenge": challenge})
+        if not still_current(challenge, fields, answers):
+            raise numbers_changed()
     except ApiError as e:
         log("manual_refused", reason=e.code, http_status=e.status)
         return error_response(e)
