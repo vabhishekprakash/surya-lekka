@@ -210,8 +210,13 @@ def test_a_held_finding_asks_about_its_numbers_with_yes_or_fix():
     card = APP[APP.index("function operandItem(o)"):APP.index("function renderVendor(")]
     assert 'text: "Yes"' in card and 'text: "Fix a number"' in card and "(you typed this)" in card
     assert "f.operands_confirmed !== false" in card and "state.confirmedOperands.add(token)" in card
-    # every check request carries the operand sets confirmed so far; the server decides which still apply
-    assert APP.count("confirmed_operands: [...state.confirmedOperands]") == 3
+    # a fresh form submission starts with nothing confirmed; "Yes" sends what was confirmed since,
+    # and the server decides which still apply
+    assert APP.count("state.confirmedOperands = new Set();") >= 3 and APP.count("confirmed_operands: []") == 2
+    assert APP.count("confirmed_operands: [...state.confirmedOperands]") == 1
+    # typed-in numbers: the challenge from the last answer goes back with the next request
+    assert "if (result.challenge) state.challenge = result.challenge;" in APP
+    assert "body.challenge = state.challenge" in APP and "challenge: state.challenge" in APP
     assert "state.confirmedOperands = new Set();" in APP[APP.index("function openReview("):]
 
 

@@ -189,6 +189,7 @@ const state = {
   lastRequest: null,
   pageImages: [],
   boxIndex: new Map(),
+  challenge: null,
 };
 
 // ---------------------------------------------------------------- helpers
@@ -1074,7 +1075,10 @@ async function submitReview(event) {
   status.classList.remove("error");
   status.textContent = "Running the checks";
   try {
-    const body = { ...collectReview(), confirmed_operands: [...state.confirmedOperands] };
+    // A fresh submission of the review starts over: any change of value, answer or option asks
+    // again, and the server refuses tokens from an earlier revision anyway.
+    state.confirmedOperands = new Set();
+    const body = { ...collectReview(), confirmed_operands: [] };
     state.lastRequest = { path: jobPath("/checks"), body };
     const result = await api("POST", state.lastRequest.path, body);
     status.textContent = "";
@@ -1182,7 +1186,9 @@ async function submitManual(event) {
   status.classList.remove("error");
   status.textContent = "Running the checks";
   try {
-    const body = { ...collectManual(), confirmed_operands: [...state.confirmedOperands] };
+    // A fresh submission of the form starts over: tokens from before an edit never carry over.
+    state.confirmedOperands = new Set();
+    const body = { ...collectManual(), challenge: state.challenge, confirmed_operands: [] };
     state.lastRequest = { path: "/checks", body };
     const result = await api("POST", "/checks", body);
     status.textContent = "";
@@ -1270,6 +1276,7 @@ async function confirmOperands(token, button) {
   button.disabled = true;
   state.confirmedOperands.add(token);
   const body = { ...state.lastRequest.body, confirmed_operands: [...state.confirmedOperands] };
+  if (state.lastRequest.path === "/checks") body.challenge = state.challenge;
   state.lastRequest = { ...state.lastRequest, body };
   try {
     openResults(await api("POST", state.lastRequest.path, body));
@@ -1338,6 +1345,7 @@ function renderVendor(result) {
 
 function openResults(result) {
   state.result = result;
+  if (result.challenge) state.challenge = result.challenge;  // typed-in numbers: tokens are signed for it
   state.entryChecks = result.entry_checks || [];
   if (state.mode === "manual") showManualEntryChecks();
   const findings = result.findings || [];

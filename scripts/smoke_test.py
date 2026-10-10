@@ -168,6 +168,7 @@ def step_manual(api, args):
     held = [f for f in result.get("findings") or [] if f["status"] in ("consistent", "inconsistent")]
     expect(not held, "a check gave a result before its numbers were confirmed")
     status, result = api.call("POST", "/checks", {"fields": fields, "answers": answers,
+                                                  "challenge": result.get("challenge"),
                                                   "confirmed_operands": tokens(result["findings"])})
     expect(status == 200, f"POST /checks with confirmed numbers returned {refused(status, result)}")
     got = {k: v for k, v in statuses(result.get("findings") or []).items() if k in COMPARED}
