@@ -165,6 +165,11 @@ def test_credits_cover_every_pinned_dependency_and_pdfjs():
     version = re.search(r"pdf\.js/([\d.]+)/", (ROOT / "web" / "index.html").read_text(encoding="utf-8")).group(1)
     assert f"[pdf.js](https://github.com/mozilla/pdf.js) {version}, from cdnjs" in credits and "Apache-2.0" in credits
     assert "AGPL-3.0" in credits  # PyMuPDF, used only by tools outside the deployed app
+    jsdom = json.loads((ROOT / "tests" / "package.json").read_text(encoding="utf-8"))["devDependencies"]["jsdom"]
+    assert f"[jsdom](https://github.com/jsdom/jsdom) {jsdom}" in credits
+    for action in re.findall(r"uses: actions/([\w-]+)@", "".join(
+            f.read_text(encoding="utf-8") for f in (ROOT / ".github" / "workflows").glob("*.yml"))):
+        assert f"[{action}](https://github.com/actions/{action})" in credits, action
 
 
 def test_the_test_sample_s4_is_described_as_deliberately_wrong():

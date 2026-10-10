@@ -20,6 +20,12 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libgl1
       - name: Install Python packages
         run: pip install -r requirements-dev.txt -r requirements-redact.txt
+      # jsdom (tests/package.json) runs web/app.js in a simulated browser; it needs Node 22.22+ or 24.15+.
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "24"
+      - name: Install the DOM test dependency
+        run: npm ci --prefix tests --no-audit --no-fund
       - name: Tests (the known flaky redaction server test is run once more if it alone fails)
         run: python scripts/ci_tests.py -q
       - name: Template lint, SAM template and translated CloudFormation

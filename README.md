@@ -335,7 +335,8 @@ Surya Lekka's own code is under the MIT License (`LICENSE`). It uses:
 | [ONNX Runtime](https://onnxruntime.ai) 1.30.0 | redaction tools | MIT |
 | [OpenCV](https://github.com/opencv/opencv-python) (opencv-python) 5.0.0.93 | redaction tools | Apache-2.0 |
 | [NumPy](https://numpy.org) 2.5.3 | redaction tools | BSD-3-Clause, with parts under 0BSD, MIT, Zlib and CC0-1.0 |
-| GitHub Actions: [checkout](https://github.com/actions/checkout), [setup-python](https://github.com/actions/setup-python), [configure-pages](https://github.com/actions/configure-pages), [upload-pages-artifact](https://github.com/actions/upload-pages-artifact), [deploy-pages](https://github.com/actions/deploy-pages) | CI and the GitHub Pages mirror | MIT |
+| [jsdom](https://github.com/jsdom/jsdom) 30.1.2 (`tests/package.json`) | tests: runs the web app in a simulated browser | MIT |
+| GitHub Actions: [checkout](https://github.com/actions/checkout), [setup-python](https://github.com/actions/setup-python), [setup-node](https://github.com/actions/setup-node), [configure-pages](https://github.com/actions/configure-pages), [upload-pages-artifact](https://github.com/actions/upload-pages-artifact), [deploy-pages](https://github.com/actions/deploy-pages) | CI and the GitHub Pages mirror | MIT |
 
 The architecture diagram (`docs/surya-lekka-architecture.svg`) and the made-up sample quotes are our own. Each licence is taken from the package's own metadata (for pdf.js, its cdnjs entry; for the GitHub Actions, each repository's licence file); the versions are the ones pinned in the requirements files.
 

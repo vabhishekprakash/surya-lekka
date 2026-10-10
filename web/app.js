@@ -143,6 +143,7 @@ const state = {
   pageImages: [],
   boxIndex: new Map(),
   challenge: null,
+  retrySample: null,  // a linked sample the problem screen's "Try again" reopens
   seq: 0,          // the latest request whose answer may still change the screen
   lang: "en",      // the results screen's language: "en" or "te" (the household's choice)
   telugu: null,    // the Telugu pack (te.js), loaded when first chosen
@@ -270,7 +271,8 @@ window.addEventListener("popstate", (event) => {
   go(view, false);
 });
 
-function showProblem(title, message, { retry = false, sample = false } = {}) {
+function showProblem(title, message, { retry = false, sample = false, retrySample = null } = {}) {
+  state.retrySample = retrySample;  // "Try again" reopens this sample instead of retrying a job
   $("#problem-title").textContent = title;
   $("#problem-message").textContent = message;
   $("#problem-retry").hidden = !retry;
@@ -300,24 +302,52 @@ function showApiError(error) {
 
 // ---------------------------------------------------------------- samples
 
-async function startSample(sampleId) {
+// Opens a sample. Returns "opened", "replaced" (a newer request took over) or, with quiet, the
+// error instead of showing it.
+async function startSample(sampleId, { quiet = false } = {}) {
   const buttons = $$("[data-sample]");
   buttons.forEach((b) => { b.disabled = true; });
   resetUpload();  // a sample has no page images of its own
   const seq = nextRequest();
   try {
     const job = await api("POST", `/samples/${encodeURIComponent(sampleId)}`);
-    if (!stillCurrent(seq)) return;
+    if (!stillCurrent(seq)) return "replaced";
     newJob(job, job.mode);
     const view = await api("GET", jobPath());
-    if (!stillCurrent(seq)) return;
+    if (!stillCurrent(seq)) return "replaced";
     if (view.status === "done") openReview(view);
     else startWaiting();
+    return "opened";
   } catch (error) {
+    if (quiet) return error;
     showApiError(error);
+    return error;
   } finally {
     buttons.forEach((b) => { b.disabled = false; });
   }
+}
+
+const SAMPLE_FAILED = "Couldn't open the sample, tap to try again.";
+
+// A shared link such as #sample=S4 on a fresh start: it says it is opening, tries once more when
+// the first try fails for a reason other than a refusal (a cold or slow start), and otherwise
+// offers a clear way to try again instead of leaving the home screen showing.
+async function openLinkedSample(sampleId) {
+  const status = $("#sample-status");
+  status.textContent = "Opening the sample…";
+  let outcome;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    outcome = await startSample(sampleId, { quiet: true });
+    if (!(outcome instanceof Error)) break;
+    if (outcome.status && outcome.status < 500) break;  // a refusal: retrying won't help
+  }
+  status.textContent = "";
+  if (!(outcome instanceof Error)) return;
+  if (outcome.status && outcome.status < 500) {
+    showApiError(outcome);
+    return;
+  }
+  showProblem("Couldn't open the sample", SAMPLE_FAILED, { retry: true, retrySample: sampleId });
 }
 
 function newJob(job, mode) {
@@ -1438,7 +1468,8 @@ function init() {
   });
   $("#send-pages").addEventListener("click", sendPages);
   $("#retry-upload").addEventListener("click", retryUpload);
-  $("#problem-retry").addEventListener("click", retryJob);
+  $("#problem-retry").addEventListener("click", () => (state.retrySample ? openLinkedSample(state.retrySample)
+    : retryJob()));
   $("#review-form").addEventListener("submit", submitReview);
   $("#manual-form").addEventListener("submit", submitManual);
   $("#add-charge").addEventListener("click", () => addCharge());
@@ -1455,7 +1486,7 @@ function init() {
   const linked = /^sample=(S\d{1,2})$/.exec(start);
   go(["upload", "manual"].includes(start) ? start : "home", false);
   history.replaceState({ view: state.view }, "", `#${state.view}`);
-  if (linked) startSample(linked[1]);
+  if (linked) openLinkedSample(linked[1]);
 }
 
 init();

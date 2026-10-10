@@ -1,0 +1,8 @@
+{
+  "name": "surya-lekka-dom-tests",
+  "private": true,
+  "description": "Test-only dependency: jsdom runs web/app.js in a simulated browser for the DOM tests.",
+  "devDependencies": {
+    "jsdom": "30.1.2"
+  }
+}

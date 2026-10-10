@@ -28,3 +28,6 @@ node_modules/
 
 # local build output (sample page images)
 .build/
+
+# test-only node packages (npm ci --prefix tests)
+tests/node_modules/
