@@ -933,3 +933,63 @@ def test_a_new_revision_only_when_corrections_or_answers_change(aws):
     assert revision() == 3
     again = call(jobs.recheck, {"answers": S1_ANSWERS, "confirmed_operands": tokens}, **where)[1]
     assert not [f for f in again["findings"] if f["status"] in ("consistent", "inconsistent")]
+
+
+# --- page omissions and the whole-item bound ---------------------------------------------------------
+
+def test_a_43_page_quote_reads_20_pages_and_is_marked_incomplete(aws):
+    plan = {"page_count": 20, "page_numbers": list(range(1, 21)), "total_pages": 43,
+            "omitted": [{"page": n, "reason": "over_limit"} for n in range(21, 44)]}
+    status, job = call(jobs.create_job, plan)
+    assert status == 201 and len(job["uploads"]) == 20
+    upload(aws, job, 20)
+    assert run_worker(job["job_id"]) == ["done"]
+    view = get(job)[1]
+    assert view["processing_complete"] is False
+    assert view["extraction"]["pages_skipped"] == list(range(21, 44))
+    status, checked = call(jobs.recheck, {"answers": S1_ANSWERS}, path={"id": job["job_id"]},
+                           query={"t": job["token"]})
+    (c2,) = [f for f in checked["findings"] if f["check_id"] == "C2_central_subsidy"]
+    assert c2["status"] == "needs_confirmation" and c2["message_key"] == "C2.pages_incomplete"
+
+
+def test_uploaded_pages_keep_their_original_numbers(aws):
+    plan = {"page_count": 2, "page_numbers": [1, 3], "total_pages": 3, "omitted": [{"page": 2, "reason": "unreadable"}]}
+    job = call(jobs.create_job, plan)[1]
+    upload(aws, job, 2)
+    assert run_worker(job["job_id"]) == ["done"]
+    view = get(job)[1]
+    assert view["extraction"]["pages_processed"] == [1, 3] and view["extraction"]["pages_skipped"] == [2]
+    assert view["processing_complete"] is False
+    assert {c["page"] for c in view["extraction"]["gross_total"]["candidates"]} <= {1, 3}
+
+
+@pytest.mark.parametrize("plan", [
+    {"page_count": 2, "page_numbers": [1, 2], "total_pages": 3},  # page 3 neither sent nor omitted
+    {"page_count": 2, "page_numbers": [1, 2], "total_pages": 3, "omitted": [{"page": 2, "reason": "unreadable"}]},
+    {"page_count": 2, "page_numbers": [2, 1], "total_pages": 2},
+    {"page_count": 2, "page_numbers": [1, 2], "total_pages": 3, "omitted": [{"page": 3, "reason": "lost"}]},
+    {"page_count": 2, "page_numbers": [1], "total_pages": 1},
+    {"page_count": 2, "page_numbers": [1, 2], "total_pages": 1},
+    {"page_count": 2, "total_pages": 5000},
+])
+def test_a_page_plan_that_does_not_cover_every_page_once_is_refused(aws, plan):
+    status, body = call(jobs.create_job, plan)
+    assert status == 400 and body["error"] == "bad_page_plan" and scan() == []
+
+
+def test_a_recheck_whose_whole_item_would_be_too_large_is_refused_cleanly(aws, monkeypatch):
+    job = done_job(aws)
+    before = item(job["job_id"])
+    monkeypatch.setattr(common, "ITEM_MAX_BYTES", common.item_size(before) + 10)
+    status, body = call(jobs.recheck, {"answers": S1_ANSWERS}, path={"id": job["job_id"]}, query={"t": job["token"]})
+    assert status == 413 and body["error"] == "result_too_large"
+    assert item(job["job_id"]) == before  # nothing written
+
+
+def test_the_worker_refuses_a_result_whose_whole_item_would_be_too_large(aws, monkeypatch):
+    job = create(2)
+    upload(aws, job, 2)
+    monkeypatch.setattr(worker, "ITEM_MAX_BYTES", 2_000)
+    run_worker(job["job_id"])
+    assert item(job["job_id"])["reason"] == "result_too_large"

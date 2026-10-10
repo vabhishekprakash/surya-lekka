@@ -37,7 +37,9 @@ from .common import (
     MAX_RETRIES,
     RETRYABLE_REASONS,
     claim,
+    ITEM_MAX_BYTES,
     error_code,
+    item_size,
     job_binding,
     job_ttl_seconds,
     log,
@@ -172,9 +174,10 @@ def process_job(bucket, job_id, context=None):
     page_count = int(item["page_count"])
     retries_left = int(item.get("retries", 0)) < MAX_RETRIES
     try:
-        pages = _load_pages(bucket, job_id, page_count)
-        quote, stats = _extract(job_id, pages, item.get("batches") or {}, context)
-        _save(job_id, quote, {**stats, "pages": page_count, "seconds": round(time.perf_counter() - started, 3)})
+        pages = _load_pages(bucket, job_id, page_count, [int(n) for n in item.get("page_numbers") or []])
+        omitted = [int(o["page"]) for o in item.get("omitted_pages") or []]
+        quote, stats = _extract(job_id, pages, item, omitted, context)
+        _save(job_id, item, quote, {**stats, "pages": page_count, "seconds": round(time.perf_counter() - started, 3)})
     except OutOfTime:
         _fail(bucket, job_id, page_count, "timed_out", retries_left, started)
         return "interrupted"
@@ -200,7 +203,8 @@ def _read(bucket, key, limit):
     return body
 
 
-def _load_pages(bucket, job_id, page_count):
+def _load_pages(bucket, job_id, page_count, numbers=()):
+    """The uploaded page images, each with its page number in the original quote."""
     try:
         manifest = json.loads(_read(bucket, manifest_key(job_id), MANIFEST_MAX_BYTES))
     except ValueError:
@@ -212,7 +216,7 @@ def _load_pages(bucket, job_id, page_count):
         data = _read(bucket, page_key(job_id, n), MAX_IMAGE_BYTES)
         if not data.startswith(b"\xff\xd8\xff"):
             raise JobFailed("not_a_jpeg")
-        pages.append(PageImage(n, data, 0, 0, 0, 0))
+        pages.append(PageImage(numbers[n - 1] if len(numbers) == page_count else n, data, 0, 0, 0, 0))
     return pages
 
 
@@ -234,15 +238,17 @@ def _saved_record(text, batch, pages, model):
     return record
 
 
-def _save_batch(job_id, record):
-    """Keep one batch's reading on the job so a retry need not pay for it again.
-    A batch that can't be saved only costs a repeat call on retry."""
+def _save_batch(job_id, record, item):
+    """Keep one batch's reading on the job so a retry need not pay for it again. A batch that
+    can't be saved, because it or the whole item would be too large, only costs a repeat call."""
     from botocore.exceptions import ClientError
 
     text = json.dumps(record, default=str)
-    if len(text) > BATCH_SAVE_MAX_BYTES:
+    batches = {**(item.get("batches") or {}), str(record["batch"]): text}
+    if len(text) > BATCH_SAVE_MAX_BYTES or item_size({**item, "batches": batches}) > ITEM_MAX_BYTES:
         log("batch_not_saved", job_id=job_id, batches=record["batch"], reason="too_large")
         return
+    item["batches"] = batches
     try:
         table().update_item(
             Key={"job_id": job_id}, UpdateExpression="SET #batches.#n = :record",
@@ -255,7 +261,8 @@ def _save_batch(job_id, record):
         log("batch_not_saved", job_id=job_id, batches=record["batch"], reason=error_code(e) or "client_error")
 
 
-def _extract(job_id, pages, saved, context):
+def _extract(job_id, pages, item, omitted, context):
+    saved = item.get("batches") or {}
     engine = reader()
     model = engine.model
     batches, rejected = plan_batches(pages, engine.request_size, engine.request_limit, engine.max_pages)
@@ -283,7 +290,7 @@ def _extract(job_id, pages, saved, context):
         record["boxes"] = boxes.record_boxes(result)  # page coordinates for highlighting, no text
         record["model_id"] = model
         records.append(record)
-        _save_batch(job_id, record)
+        _save_batch(job_id, record, item)
     if not records:
         raise JobFailed("extraction_failed")
     usage = [r.get("usage") or {} for r in records]
@@ -294,16 +301,19 @@ def _extract(job_id, pages, saved, context):
     else:
         stats.update(input_tokens=sum(u.get("inputTokens", 0) for u in usage),
                      output_tokens=sum(u.get("outputTokens", 0) for u in usage))
-    quote = merge_batches(records, failures, rejected)
+    quote = merge_batches(records, failures, sorted(set(rejected) | set(omitted)))
     boxes.attach(quote, [b for r in records for b in r.get("boxes") or []])
     return quote, stats
 
 
-def _save(job_id, quote, stats):
+def _save(job_id, item, quote, stats):
     result = run_checks(quote, binding=job_binding(job_id, 0))
     extraction = json.dumps(quote, default=str)
     checked = json.dumps({k: result[k] for k in ("findings", "questions", "vendor_message", "vendor_message_lines", "check_this", "entry_checks")}, default=str)
-    if len(extraction) + len(checked) > RESULT_MAX_BYTES:
+    final = {**{k: v for k, v in item.items() if k not in ("batches", "reason")}, "extraction": extraction,
+             "result": checked, "stats": json.dumps(stats), "processing_complete": True, "finished_at": now(),
+             "expires_at": now()}
+    if len(extraction) + len(checked) > RESULT_MAX_BYTES or item_size(final) > ITEM_MAX_BYTES:
         raise JobFailed("result_too_large")
     if not transition(job_id, "processing", "done", remove=("batches", "reason"), extraction=extraction,
                       result=checked, processing_complete=bool(quote["processing_complete"]),

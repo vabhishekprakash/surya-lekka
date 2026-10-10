@@ -334,6 +334,31 @@ def _take_day_slots(day, cap, pages, page_cap):
     return True
 
 
+ITEM_MAX_BYTES = 380_000  # DynamoDB's limit is 400 KB for the whole item; keep a margin
+
+
+def item_size(value):
+    """The stored size of an item or attribute value, counted as DynamoDB counts it (names and
+    values in UTF-8, numbers generously), so a write can be refused before DynamoDB does."""
+    if isinstance(value, dict):
+        return sum(len(str(k).encode("utf-8")) + item_size(v) + 1 for k, v in value.items()) + 3
+    if isinstance(value, (list, tuple, set)):
+        return sum(item_size(v) + 1 for v in value) + 3
+    if isinstance(value, bool) or value is None:
+        return 1
+    if isinstance(value, (int, float)) or type(value).__name__ == "Decimal":
+        return len(str(value)) + 1
+    if isinstance(value, (bytes, bytearray)):
+        return len(value)
+    return len(str(value).encode("utf-8"))
+
+
+def check_item_size(item):
+    """Refuse cleanly (413 result_too_large) when the complete item would be too large to store."""
+    if item_size(item) > ITEM_MAX_BYTES:
+        raise ApiError(413, "result_too_large", "This check holds too much to store. Please start a new check.")
+
+
 def new_job(page_count, source, mode="nova", status="awaiting_upload", job_id=None, **fields):
     """Create a job, awaiting upload unless told otherwise. Returns (job_id, token).
     mode says who read the quote: a reading engine, or "saved" for a sample's saved reading.
@@ -391,7 +416,7 @@ def authorised_job(event):
     not_found = ApiError(404, "not_found", "No check matches this link.")
     if not isinstance(job_id, str) or not JOB_ID.fullmatch(job_id):
         raise not_found
-    item = table().get_item(Key={"job_id": job_id}).get("Item")
+    item = table().get_item(Key={"job_id": job_id}, ConsistentRead=True).get("Item")
     if not token_matches(token, (item or {}).get("token_hash")) or item is None:
         raise not_found
     if int(item.get("expires_at", 0)) <= now():

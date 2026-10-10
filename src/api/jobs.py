@@ -25,6 +25,7 @@ from .common import (
     bucket_name,
     check_kill_switch,
     check_reading_available,
+    check_item_size,
     conditional_update,
     job_binding,
     error_response,
@@ -56,18 +57,52 @@ def _presigned_post(key, content_type, max_bytes):
     return {"url": post["url"], "fields": post["fields"]}
 
 
+MAX_TOTAL_PAGES = 2000
+OMISSION_REASONS = {"over_limit", "too_large", "unreadable"}
+
+
+def _page_plan(body, pages):
+    """(page numbers, total pages, omitted pages) from POST /jobs. Each uploaded image keeps its
+    page number in the original quote; every other page is listed as omitted with its reason
+    (over the page limit, too large to send, or unreadable), so the reading is marked incomplete."""
+    numbers = body.get("page_numbers", list(range(1, pages + 1)))
+    total = body.get("total_pages", pages)
+    omitted = body.get("omitted", [])
+
+    def whole(n, low, high):
+        return not isinstance(n, bool) and isinstance(n, int) and low <= n <= high
+    bad = ApiError(400, "bad_page_plan", "page_numbers, total_pages and omitted must list every page once.")
+    if not whole(total, pages, MAX_TOTAL_PAGES) or not isinstance(numbers, list) or not isinstance(omitted, list):
+        raise bad
+    if len(numbers) != pages or not all(whole(n, 1, total) for n in numbers) or numbers != sorted(set(numbers)):
+        raise bad
+    if not all(isinstance(o, dict) and set(o) == {"page", "reason"} and whole(o["page"], 1, total)
+               and o["reason"] in OMISSION_REASONS for o in omitted):
+        raise bad
+    left_out = [o["page"] for o in omitted]
+    if len(set(left_out)) != len(left_out) or set(left_out) & set(numbers) or len(left_out) + pages != total:
+        raise bad
+    return numbers, total, sorted(omitted, key=lambda o: o["page"])
+
+
 @guarded("create")
 def create_job(event, context):
-    """POST /jobs {"page_count": n}"""
+    """POST /jobs {"page_count": n, "page_numbers": [...], "total_pages": t, "omitted": [{"page", "reason"}]}
+
+    page_count is the number of page images to upload. The other fields are optional: without
+    them the images are pages 1 to n of an n-page quote."""
     try:
         check_reading_available()
         check_kill_switch()
-        pages = body_json(event).get("page_count")
+        body = body_json(event)
+        pages = body.get("page_count")
         if isinstance(pages, bool) or not isinstance(pages, int) or not 1 <= pages <= MAX_PAGES:
             raise ApiError(400, "bad_page_count", f"page_count must be a whole number from 1 to {MAX_PAGES}.")
+        numbers, total, omitted = _page_plan(body, pages)
         take_slots(event, pages)
-        job_id, token = new_job(pages, "upload", mode=reading_engine())
-        body = {
+        job_id, token = new_job(pages, "upload", mode=reading_engine(), page_numbers=numbers, total_pages=total,
+                                omitted_pages=omitted)
+        reply = {
             "job_id": job_id,
             "token": token,
             "uploads": [{"page": n, **_presigned_post(page_key(job_id, n), "image/jpeg", MAX_IMAGE_BYTES)}
@@ -80,7 +115,7 @@ def create_job(event, context):
         log("create_refused", reason=e.code, http_status=e.status)
         return error_response(e)
     log("job_created", job_id=job_id, pages=pages, http_status=201)
-    return response(201, body)
+    return response(201, reply)
 
 
 def _stuck(item):
@@ -172,13 +207,15 @@ def recheck(event, context):
         user_inputs = {"corrections": corrections, "confirmations": answers, **tokens}
         # Any change of corrections or answers (an option switch included) starts a new review
         # revision, so tokens issued before it no longer confirm anything, even after a revert.
+        # Nothing is written until the request is fully checked, and then corrections, result and
+        # revision are written together, only if the revision is still the one read here.
         revision = int(item.get("review_revision", 0))
         before = json.loads(item["corrections"])["user_inputs"] if item.get("corrections") else {}
-        if (corrections, answers) != (before.get("corrections") or {}, before.get("confirmations") or {}):
-            revision = _next_revision(item["job_id"], revision)
+        changed = (corrections, answers) != (before.get("corrections") or {}, before.get("confirmations") or {})
+        target = revision + 1 if changed else revision
         try:
             result = run_checks(json.loads(item["extraction"]), user_inputs,
-                                binding=job_binding(item["job_id"], revision))
+                                binding=job_binding(item["job_id"], target))
         except KeyError as e:
             raise ApiError(400, "unknown_field", str(e).strip("'\"")) from None
         except (TypeError, ValueError, AttributeError):
@@ -187,27 +224,22 @@ def recheck(event, context):
         stored = {"user_inputs": user_inputs,
                   "corrected_fields": [{**c, "provenance": "user_corrected"} for c in result["corrected_fields"]]}
         checked_text, stored_text = json.dumps(checked, default=str), json.dumps(stored, default=str)
-        if len(checked_text) + len(stored_text) > RESULT_MAX_BYTES:
-            raise ApiError(413, "too_large", "Too many corrections to store.")
-        table().update_item(
-            Key={"job_id": item["job_id"]},
-            UpdateExpression="SET #checked = :checked, #corrections = :corrections, #checked_at = :at",
-            ExpressionAttributeNames={"#checked": "checked", "#corrections": "corrections", "#checked_at": "checked_at"},
-            ExpressionAttributeValues={":checked": checked_text, ":corrections": stored_text, ":at": now()})
+        attributes = {"checked": checked_text, "corrections": stored_text, "checked_at": now(),
+                      "review_revision": target, "checked_revision": target}
+        check_item_size({**item, **attributes})
+        first = "attribute_not_exists(#review_revision) OR " if revision == 0 else ""
+        names = {f"#{k}": k for k in attributes}
+        if not conditional_update(
+                item["job_id"], "SET " + ", ".join(f"#{k} = :{k}" for k in attributes),
+                f"({first}#review_revision = :expected) AND #status = :done", {**names, "#status": "status"},
+                {**{f":{k}": v for k, v in attributes.items()}, ":expected": revision, ":done": "done"}):
+            raise ApiError(409, "review_changed", "The review changed in another window. Please open the quote again.")
     except ApiError as e:
         log("recheck_refused", reason=e.code, http_status=e.status)
         return error_response(e)
     log("rechecked", job_id=item["job_id"], http_status=200)
     return response(200, {**checked, "corrected_fields": stored["corrected_fields"]})
 
-
-def _next_revision(job_id, current):
-    """Move the job's review revision on by one, atomically; refuse if another request did first."""
-    first = "attribute_not_exists(#rev) OR " if current == 0 else ""
-    if not conditional_update(job_id, "SET #rev = :next", f"{first}#rev = :current", {"#rev": "review_revision"},
-                              {":next": current + 1, ":current": current}):
-        raise ApiError(409, "review_changed", "The review changed in another window. Please open the quote again.")
-    return current + 1
 
 
 @guarded("retry")
