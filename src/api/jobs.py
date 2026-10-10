@@ -20,6 +20,7 @@ from .common import (
     STALE_SECONDS,
     UPLOAD_URL_SECONDS,
     ApiError,
+    check_new_job,
     authorised_job,
     body_json,
     bucket_name,
@@ -329,15 +330,16 @@ def _saved_sample(event, sample_id):
     quote, pages = reading.get("quote"), reading.get("pages")
     if reading.get("reading") != "saved" or not isinstance(quote, dict) or not isinstance(pages, dict):
         raise ApiError(404, *SAMPLE_MISSING)
-    take_slots(event, "sample")
     job_id = str(uuid.uuid4())  # the findings' tokens are signed for this job, revision 0
     result = run_checks(quote, binding=job_binding(job_id, 0))
     checked = {k: result[k] for k in ("findings", "questions", "vendor_message", "vendor_message_lines", "check_this", "entry_checks")}
-    job_id, token = new_job(
-        len(pages), f"sample:{sample_id}", mode="saved", status="done", job_id=job_id,
-        extraction=json.dumps(quote, default=str), result=json.dumps(checked, default=str),
-        processing_complete=quote.get("processing_complete") is True, page_text=json.dumps(pages),
-        finished_at=now())
+    job = dict(page_count=len(pages), source=f"sample:{sample_id}", mode="saved", status="done", job_id=job_id,
+               extraction=json.dumps(quote, default=str), result=json.dumps(checked, default=str),
+               processing_complete=quote.get("processing_complete") is True, page_text=json.dumps(pages),
+               finished_at=now())
+    check_new_job(**job)  # an oversized saved reading is refused before it spends a sample slot
+    take_slots(event, "sample")
+    job_id, token = new_job(**job)
     return job_id, token, len(pages)
 
 

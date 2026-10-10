@@ -378,14 +378,22 @@ def new_job(page_count, source, mode="nova", status="awaiting_upload", job_id=No
     job_id may be chosen beforehand (a sample's findings are signed for it)."""
     job_id = job_id or str(uuid.uuid4())
     token, digest = new_token()
-    created = now()
-    table().put_item(
-        Item={"job_id": job_id, "status": status, "token_hash": digest, "page_count": page_count,
-              "source": source, "mode": mode, "created_at": created, "expires_at": created + job_ttl_seconds(),
-              **fields},
-        ConditionExpression="attribute_not_exists(job_id)",
-    )
+    item = _job_item(job_id, digest, page_count, source, mode, status, fields)
+    check_item_size(item)  # the whole item, before any write: an oversized one is a clean 413
+    table().put_item(Item=item, ConditionExpression="attribute_not_exists(job_id)")
     return job_id, token
+
+
+def _job_item(job_id, digest, page_count, source, mode, status, fields):
+    created = now()
+    return {"job_id": job_id, "status": status, "token_hash": digest, "page_count": page_count,
+            "source": source, "mode": mode, "created_at": created, "expires_at": created + job_ttl_seconds(),
+            **fields}
+
+
+def check_new_job(page_count, source, mode="nova", status="awaiting_upload", job_id=None, **fields):
+    """Refuses (413) a job new_job would refuse for its size, before admission is spent on it."""
+    check_item_size(_job_item(job_id or str(uuid.uuid4()), "0" * 64, page_count, source, mode, status, fields))
 
 
 def conditional_update(job_id, update, condition, names, values):
