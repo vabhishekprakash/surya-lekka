@@ -1,6 +1,6 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 720" width="1200" height="720" font-family="Arial, Helvetica, sans-serif">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 820" width="1200" height="820" font-family="Arial, Helvetica, sans-serif">
   <title>Surya Lekka architecture on AWS</title>
-  <desc>A household's browser loads the website from AWS Amplify Hosting (manual deploys; GitHub Pages serves a mirror), renders quote pages with pdf.js, uploads page images directly to a private S3 bucket and talks to an HTTP API on API Gateway. Lambda functions create jobs, return results, run the deterministic checks and handle manual entry and samples. An S3 event triggers the Worker Lambda, which sends each page to Amazon Textract in ap-south-1 to read it and stores results in DynamoDB. Amazon Bedrock (Nova) is an optional reader if quota is granted. Failed jobs go to SQS. Everything logs to CloudWatch without document text, and the stack is deployed with AWS SAM.</desc>
+  <desc>A household's browser loads the website from AWS Amplify Hosting (manual deploys; GitHub Pages serves a mirror), renders quote pages with pdf.js, uploads page images directly to a private S3 bucket and talks to an HTTP API on API Gateway. Lambda functions create jobs, return results, run the deterministic checks and handle manual entry and samples. An S3 event triggers the Worker Lambda, which sends each page to Amazon Textract in ap-south-1 to read it and stores results in DynamoDB. Amazon Bedrock (Nova) is built but switched off while Bedrock access isn't granted. Failed jobs go to SQS. Everything logs to CloudWatch without document text; CloudWatch alarms email through Amazon SNS; AWS X-Ray traces each call by operation, status and timing; AWS Secrets Manager holds the key that signs confirmations. At account level, budget alerts are set by hand and an AWS Organizations AI services opt-out policy covers Textract. Amazon Translate drafted the Telugu text once, at build time. The stack is deployed with AWS SAM.</desc>
   <defs>
     <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
       <path d="M1 1 L9 5 L1 9" fill="none" stroke="#444" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
@@ -14,7 +14,7 @@
     </style>
   </defs>
 
-  <rect x="0" y="0" width="1200" height="720" fill="#ffffff"/>
+  <rect x="0" y="0" width="1200" height="820" fill="#ffffff"/>
   <text x="30" y="38" font-size="20" font-weight="700" fill="#1d2733">Surya Lekka: architecture on AWS (ap-south-1)</text>
   <text x="30" y="60" class="s">The reader only reads the quote. Every finding comes from plain, tested Python checks and a dated rules file.</text>
 
@@ -77,8 +77,8 @@
   <!-- Bedrock, optional -->
   <rect x="1010" y="125" width="160" height="90" rx="10" fill="#ffffff" stroke="#01a88d" stroke-width="1.4" stroke-dasharray="6 4"/>
   <text x="1090" y="152" text-anchor="middle" class="t">Amazon Bedrock</text>
-  <text x="1090" y="173" text-anchor="middle" class="s">Nova, optional,</text>
-  <text x="1090" y="191" text-anchor="middle" class="s">if quota is granted</text>
+  <text x="1090" y="173" text-anchor="middle" class="s">Nova, built but off</text>
+  <text x="1090" y="191" text-anchor="middle" class="s">until access is granted</text>
 
   <!-- DynamoDB -->
   <rect x="780" y="390" width="200" height="70" rx="10" fill="#eef6ea" stroke="#3f8624" stroke-width="1.4"/>
@@ -90,15 +90,31 @@
   <text x="1090" y="418" text-anchor="middle" class="t">Amazon SQS</text>
   <text x="1090" y="439" text-anchor="middle" class="s">failed jobs</text>
 
-  <!-- CloudWatch -->
+  <!-- CloudWatch, SNS, X-Ray, Secrets Manager -->
   <rect x="500" y="525" width="215" height="60" rx="10" fill="#fdeaf3" stroke="#e7157b" stroke-width="1.4"/>
   <text x="607" y="549" text-anchor="middle" class="t">CloudWatch</text>
-  <text x="607" y="569" text-anchor="middle" class="s">logs, no document text</text>
+  <text x="607" y="569" text-anchor="middle" class="s">logs (no document text), alarms</text>
 
-  <!-- Safety -->
-  <rect x="780" y="525" width="390" height="60" rx="10" fill="#fdeef0" stroke="#dd344c" stroke-width="1.4"/>
-  <text x="975" y="549" text-anchor="middle" class="t">Account safety</text>
-  <text x="975" y="569" text-anchor="middle" class="s">Budgets alerts set on the account, daily job and page caps</text>
+  <rect x="740" y="525" width="130" height="60" rx="10" fill="#fdeaf3" stroke="#e7157b" stroke-width="1.4"/>
+  <text x="805" y="549" text-anchor="middle" class="t">Amazon SNS</text>
+  <text x="805" y="569" text-anchor="middle" class="s">alarm email</text>
+
+  <rect x="255" y="525" width="215" height="60" rx="10" fill="#fdeaf3" stroke="#e7157b" stroke-width="1.4"/>
+  <text x="362" y="549" text-anchor="middle" class="t">AWS X-Ray</text>
+  <text x="362" y="569" text-anchor="middle" class="s">operation, status, timing only</text>
+
+  <rect x="895" y="525" width="275" height="60" rx="10" fill="#fdeef0" stroke="#dd344c" stroke-width="1.4"/>
+  <text x="1032" y="549" text-anchor="middle" class="t">AWS Secrets Manager</text>
+  <text x="1032" y="569" text-anchor="middle" class="s">ConfirmSecret: signs confirmations</text>
+
+  <!-- Outside the stack -->
+  <rect x="235" y="635" width="600" height="60" rx="10" fill="#fdeef0" stroke="#dd344c" stroke-width="1.4"/>
+  <text x="535" y="659" text-anchor="middle" class="t">Account level, set by hand</text>
+  <text x="535" y="679" text-anchor="middle" class="s">AWS Budgets alerts · AWS Organizations AI services opt-out policy (Textract)</text>
+
+  <rect x="855" y="635" width="315" height="60" rx="10" fill="#f4f6f8" stroke="#6b7684" stroke-width="1.2" stroke-dasharray="5 4"/>
+  <text x="1012" y="659" text-anchor="middle" class="t">Amazon Translate</text>
+  <text x="1012" y="679" text-anchor="middle" class="s">build time only: drafted the Telugu once</text>
 
   <!-- Arrows -->
   <path class="ln" d="M205 310 L255 175" marker-end="url(#a)"/>
@@ -134,7 +150,9 @@
   <path class="dash" d="M607 440 L607 525" marker-end="url(#a)"/>
   <path class="dash" d="M800 325 L715 545" marker-end="url(#a)"/>
 
+  <path class="ln" d="M715 555 L740 555" marker-end="url(#a)"/>
+
   <!-- Footer notes -->
-  <text x="30" y="650" class="s">Mode labels on every result: "Read by Amazon Textract", "Read by Amazon Nova", "Entered by you", "Sample (saved reading)".</text>
-  <text x="30" y="672" class="s">With reading switched off, the samples and the manual-entry path still run on Lambda, and uploads are refused with a message.</text>
+  <text x="30" y="740" class="s">Mode labels on every result: "Read by Amazon Textract", "Read by Amazon Nova", "Entered by you", "Saved reading of a made-up quote. Not read live."</text>
+  <text x="30" y="762" class="s">With reading switched off, the samples and the manual-entry path still run on Lambda, and uploads are refused with a message.</text>
 </svg>
