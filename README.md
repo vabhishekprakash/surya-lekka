@@ -49,6 +49,8 @@ A calculator needs you to find each number, know which figure is the DC panel ca
    The worker saves each page or batch as it arrives, so a retry only reads the rest.
 4. The worker merges the batches, runs the checks, stores the result in DynamoDB and deletes the uploaded pages.
 5. The review screen shows every value next to its source text and a thumbnail of the user's own page. The user corrects anything wrong, can add a charge the reading missed, says whether every charge on the quote is listed, and answers the questions the rules need. The checks run again on the corrected values, and each correction is stored as the user's.
+   Some values are marked "Check this": two parts of the quote disagree on them, they couldn't be read cleanly, the reading was less than 80% sure, or they come from a kind of reading that got a value wrong on our development quotes (`src/rules/check_this.json`). Every check that uses such a value waits at "needs confirmation" until the household ticks that one value as right, or types the right one. There is no button that accepts them all.
+   A number the household types is asked about when it looks unusual for a home system: panels outside 100 to 800 W, a system outside 0.5 to 20 kW, more than 100 panels, an amount outside a household range, or a figure about 10, 100 or 1,000 times what the other numbers imply (`src/rules/entry_guards.json`). Nothing is changed. Until the household confirms the number, the checks that use it say "Please check the number you entered".
 6. The results screen groups the findings by outcome and offers the vendor questions with Copy and Send on WhatsApp buttons.
 
 There are two other ways in. The three samples are made-up quotes with saved readings, so trying one never calls the model. "Type the numbers instead" sends the figures the user types straight to the checks, with nothing stored. Every result carries a label saying where its values came from: "Read by Amazon Textract", "Read by Amazon Nova", "Sample (saved reading)" or "Entered by you".
@@ -59,7 +61,7 @@ While our AWS account is blocked from creating CloudFront distributions, the pub
 
 ## What it checks
 
-The checks are plain Python in `src/checks/` and use `Decimal` for money. Each finding carries its status, the quote lines it used, any value it worked out (labelled as computed), and the rule id and date where a rule applies.
+The checks are plain Python in `src/checks/` and use `Decimal` for money. Each finding carries its status, the quote lines it used, any value it worked out (labelled as computed), and the rule id and date where a rule applies. Every finding, vendor question and vendor-message line also carries a stable message key and its parameters (`src/checks/messages.py`), so the text can be translated without touching the checks.
 
 ### C1: system size
 
