@@ -310,8 +310,6 @@ We built Surya Lekka with these AI tools, each in a set role:
 |---|---|
 | Claude Code | Wrote the code under our direction. |
 | Claude chat | Planning and prompts. |
-| Claude in Chrome | AWS console and spreadsheet tasks. |
-| GPT-6 Astra | External reviews and adversarial test cases. |
 | ChatGPT agent | Finding public quotes. |
 
 The quotes were labelled by hand by us, never by an AI tool.
@@ -342,4 +340,10 @@ The architecture diagram (`docs/surya-lekka-architecture.svg`) and the made-up s
 
 ## Team
 
-TEAM: to be filled in by the authors. This section is a placeholder; we write it ourselves.
+- **Abhishek — Development and AWS deployment:** Application
+  implementation, quote-reading pipeline, calculation and subsidy
+  checks, web interface, AWS infrastructure, automated tests,
+  evaluation tooling and technical documentation.
+
+- **Arya — Website testing and demo:** Responsible for end-to-end
+  testing of the household journey and preparing the demo video.
