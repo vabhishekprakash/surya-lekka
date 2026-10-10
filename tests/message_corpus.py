@@ -24,7 +24,12 @@ VARIANTS = {
     "assam": {**FULL, "state": "Assam"},
     "before_cutoff": {**FULL, "portal_application_on_or_after_cutoff": False},
     "give_it_up": {**FULL, "give_it_up": True},
-    "rwa": {**FULL, "consumer_type": "rwa_ghs"},
+    "rwa": {**FULL, "consumer_type": "rwa"},
+    "household_only": {"consumer_type": "individual_household", "multiple_options": False},
+    "state_unknown": {**FULL, "state": "Atlantis"},
+    "portal_unknown": {k: v for k, v in FULL.items() if k != "portal_application_on_or_after_cutoff"},
+    "first_unknown": {k: v for k, v in FULL.items() if k not in ("first_system", "prior_central_subsidy")},
+    "give_it_up_open": {k: v for k, v in FULL.items() if k != "give_it_up"},
     "not_first": {**FULL, "first_system": False, "prior_central_subsidy": True},
     "gst_excluded": {**FULL, "gst_treatment": "excluded"},
     "gst_unclear": {**FULL, "gst_treatment": "unclear"},
@@ -51,7 +56,35 @@ MANUAL.update({
                                                     {"label": "Structure", "amount": "7,000", "included_in_total": "unclear"}]},
     "makes": {**MANUAL["good"], "panel_make_model": "Example PV EXM-550", "inverter_make_model": "Example Inverter X3",
               "inverter_rating": "3 kW", "vendor_registration": "EX-VR-0001", "dcr_declaration": True},
+    "not_dcr": {**MANUAL["good"], "dcr_declaration": False},
+    "wattage_range": {**MANUAL["good"], "panel_wattage": "540-550 Wp", "stated_capacity": "3.3 kWp"},
+    "subsidy_unreadable": {**MANUAL["good"], "subsidy_central": "78,0O0"},
+    "base_unreadable": {**MANUAL["good"], "base_price": "one lakh fifty"},
+    "higher_from_stated": {"stated_capacity": "3 kWp", "subsidy_central": "90,000", "gross_total": "1,68,000"},
+    "within": {**MANUAL["good"], "stated_capacity": "3.305 kWp", "base_price": "1,68,000", "gross_total": "1,68,001",
+               "net_cost": "90,002"},
+    "small_range": {**MANUAL["good"], "panel_count": "4", "panel_wattage": "540-550 Wp", "stated_capacity": "2.2 kWp"},
+    "no_size": {k: v for k, v in MANUAL["good"].items() if k != "stated_capacity"},
 })
+
+
+def _unsure(quote):
+    """The sample quote with every detail C4 asks about read two ways."""
+    quote = copy.deepcopy(quote)
+    conflict = {"value": None, "evidence_text": None, "page": None, "batch": None, "conflict": True, "candidates": []}
+    for name in ("dcr_declaration", "vendor_registration"):
+        quote[name] = dict(conflict)
+    for g in quote["module_groups"]:
+        g["make_model"] = dict(conflict)
+    for i in quote["inverters"]:
+        i["make_model"] = dict(conflict)
+        i["rating"] = {"value": {"raw": "3 or 5 kW", "parsed": None, "unit": None, "parse_status": "unparseable"},
+                       "evidence_text": "Inverter 3 or 5 kW", "page": 1, "batch": 1}
+    return quote
+
+
+def _incomplete(quote):
+    return dict(copy.deepcopy(quote), processing_complete=False)
 
 
 def _dry_quote(change=None):
@@ -79,6 +112,12 @@ def cases():
         out.append((f"{sample['sample_id']}/own", sample["quote"], sample["user_inputs"]))
     for name, answers in VARIANTS.items():
         out.append((f"dryrun/{name}", _dry_quote(), {"confirmations": answers}))
+    out.append(("dryrun/unsure", _unsure(_dry_quote()), {"confirmations": FULL}))
+    out.append(("dryrun/incomplete", _incomplete(_dry_quote()), {"confirmations": FULL}))
+    mentioned = _dry_quote()
+    mentioned["flags"]["model_proposed"]["give_it_up"] = {"value": "mentioned", "evidence_text": "Give It Up option",
+                                                          "page": 1, "batch": 1}
+    out.append(("dryrun/give_it_up_mentioned", mentioned, {"confirmations": VARIANTS["give_it_up_open"]}))
     for path in sorted((ROOT / "tests" / "fixtures" / "redteam").glob("[0-9][0-9]_*.json")):
         case = json.loads(path.read_text(encoding="utf-8"))
         quote = _redteam(path)
@@ -90,6 +129,9 @@ def cases():
             out.append((f"manual/{name}/{variant}", manual.blank_quote(charges),
                         {"corrections": corrections, "confirmations": {"multiple_options": False,
                                                                        **VARIANTS[variant]}}))
+        charges, corrections = manual.typed_corrections(fields)
+        out.append((f"manual/{name}/options_unknown", manual.blank_quote(charges),
+                    {"corrections": corrections, "confirmations": VARIANTS["options_unknown"]}))
     return out
 
 
