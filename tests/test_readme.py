@@ -65,8 +65,7 @@ def test_results_team_and_limits_say_only_what_is_known():
     # dev and held-out side by side with their denominators, never pooled
     assert "| Development (8 quotes) | Held out (9 quotes) |" in results
     assert "36 of 82 (44%)" in results and "27 of 92 (29%)" in results
-    assert "\n\nTEAM: to be filled in by the authors" in section("Team")
-    assert "placeholder" in section("Team")
+    assert section("Team").strip() != "## Team"  # written by the authors themselves
     limits = section("Limits")
     assert "Lambda concurrency on our account is 10." in limits
     assert "Amazon Nova reading is built but switched off while Bedrock access isn't granted." in limits
@@ -82,14 +81,15 @@ def test_deploy_commands_and_architecture_image():
 
 
 def test_plain_text_rules():
-    assert "—" not in README and "–" not in README
+    ours = README.replace(section("Team"), "")  # the authors write the Team section themselves
+    assert "—" not in ours and "–" not in ours
     # AI tools are named in "How this was built" (an event rule) and nowhere else.
     built = section("How this was built")
     # ...and in the agreed sentence on who reviewed the Telugu (Limits)
     telugu = ("Claude Opus 5.5 reviewed it, and a second independent Claude check back-translated it.")
     assert not re.search(r"Claude|ChatGPT|Copilot|Anthropic|GPT-|generated (by|with)|AI[- ]assist",
                          README.replace(built, "").replace(telugu, ""), re.I)
-    assert "**" not in README
+    assert "**" not in ours
     assert "illustrative" in section("Press release")  # the household quote is not presented as real
 
 
