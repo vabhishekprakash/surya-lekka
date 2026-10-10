@@ -58,9 +58,12 @@ def test_privacy_line_matches_the_web_app():
 
 
 def test_results_team_and_limits_say_only_what_is_known():
-    assert section("Results").split("\n\n")[1] == "Evaluation pending."
-    assert "8 for development and 9 held out" in section("Results") and "run once" in section("Results")
-    assert re.search(r"\d+(\.\d+)?\s?%", section("Results")) is None
+    results = section("Results")
+    assert "8 for development and 9 held out" in results and "read once" in results
+    assert "reader-safe-2" in results and "frozen before any reading" in results
+    # dev and held-out side by side with their denominators, never pooled
+    assert "| Development (8 quotes) | Held out (9 quotes) |" in results
+    assert "36 of 82 (44%)" in results and "27 of 92 (29%)" in results
     assert section("Team").strip().endswith("TEAM: to be filled in by the authors")
     limits = section("Limits")
     assert "Lambda concurrency on our account is 10." in limits

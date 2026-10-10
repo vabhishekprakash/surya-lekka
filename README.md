@@ -12,7 +12,7 @@ Read the quote, check the numbers and the subsidy rule, and know what to ask the
 
 A rooftop solar quote packs a lot into a page or two: how many panels and of what wattage, the system size, the price with GST and extra charges, and the subsidy the vendor expects the household to get. Under PM Surya Ghar, the central subsidy depends on the DC capacity of the panels, the household's state, and when they applied on the National Portal, and it needs DCR panels made from Indian cells. Checking all of that by hand means finding each figure on the quote, knowing which rule applies, and redoing the sums.
 
-With Surya Lekka, a household uploads the quote as a PDF or as photos of its pages. Amazon Textract reads each page, answering a fixed set of questions and reading its tables, and the app keeps the line each value came from, or says "not found". The reading can be wrong: on our 8 development quotes it read 36 of the 82 printed values correctly, got 9 wrong and filled in 1 that the quote doesn't state, and the app marked all 10 of those "Check this". (Amazon Nova on Amazon Bedrock can read the quote instead once the account has Bedrock access.) The household confirms or corrects the values and answers a few questions, such as their state and when they applied. Plain, tested Python code then runs the checks, and a finding only appears after the household confirms the numbers it uses. Each finding shows the line from the quote, the rule it was checked against and the rule's date. The details the quote leaves out become a short, polite message to copy or send to the vendor on WhatsApp. Anyone who would rather not upload anything can type the numbers in instead.
+With Surya Lekka, a household uploads the quote as a PDF or as photos of its pages. Amazon Textract reads each page, answering a fixed set of questions and reading its tables, and the app keeps the line each value came from, or says "not found". The reading can be wrong: on our 8 development quotes it read 36 of the 82 printed values correctly, got 9 wrong and filled in 1 that the quote doesn't state, and the app marked all 10 of those "Check this". On 9 held-out quotes, read once, it read 27 of 92 correctly, got 4 wrong and filled in 3, and marked 4 of those 7. (Amazon Nova on Amazon Bedrock can read the quote instead once the account has Bedrock access.) The household confirms or corrects the values and answers a few questions, such as their state and when they applied. Plain, tested Python code then runs the checks, and a finding only appears after the household confirms the numbers it uses. Each finding shows the line from the quote, the rule it was checked against and the rule's date. The details the quote leaves out become a short, polite message to copy or send to the vendor on WhatsApp. Anyone who would rather not upload anything can type the numbers in instead.
 
 > "I had the quote on my phone and the vendor wanted an answer. It showed me the panel count didn't add up to the system size and gave me the questions to send back."
 >
@@ -234,16 +234,49 @@ GitHub Actions runs the tests and the lint on every push (`.github/workflows/tes
 - Panel count and wattage answers are paired in the order Textract returns them on a page. When a page has several, the household confirms the pairing.
 - Only the central subsidy for an individual household is checked. State top-ups are not checked, and applications received before 13 Feb 2024 follow earlier rules that aren't covered.
 - Eligibility is never verified: not DCR panels, not the vendor's registration, not the inspection.
-- The reading can be wrong. On our 8 development quotes Amazon Textract, with our mapping, read 36 of 82 printed values correctly, 9 wrong and 1 that isn't on the quote; all 10 were marked "Check this", but that list of risky readings was built from those same quotes, so the held-out quotes are the real test. Every value is shown with its source text, highlighted on its page, for the household to confirm or correct.
+- The reading can be wrong. On our 8 development quotes Amazon Textract, with our mapping, read 36 of 82 printed values correctly, 9 wrong and 1 that isn't on the quote; all 10 were marked "Check this", but that list of risky readings was built from those same quotes. On the 9 held-out quotes it read 27 of 92 correctly, 4 wrong and 3 that aren't on the quote, and marked 4 of those 7 (see Results). Every value is shown with its source text, highlighted on its page, for the household to confirm or correct.
 - The interface language doesn't change what is read: Amazon Textract's questions work on English quotes only. A Telugu draft of the messages (`web/i18n/te.json`, drafted once with Amazon Translate by `scripts/translate_messages.py`) waits for a reviewer and isn't shown yet.
 - At most 20 pages per quote are read.
 - With hosting off, the web app has to be served from `http://127.0.0.1:8000` to reach the API.
 
 ## Results
 
-Evaluation pending.
+The method: 17 real quotes, hand-labelled by us, 8 for development and 9 held out. The labels were written and frozen before any reading of the held-out quotes, and the scoring, the reader and the safety harness were frozen at the tag `reader-safe-2` (3fa34d6). The held-out set was read once, all nine quotes together, from that tag, on 10 Oct 2026: 61 pages, about $1.22 of Amazon Textract. A second run is refused. The quotes and labels stay outside this repo, and only aggregate numbers are published here. Development and held-out numbers are never pooled.
 
-The method: 17 real quotes, hand-labelled by us, 8 for development and 9 held out. The held-out set is run once, all nine quotes together. Raw extraction is scored per field separately from the results after the user's corrections. The quotes and labels stay outside this repo, and only aggregate numbers will be published.
+Reading, before the household confirms or corrects anything (printed fields only):
+
+| | Development (8 quotes) | Held out (9 quotes) |
+|---|---|---|
+| Printed values read correctly (recall) | 36 of 82 (44%) | 27 of 92 (29%) |
+| Filled values that were correct (precision) | 36 of 46 (78%) | 27 of 34 (79%) |
+| Wrong values | 9 | 4 |
+| Values filled in that the quote doesn't state | 1 | 3 |
+| Judgement fields filled in wrongly | 0 of 40 | 0 of 45 |
+| Wrong or filled-in values marked "Check this" | 10 of 10 | 4 of 7 |
+
+The "Check this" rule was built from the development errors, so its 10 of 10 there is in-sample; on the held-out quotes it caught 4 of 7, and the other 3 rely on the household confirming the numbers before any finding appears.
+
+Findings on the raw reading: under every household scenario (S-A to S-E), with nothing confirmed and with every value accepted as shown, the checks gave no "matches" and no "doesn't match" on any of the 17 quotes. With no definitive findings there were no false ones to count, and no error rate can be estimated from them. The reader misses too many of the values the checks need (panel wattage, the base price, which subsidy a figure is) for a check to complete without the household's corrections.
+
+Findings on the labelled values (the hand-made labels as the quote's values, every number confirmed), scenario S-A:
+
+| | Development (8) | Held out (9) |
+|---|---|---|
+| System size: matches / doesn't match | 0 / 1 | 1 / 0 |
+| Central subsidy: matches / doesn't match | 1 / 0 | 3 / 0 |
+| Total: matches / doesn't match | 0 / 0 | 0 / 0 |
+| Net cost: matches / doesn't match | 1 / 0 | 4 / 0 |
+| DCR declaration not stated | 8 | 8 |
+| Vendor registration number not found | 8 | 8 |
+| Net-meter charges not mentioned | 8 | 8 |
+| Charges outside the total, or not clearly inside it | 6 | 8 |
+| Number of panels not found | 3 | 5 |
+| Panel wattage not found, or given as a range | 5 | 3 |
+| Panel make and model not found | 1 | 2 |
+| Inverter make and model not found | 1 | 1 |
+| Inverter rating not found, or unclear | 4 | 4 |
+
+No total check completed: none of the 17 labels states a base price that the total can be checked against. Each definitive finding on labelled values is listed, with its numbers and rule, in a file outside this repo for us to check by hand. Positive controls (made-up quotes with hand-worked findings, `eval/positive_controls.txt`) still give every expected "matches" and "doesn't match" at the tag, so the absence of findings on the raw reading is not a harness that can't see them.
 
 Evaluation notes:
 
