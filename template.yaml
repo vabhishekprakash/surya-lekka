@@ -104,6 +104,7 @@ Rules:
 Conditions:
   Hosting: !Equals [!Ref HostingEnabled, "true"]
   HasSecondOrigin: !Not [!Equals [!Ref SecondSiteOrigin, none]]
+  SecondOrigin: !And [!Not [!Condition Hosting], !Condition HasSecondOrigin]
   UseReservedConcurrency: !Not [!Equals [!Ref ReservedConcurrency, 0]]
   NovaReading: !Equals [!Ref ReadingEngine, nova]
   TextractReading: !Equals [!Ref ReadingEngine, textract]
@@ -154,7 +155,10 @@ Resources:
               SSEAlgorithm: AES256
       CorsConfiguration:
         CorsRules:
-          - AllowedOrigins: !If [Hosting, [!Sub "https://${SiteDistribution.DomainName}"], !If [HasSecondOrigin, [!Ref SiteOrigin, !Ref SecondSiteOrigin], [!Ref SiteOrigin]]]
+          # A list, not one !If: SAM mistranslates an intrinsic that returns the whole list.
+          - AllowedOrigins:
+              - !If [Hosting, !Sub "https://${SiteDistribution.DomainName}", !Ref SiteOrigin]
+              - !If [SecondOrigin, !Ref SecondSiteOrigin, !Ref AWS::NoValue]
             AllowedMethods: [POST]
             AllowedHeaders: ["*"]
             MaxAge: 600
@@ -285,7 +289,10 @@ Resources:
     Type: AWS::Serverless::HttpApi
     Properties:
       CorsConfiguration:
-        AllowOrigins: !If [Hosting, [!Sub "https://${SiteDistribution.DomainName}"], !If [HasSecondOrigin, [!Ref SiteOrigin, !Ref SecondSiteOrigin], [!Ref SiteOrigin]]]
+        # A list, not one !If: SAM mistranslates an intrinsic that returns the whole list.
+        AllowOrigins:
+          - !If [Hosting, !Sub "https://${SiteDistribution.DomainName}", !Ref SiteOrigin]
+          - !If [SecondOrigin, !Ref SecondSiteOrigin, !Ref AWS::NoValue]
         AllowMethods: [GET, POST, OPTIONS]
         AllowHeaders: [content-type]
         MaxAge: 600

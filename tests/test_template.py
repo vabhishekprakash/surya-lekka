@@ -455,3 +455,14 @@ def test_a_second_origin_is_accepted_only_when_named():
     assert allowed.fullmatch("https://main.d2sqhcgne0nq26.amplifyapp.com") and allowed.fullmatch("none")
     for bad in ("*", "http://main.d2sqhcgne0nq26.amplifyapp.com", "https://a.com/path", "https://*.amplifyapp.com"):
         assert not allowed.fullmatch(bad), bad
+
+
+def test_sam_keeps_the_api_cors_an_object_with_every_origin():
+    # SAM moves the HTTP API's CORS into the OpenAPI body. One !If returning the whole list used to
+    # replace the CORS object there, and API Gateway kept the old origins.
+    lint = runpy.run_path(str(ROOT / "scripts" / "lint_template.py"))
+    body = lint["translate"](ROOT / "template.yaml")["Resources"]["HttpApi"]["Properties"]["Body"]
+    cors = body["x-amazon-apigateway-cors"]
+    assert isinstance(cors, dict) and isinstance(cors["allowOrigins"], list) and len(cors["allowOrigins"]) == 2
+    name, _, otherwise = cors["allowOrigins"][1]["Fn::If"]  # SAM fills in the parameter's value here
+    assert name == "SecondOrigin" and otherwise == {"Ref": "AWS::NoValue"}
