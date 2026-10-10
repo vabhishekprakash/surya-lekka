@@ -52,9 +52,15 @@ function global:aws {
             $global:LASTEXITCODE = 254
             return
         }
+        "amplify" {
+            if ($args[1] -eq "create-deployment") { return '{"jobId": "7", "zipUploadUrl": "https://upload.example/zip"}' }
+            if ($args[1] -eq "get-job") { return "SUCCEED" }
+            return "PENDING"
+        }
         default { return "" }
     }
 }
+function global:Invoke-WebRequest { param($Uri, $Method, $InFile, $ContentType, [switch]$UseBasicParsing) $global:calls += ,("upload " + $Uri) }
 function global:sam { $global:calls += ,("sam " + ($args -join " ")); $global:LASTEXITCODE = 0 }
 function global:gh { $global:calls += ,("gh " + ($args -join " ")); $global:LASTEXITCODE = 0 }
 """
@@ -128,10 +134,10 @@ def test_deploy_with_hosting_and_a_cross_region_profile():
     overrides = deploy.split("--parameter-overrides ")[1].split()
     assert "--profile default --region ap-south-1" in deploy
     assert "--resolve-s3 --save-params --no-confirm-changeset --no-fail-on-empty-changeset" in deploy
-    assert overrides[:5] == ["StackPrefix=surya-lekka", "HostingEnabled=true", "SiteOrigin=http://127.0.0.1:8000",
-                             "ReadingEngine=nova", "ModelId=apac.amazon.nova-pro-v1:0"]
-    assert overrides[5] == "ProfileModelArns=" + ",".join(m["modelArn"] for m in profile["models"])
-    assert overrides[6] == "GlobalModelArns=none"
+    assert overrides[:6] == ["StackPrefix=surya-lekka", "HostingEnabled=true", "SiteOrigin=http://127.0.0.1:8000",
+                             "SecondSiteOrigin=none", "ReadingEngine=nova", "ModelId=apac.amazon.nova-pro-v1:0"]
+    assert overrides[6] == "ProfileModelArns=" + ",".join(m["modelArn"] for m in profile["models"])
+    assert overrides[7] == "GlobalModelArns=none"
     uploads = {c.split("s3://site-bucket/")[1].split()[0]: c for c in calls if "s3://site-bucket/" in c}
     assert set(uploads) == {p.name for p in (ROOT / "web").iterdir() if p.is_file()}
     assert "--content-type text/javascript; charset=utf-8" in uploads["app.js"]
@@ -325,3 +331,27 @@ def test_every_deploy_sets_the_three_caps_and_prints_them(extra, caps):
     assert {f"DailyJobCap={caps[0]}", f"IpDailyJobCap={caps[1]}", f"DailyPageCap={caps[2]}"} <= set(overrides)
     assert (f"Caps in effect: {caps[0]} checks a day, {caps[1]} per address a day, {caps[2]} pages a day"
             in run.stdout)
+
+
+@windows_powershell
+def test_amplify_publishes_by_a_manual_deployment_and_adds_the_second_origin():
+    stack = {"FAKE_STACK": outputs(("ApiUrl", "https://abc.example.com"), ("BucketName", "b"))}
+    base = f"-Profile default -Region ap-south-1 -ExpectedAccount {ACCOUNT} -HostingEnabled false "
+    run, calls = run_ps("deploy.ps1", base + "-Amplify -AmplifyAppId d2sqhcgne0nq26", stack)
+    assert run.returncode == 0, run.stdout + run.stderr
+    (deploy,) = [c for c in calls if c.startswith("sam deploy")]
+    assert "SecondSiteOrigin=https://main.d2sqhcgne0nq26.amplifyapp.com" in deploy
+    amplify = [c.split()[2] for c in calls if c.startswith("aws amplify")]
+    assert amplify[:2] == ["create-deployment", "start-deployment"] and "get-job" in amplify
+    assert "upload https://upload.example/zip" in calls
+    assert "Amplify: https://main.d2sqhcgne0nq26.amplifyapp.com/" in run.stdout
+    run, calls = run_ps("deploy.ps1", base, stack)
+    (deploy,) = [c for c in calls if c.startswith("sam deploy")]
+    assert "SecondSiteOrigin=none" in deploy and not [c for c in calls if c.startswith("aws amplify")]
+
+
+@windows_powershell
+def test_amplify_needs_an_app_id():
+    run, calls = run_ps("deploy.ps1", f"-Profile default -Region ap-south-1 -ExpectedAccount {ACCOUNT} "
+                        "-HostingEnabled false -Amplify", {})
+    assert run.returncode != 0 and "AmplifyAppId" in run.stdout and not [c for c in calls if c.startswith("sam ")]

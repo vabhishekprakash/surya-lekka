@@ -43,6 +43,11 @@ param(
     [ValidateRange(0, 100000)][int]$IpDailyJobCap = 10,
     [ValidateRange(0, 100000)][int]$DailyPageCap = 300,
     [switch]$Pages,
+    # Also publish web/ to Amplify Hosting by a manual deployment (no Git connection) to an app
+    # made once with: aws amplify create-app --name <name> --platform WEB, and its branch.
+    [switch]$Amplify,
+    [string]$AmplifyAppId,
+    [string]$AmplifyBranch = "main",
     [string]$BuildDir = ".build"
 )
 
@@ -52,6 +57,14 @@ Confirm-AwsTarget -AwsProfile $AwsProfile -Region $Region -ExpectedAccount $Expe
 if ($Pages -and $SiteOrigin -cnotmatch '^https://[a-z0-9-]+\.github\.io$') {
     throw "With -Pages, -SiteOrigin must be the GitHub Pages origin, such as https://<user>.github.io (no path)."
 }
+
+if ($Amplify -and $AmplifyAppId -cnotmatch '^d[a-z0-9]{6,20}$') {
+    throw "With -Amplify, -AmplifyAppId must be the Amplify app id, such as d2sqhcgne0nq26."
+}
+if ($Amplify -and $AmplifyBranch -cnotmatch '^[a-z0-9-]{1,40}$') {
+    throw "-AmplifyBranch must be a plain branch name, such as main."
+}
+$secondOrigin = if ($Amplify) { "https://$AmplifyBranch.$AmplifyAppId.amplifyapp.com" } else { "none" }
 
 if ($StackName -cnotmatch '^[a-z0-9][a-z0-9-]{1,30}$') {
     throw "The stack name also starts the bucket name: use 2 to 31 lower-case letters, digits or hyphens."
@@ -99,6 +112,7 @@ Invoke-Step "Build" { sam build --template-file template.yaml }
 $deployArgs = @("--stack-name", $StackName, "--capabilities", "CAPABILITY_IAM") + $aws + @(
     "--parameter-overrides",
     "StackPrefix=$StackName", "HostingEnabled=$HostingEnabled", "SiteOrigin=$SiteOrigin",
+    "SecondSiteOrigin=$secondOrigin",
     "ReadingEngine=$ReadingEngine", "ModelId=$ModelId",
     "ProfileModelArns=$($access.ProfileModelArns)", "GlobalModelArns=$($access.GlobalModelArns)",
     "DailyJobCap=$DailyJobCap", "IpDailyJobCap=$IpDailyJobCap", "DailyPageCap=$DailyPageCap"
@@ -184,9 +198,38 @@ if ($Pages) {
     $repo = (Split-Path -Leaf (git remote get-url origin)) -replace '\.git$', ''
 }
 
+if ($Amplify) {
+    Write-Host "== Publish the web app to Amplify Hosting (manual deployment)"
+    $amplifyDir = Join-Path $BuildDir "web-amplify"
+    if (Test-Path $amplifyDir) { Remove-Item -Recurse -Force $amplifyDir }
+    $null = & $python scripts\build_site.py @siteArgs --out $amplifyDir
+    if ($LASTEXITCODE -ne 0) { throw "Writing the web app for Amplify failed (exit code $LASTEXITCODE)" }
+    $zip = Join-Path $BuildDir "web-amplify.zip"
+    if (Test-Path $zip) { Remove-Item -Force $zip }
+    Compress-Archive -Path (Join-Path $amplifyDir "*") -DestinationPath $zip
+    $deployment = aws amplify create-deployment --app-id $AmplifyAppId --branch-name $AmplifyBranch @aws --output json |
+        ConvertFrom-Json
+    if ($LASTEXITCODE -ne 0 -or -not $deployment.jobId) { throw "Amplify create-deployment failed." }
+    $null = Invoke-WebRequest -Uri $deployment.zipUploadUrl -Method Put -InFile $zip -ContentType "application/zip" `
+        -UseBasicParsing
+    Invoke-Step "Start the Amplify deployment" {
+        aws amplify start-deployment --app-id $AmplifyAppId --branch-name $AmplifyBranch --job-id $deployment.jobId @aws `
+            --query jobSummary.status --output text
+    }
+    $status = "PENDING"
+    foreach ($try in 1..60) {
+        $status = aws amplify get-job --app-id $AmplifyAppId --branch-name $AmplifyBranch --job-id $deployment.jobId @aws `
+            --query job.summary.status --output text
+        if ($status -notin @("PENDING", "PROVISIONING", "RUNNING")) { break }
+        Start-Sleep -Seconds 5
+    }
+    if ($status -ne "SUCCEED") { throw "The Amplify deployment ended as $status." }
+}
+
 Write-Host ""
 Write-Host "API URL: $apiUrl"
 Write-Host "Caps in effect: $DailyJobCap checks a day, $IpDailyJobCap per address a day, $DailyPageCap pages a day"
+if ($Amplify) { Write-Host "Amplify: $secondOrigin/ (the API accepts it as a second origin)" }
 if ($HostingEnabled -eq "true") {
     Write-Host "Site:    $siteUrl"
 } elseif ($Pages) {

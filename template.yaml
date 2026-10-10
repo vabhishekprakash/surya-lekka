@@ -17,6 +17,13 @@ Parameters:
       The only origin allowed to call the API when HostingEnabled is false: where web/ is opened locally
       (scheme and host, no trailing slash). With hosting on, the CloudFront domain is used instead.
     AllowedPattern: "^https?://[A-Za-z0-9.-]+(:[0-9]+)?$"
+  SecondSiteOrigin:
+    Type: String
+    Default: none
+    Description: >-
+      A second origin allowed to call the API when HostingEnabled is false, such as the Amplify Hosting
+      domain (https://main.<app id>.amplifyapp.com), or none.
+    AllowedPattern: "^(none|https://[A-Za-z0-9.-]+)$"
   StackPrefix:
     Type: String
     AllowedPattern: "^[a-z0-9][a-z0-9-]{1,30}$"
@@ -96,6 +103,7 @@ Rules:
 
 Conditions:
   Hosting: !Equals [!Ref HostingEnabled, "true"]
+  HasSecondOrigin: !Not [!Equals [!Ref SecondSiteOrigin, none]]
   UseReservedConcurrency: !Not [!Equals [!Ref ReservedConcurrency, 0]]
   NovaReading: !Equals [!Ref ReadingEngine, nova]
   TextractReading: !Equals [!Ref ReadingEngine, textract]
@@ -146,7 +154,7 @@ Resources:
               SSEAlgorithm: AES256
       CorsConfiguration:
         CorsRules:
-          - AllowedOrigins: [!If [Hosting, !Sub "https://${SiteDistribution.DomainName}", !Ref SiteOrigin]]
+          - AllowedOrigins: !If [Hosting, [!Sub "https://${SiteDistribution.DomainName}"], !If [HasSecondOrigin, [!Ref SiteOrigin, !Ref SecondSiteOrigin], [!Ref SiteOrigin]]]
             AllowedMethods: [POST]
             AllowedHeaders: ["*"]
             MaxAge: 600
@@ -277,7 +285,7 @@ Resources:
     Type: AWS::Serverless::HttpApi
     Properties:
       CorsConfiguration:
-        AllowOrigins: [!If [Hosting, !Sub "https://${SiteDistribution.DomainName}", !Ref SiteOrigin]]
+        AllowOrigins: !If [Hosting, [!Sub "https://${SiteDistribution.DomainName}"], !If [HasSecondOrigin, [!Ref SiteOrigin, !Ref SecondSiteOrigin], [!Ref SiteOrigin]]]
         AllowMethods: [GET, POST, OPTIONS]
         AllowHeaders: [content-type]
         MaxAge: 600

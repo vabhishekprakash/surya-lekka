@@ -58,7 +58,7 @@ There are two other ways in. The three samples are made-up quotes with saved rea
 
 The stack is defined in `template.yaml` (AWS SAM): an HTTP API on API Gateway, seven Lambda functions on Python 3.12, a private S3 bucket for uploads, DynamoDB for jobs, an SQS queue for worker events that failed, CloudWatch logs kept for 7 days, X-Ray tracing, and the web app in a second private bucket behind CloudFront.
 
-While our AWS account is blocked from creating CloudFront distributions, the public site is served from GitHub Pages instead, at https://vabhishekprakash.github.io/surya-lekka/, and talks to the same API. The template still supports CloudFront: `HostingEnabled` is only switched off until the account is verified.
+While our AWS account is blocked from creating CloudFront distributions, the public site is served from GitHub Pages instead, at https://vabhishekprakash.github.io/surya-lekka/, and talks to the same API. The same files are also on AWS Amplify Hosting in ap-south-1, at https://main.d2sqhcgne0nq26.amplifyapp.com/, published by a manual deployment (no Git connection); the API accepts both addresses. The template still supports CloudFront: `HostingEnabled` is only switched off until the account is verified.
 
 ## What it checks
 
@@ -178,6 +178,7 @@ The stack deploys in `ap-south-1` (Mumbai) or `ap-southeast-2` (Sydney). The tem
 - `-ReadingEngine textract` turns reading on with Amazon Textract in the stack's Region. Each page costs about $0.020 per page (tables and queries, Mumbai pricing). `DailyPageCap` (default 300 pages per UTC day, across all checks, live samples included) limits first reads to about $6.00 a day. A page that was read and saved is never read again; only if saving its reading fails can a retry read it again, at most four times in all (the first run, Lambda's one retry and two retries from the page).
 - `-ReadingEngine nova -ModelId <id>` turns reading on with Amazon Nova. The default is `none`. The model ID can be an inference profile such as `global.amazon.nova-2-lite-v1:0` or `apac.amazon.nova-pro-v1:0`, or a model in the stack's own Region such as `amazon.nova-pro-v1:0`, for accounts that can't use cross-Region inference. For a profile, the script reads the Regions it routes to with `aws bedrock get-inference-profile` and grants the worker those and no others.
 - `-DailyJobCap`, `-IpDailyJobCap` and `-DailyPageCap` (defaults 200, 10 and 300) are passed on every deploy and printed at the end, so a cap changed for one deploy never lingers.
+- `-Amplify -AmplifyAppId <id>` also publishes the built `web/` folder to an existing Amplify Hosting app as a manual deployment (zip upload, no Git connection), waits for it, and lets the API accept that address as a second origin. A deploy without `-Amplify` removes that origin again.
 - `-StackName` sets the stack name, which also starts the upload bucket's name.
 
 ### Without CloudFront

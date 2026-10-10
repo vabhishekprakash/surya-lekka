@@ -441,3 +441,17 @@ def test_get_job_reads_only_the_synthetic_samples():
     reads = [s for s in statements("GetJobFunction") if "s3:GetObject" in actions(s)]
     assert reads and all(str(s["Resource"]).endswith("/samples/*'}") or "/samples/*" in str(s["Resource"])
                          for s in reads)
+
+
+def test_a_second_origin_is_accepted_only_when_named():
+    res = resolve(HostingEnabled="false", SecondSiteOrigin="https://main.d2sqhcgne0nq26.amplifyapp.com")["Resources"]
+    for cors in (res["HttpApi"]["Properties"]["CorsConfiguration"]["AllowOrigins"],
+                 res["UploadBucket"]["Properties"]["CorsConfiguration"]["CorsRules"][0]["AllowedOrigins"]):
+        assert cors == [{"Ref": "SiteOrigin"}, {"Ref": "SecondSiteOrigin"}]
+    res = resolve(HostingEnabled="true", SecondSiteOrigin="https://main.d2sqhcgne0nq26.amplifyapp.com")["Resources"]
+    assert res["HttpApi"]["Properties"]["CorsConfiguration"]["AllowOrigins"] == [SITE_ORIGIN]
+    allowed = re.compile(TEMPLATE["Parameters"]["SecondSiteOrigin"]["AllowedPattern"])
+    assert TEMPLATE["Parameters"]["SecondSiteOrigin"]["Default"] == "none"
+    assert allowed.fullmatch("https://main.d2sqhcgne0nq26.amplifyapp.com") and allowed.fullmatch("none")
+    for bad in ("*", "http://main.d2sqhcgne0nq26.amplifyapp.com", "https://a.com/path", "https://*.amplifyapp.com"):
+        assert not allowed.fullmatch(bad), bad
