@@ -81,3 +81,42 @@ def test_the_telugu_draft_covers_every_key_and_the_app_does_not_load_it_yet():
     assert "not yet reviewed" in draft["_status"]
     assert "i18n/" not in (ROOT / "web" / "app.js").read_text(encoding="utf-8")  # the switch stays hidden
     assert not (ROOT / "web" / "i18n" / "hi.json").exists()
+
+
+def test_every_filled_in_word_is_sent_but_punctuation_is_not():
+    keys = set(T["strings"]())
+    assert {"word.total", "word.more", "join.and", "join.or", "range.to", "field.base_price", "gap.range",
+            "month.feb", "charge.outside", "panels.many"} <= keys
+    assert not {"join.comma", "join.semicolon", "join.none", "field.quoted", "sum.term", "sum.equals"} & keys
+
+
+def test_a_join_word_keeps_its_spaces():
+    assert T["_spaced"](" and ", "మరియు") == " మరియు " and T["_spaced"]("total", " మొత్తం ") == "మొత్తం"
+
+
+def test_an_update_keeps_drafts_and_corrections_and_sends_only_new_keys(tmp_path, monkeypatch):
+    import csv
+    repo, csv_dir = tmp_path / "repo", tmp_path / "csv"
+    csv_dir.mkdir()
+    texts = T["strings"]()
+    old = [k for k in texts if not k.startswith(("word.", "field.", "join.", "gap.", "month.", "charge.", "panels.",
+                                                  "sum.", "range.", "hint.", "date"))]
+    with open(csv_dir / "te_review.csv", "w", newline="", encoding="utf-8-sig") as fh:
+        w = csv.writer(fh)
+        w.writerow(["key", "English", "Telugu draft", "correction", "problems"])
+        for k in old:
+            w.writerow([k, texts[k], "OLD DRAFT", "MY FIX" if k == "confirm.operands" else "", ""])
+    sent = []
+
+    class Recording(T["DryRun"]):
+        def translate_document(self, Document, SourceLanguageCode, TargetLanguageCode):
+            sent.append(T["read_document"](Document["Content"].decode("utf-8")))
+            return super().translate_document(Document, SourceLanguageCode, TargetLanguageCode)
+    monkeypatch.setitem(T["main"].__globals__, "ROOT", repo)
+    monkeypatch.setitem(T["main"].__globals__, "DryRun", Recording)
+    assert T["main"](["--languages", "te", "--ship", "te", "--csv-dir", str(csv_dir), "--dry-run", "--update"]) == 0
+    assert set(sent[0]) == set(texts) - set(old)  # only the new keys went to Translate
+    rows = {r[0]: r for r in csv.reader(open(csv_dir / "te_review.csv", encoding="utf-8-sig"))}
+    assert rows["confirm.operands"][2:4] == ["OLD DRAFT", "MY FIX"] and rows["C1.matches"][2] == "OLD DRAFT"
+    draft = json.loads((repo / "web" / "i18n" / "te.json").read_text(encoding="utf-8"))["strings"]
+    assert draft["confirm.operands"] == "MY FIX" and draft["C1.matches"] == "OLD DRAFT"  # a correction wins
