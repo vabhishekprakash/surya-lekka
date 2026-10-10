@@ -182,6 +182,8 @@ const state = {
   pollTimer: null,
   view: "home",
   editView: null,
+  checkThis: [],
+  verified: new Set(),
 };
 
 // ---------------------------------------------------------------- helpers
@@ -723,6 +725,37 @@ function evidenceLine(field) {
   return el("div", { class: "evidence" }, pageButton(field.page, field.evidence_text), el("div", {}, parts));
 }
 
+// "Check this": a value the reading wasn't sure of, or of a kind it has got wrong before.
+// Every check that uses it waits until the household ticks it (or types the right
+// value). Each value has its own tick: there is no way to accept them all at once.
+const CHECK_REASONS = {
+  conflict: "different parts of the quote give different values",
+  unresolved: "it couldn't be read cleanly",
+  low_confidence: "the reading wasn't sure of it",
+  source_rule: "readings like this have been wrong before",
+};
+
+function checkEntry(path) {
+  // A price, subsidy or size row shows the chosen option's own value when it has one.
+  const own = (state.extraction.option_fields || {})[state.option] || {};
+  const shown = path.includes("[") || path.startsWith("flags.") ? undefined : (path in own ? state.option : null);
+  return state.checkThis.find((c) => c.path === path && (shown === undefined || (c.option_id || null) === shown));
+}
+
+function checkLine(path) {
+  const entry = checkEntry(path);
+  if (!entry) return null;
+  const why = entry.reasons.map((r) => CHECK_REASONS[r]).filter(Boolean).join(", and ");
+  const parts = [el("span", { class: "warn", text: `Check this against the quote: ${why}. The checks that use it wait until you do.` })];
+  if (!entry.reasons.includes("conflict")) {
+    const id = `verify-${path.replace(/[^a-z0-9]+/gi, "-")}`;
+    const box = el("input", { type: "checkbox", id, "data-verify": path });
+    box.checked = state.verified.has(path);
+    parts.push(el("label", { class: "verify", for: id }, box, " I checked this value against the quote and it is right"));
+  }
+  return el("div", { class: "check-this" }, parts);
+}
+
 function textRow(path, label, field, extra = {}) {
   const id = `f-${path.replace(/[^a-z0-9]+/gi, "-")}`;
   const original = inputValue(field);
@@ -731,7 +764,7 @@ function textRow(path, label, field, extra = {}) {
     el("input", { id, value: original, "data-path": path, "data-original": original,
       "data-kind": extra.kind || "text", inputmode: extra.inputmode, autocomplete: "off",
       placeholder: "Not on the quote" }),
-    evidenceLine(field));
+    evidenceLine(field), checkLine(path));
 }
 
 function selectRow(path, label, field, options) {
@@ -741,7 +774,8 @@ function selectRow(path, label, field, options) {
   const select = el("select", { id, "data-path": path, "data-original": original, "data-kind": "choice" },
     options.map(([value, text]) => el("option", { value, text })));
   select.value = original;
-  return el("div", { class: "row" }, el("label", { for: id, text: label }), select, evidenceLine(field));
+  return el("div", { class: "row" }, el("label", { for: id, text: label }), select, evidenceLine(field),
+    checkLine(path));
 }
 
 const DCR_CHOICES = [["", "The quote doesn't say"], ["true", "Yes, DCR panels and cells"], ["false", "It says they are not DCR"]];
@@ -848,7 +882,7 @@ function renderReviewFlags() {
       flag.options.map(([value, text]) => el("option", { value, text })));
     select.value = original;
     return el("div", { class: "row" }, el("label", { for: id, text: flag.text }), select,
-      field && field.evidence_text ? evidenceLine(field) : null);
+      field && field.evidence_text ? evidenceLine(field) : null, checkLine(`flags.${flag.name}`));
   }));
 }
 
@@ -876,6 +910,8 @@ function openReview(view) {
   state.extraction = view.extraction;
   state.pageText = view.page_text || null;
   state.option = "";
+  state.checkThis = view.check_this || [];
+  state.verified = new Set();
   const notes = [];
   const skipped = view.extraction.pages_skipped || [];
   if (!view.processing_complete) {
@@ -948,7 +984,11 @@ function collectReview() {
   const complete = $("[data-household=extra_charges_complete]");
   if (complete) answers.extra_charges_complete = answerValue(complete.value);
   if (state.option) answers.selected_option = state.option;
-  return { corrections, answers };
+  // A ticked value counts only while it is unchanged: a changed value is a correction.
+  const verified = $$("#view-review [data-verify]").filter((box) => box.checked).map((box) => box.dataset.verify)
+    .filter((path) => !(path in corrections) && !(path.startsWith("flags.") && path.slice(6) in answers));
+  state.verified = new Set(verified);
+  return { corrections, answers, verified };
 }
 
 async function submitReview(event) {
@@ -1153,7 +1193,10 @@ function openResults(result) {
   };
   const parts = STATUS_ORDER.filter((s) => counts[s])
     .map((s) => `${counts[s]} ${phrases[s][counts[s] === 1 ? 0 : 1]}`);
-  $("#results-summary").textContent = parts.length ? `Results: ${parts.join(", ")}.` : "";
+  const toCheck = (result.check_this || []).filter((c) => !c.option_id || c.option_id === state.option).length;
+  $("#results-summary").textContent = (parts.length ? `Results: ${parts.join(", ")}.` : "")
+    + (toCheck ? ` ${toCheck === 1 ? "One value still needs" : `${toCheck} values still need`} checking against the quote.`
+      : "");
   $("#results-groups").replaceChildren(...STATUS_ORDER.filter((s) => counts[s]).map((status) =>
     el("section", { class: "finding-group" },
       el("h3", { text: STATUS_WORDS[status][1] }),

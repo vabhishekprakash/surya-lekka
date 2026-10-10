@@ -230,3 +230,6 @@ dialog::backdrop { background: rgba(0, 0, 0, 0.55); }
   .sample-list { grid-template-columns: repeat(3, 1fr); }
   .charge-row { display: grid; grid-template-columns: 2fr 1fr 1fr; gap: 10px; }
 }
+.check-this { margin-top: 0.35rem; }
+.check-this .warn { color: var(--bad); display: block; }
+.check-this .verify { display: flex; gap: 0.5rem; align-items: flex-start; margin-top: 0.25rem; font-size: 0.92rem; }

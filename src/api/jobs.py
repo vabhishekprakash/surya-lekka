@@ -105,6 +105,7 @@ def _view(item):
             "findings": result["findings"],
             "questions": result["questions"],
             "vendor_message": result["vendor_message"],
+            "check_this": result.get("check_this", []),
             "corrections": json.loads(item["corrections"]) if item.get("corrections") else None,
         })
     return view
@@ -125,11 +126,12 @@ def get_job(event, context):
 
 @guarded("recheck")
 def recheck(event, context):
-    """POST /jobs/{id}/checks?t=token {"corrections": {...}, "answers": {...}}
+    """POST /jobs/{id}/checks?t=token {"corrections": {...}, "answers": {...}, "verified": [path, ...]}
 
     Runs the checks on the original extraction with the user's corrections and
     answers (consumer type, state, portal date, first system, prior subsidy, Give It
-    Up, selected option). Corrections are stored with their provenance.
+    Up, selected option) and the values the household checked one by one. Corrections are
+    stored with their provenance.
     """
     try:
         item = authorised_job(event)
@@ -138,16 +140,19 @@ def recheck(event, context):
         body = body_json(event)
         corrections = body.get("corrections") or {}
         answers = body.get("answers", body.get("confirmations")) or {}
+        verified = body.get("verified") or []
         if not isinstance(corrections, dict) or not isinstance(answers, dict):
             raise ApiError(400, "bad_inputs", "corrections and answers must be JSON objects.")
-        user_inputs = {"corrections": corrections, "confirmations": answers}
+        if not isinstance(verified, list) or not all(isinstance(p, str) for p in verified):
+            raise ApiError(400, "bad_inputs", "verified must be a list of value paths.")
+        user_inputs = {"corrections": corrections, "confirmations": answers, "verified": verified}
         try:
             result = run_checks(json.loads(item["extraction"]), user_inputs)
         except KeyError as e:
             raise ApiError(400, "unknown_field", str(e).strip("'\"")) from None
         except (TypeError, ValueError, AttributeError):
             raise ApiError(400, "bad_inputs", "A correction or answer has the wrong type.") from None
-        checked = {k: result[k] for k in ("findings", "questions", "vendor_message")}
+        checked = {k: result[k] for k in ("findings", "questions", "vendor_message", "check_this")}
         stored = {"user_inputs": user_inputs,
                   "corrected_fields": [{**c, "provenance": "user_corrected"} for c in result["corrected_fields"]]}
         checked_text, stored_text = json.dumps(checked, default=str), json.dumps(stored, default=str)
@@ -250,7 +255,7 @@ def _saved_sample(event, sample_id):
     if reading.get("reading") != "saved" or not isinstance(quote, dict) or not isinstance(pages, dict):
         raise ApiError(404, *SAMPLE_MISSING)
     result = run_checks(quote)
-    checked = {k: result[k] for k in ("findings", "questions", "vendor_message")}
+    checked = {k: result[k] for k in ("findings", "questions", "vendor_message", "check_this")}
     job_id, token = new_job(
         len(pages), f"sample:{sample_id}", mode="saved", status="done",
         extraction=json.dumps(quote, default=str), result=json.dumps(checked, default=str),

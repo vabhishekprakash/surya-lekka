@@ -178,3 +178,20 @@ def test_amounts_the_household_enters_show_in_rupees():
     branch = APP[APP.index('if (e.kind === "user_corrected") {'):APP.index('if (e.kind === "user_confirmed") {')]
     assert "isAmountField(e.field)" in branch and "formatInr(e.value)" in branch
     assert "function isAmountField(" in APP
+
+
+def test_values_to_check_each_have_their_own_tick_and_no_bulk_accept():
+    assert "data-verify" in APP and "verified" in APP
+    assert re.search(r'el\("input", \{ type: "checkbox", id, "data-verify": path \}\)', APP)
+    for bulk in ("confirm all", "accept all", "check all", "select all", "tick all"):
+        assert bulk not in APP.lower() and bulk not in INDEX.lower()
+    # a conflicting value has no tick: the household types the right one
+    assert 'if (!entry.reasons.includes("conflict"))' in APP
+    # a ticked value that was also changed is sent as a correction, not as checked
+    assert "!(path in corrections)" in APP
+
+
+def test_check_this_reasons_cover_every_reason_the_checks_give():
+    from checks.check_this import REASONS
+    words = re.search(r"const CHECK_REASONS = \{(.*?)\};", APP, re.S).group(1)
+    assert sorted(re.findall(r"^\s*(\w+):", words, re.M)) == sorted(REASONS)

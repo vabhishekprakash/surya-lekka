@@ -3,7 +3,8 @@ import copy
 from .arithmetic import check_gross_total, check_net_cost
 from .capacity import check_capacity
 from .common import USER_KINDS
-from .contract import normalise
+from . import check_this
+from .contract import effective_option, normalise
 from .evidence import verify_evidence
 from .missing import check_missing_details
 from .questions import vendor_message, vendor_questions
@@ -29,6 +30,8 @@ def run_checks(quote, user_inputs=None, page_texts=None, rules=None):
     """
     original = copy.deepcopy(quote)
     effective, corrected = apply_user_inputs(quote, user_inputs)
+    selected = ((effective.get("flags") or {}).get("user_confirmed") or {}).get("selected_option")
+    to_check = check_this.mark(effective, selected, effective_option(effective))
     view = normalise(effective)
     findings = [
         check_capacity(view),
@@ -43,6 +46,7 @@ def run_checks(quote, user_inputs=None, page_texts=None, rules=None):
         "contract_version": view["contract_version"],
         "findings": findings,
         "corrected_fields": corrected,
+        "check_this": to_check,
         "questions": vendor_questions(findings),
         "vendor_message": vendor_message(findings),
         "quote": effective,

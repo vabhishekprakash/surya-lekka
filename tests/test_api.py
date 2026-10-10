@@ -701,6 +701,19 @@ def test_recheck_refusals(aws):
     assert call(jobs.recheck, {"answers": {"favourite_colour": "red"}}, **where)[0] == 400
 
 
+def test_recheck_takes_values_checked_one_by_one(aws):
+    job = done_job(aws)
+    view = get(job)[1]
+    assert isinstance(view["check_this"], list)
+    where = {"path": {"id": job["job_id"]}, "query": {"t": job["token"]}}
+    status, body = call(jobs.recheck, {"answers": S1_ANSWERS, "verified": ["gross_total"]}, **where)
+    assert status == 200 and isinstance(body["check_this"], list)
+    assert get(job)[1]["corrections"]["user_inputs"]["verified"] == ["gross_total"]
+    for bad in ("gross_total", {"gross_total": True}, [1], ["*"]):
+        status, body = call(jobs.recheck, {"answers": S1_ANSWERS, "verified": bad}, **where)
+        assert status == 400, bad
+
+
 # --- logs ----------------------------------------------------------------------------------------------
 
 def test_logs_hold_no_tokens_or_document_text(aws, caplog):

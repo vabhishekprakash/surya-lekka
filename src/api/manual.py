@@ -113,4 +113,4 @@ def handler(event, context):
         log("manual_refused", reason=e.code, http_status=e.status)
         return error_response(e)
     log("manual_checked", http_status=200)
-    return response(200, {"mode": "manual", **{k: result[k] for k in ("findings", "questions", "vendor_message")}})
+    return response(200, {"mode": "manual", **{k: result[k] for k in ("findings", "questions", "vendor_message", "check_this")}})

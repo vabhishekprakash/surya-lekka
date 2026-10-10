@@ -67,7 +67,13 @@ def plain(f):
         return None
     if f.get("conflict"):
         return _field(f, Unparsed(None, "conflict"))
+    if f.get("check_this"):  # held until the household checks this value
+        return _field(f, Unparsed(_raw(f.get("value")), "check_this"))
     return _field(f, f.get("value"))
+
+
+def _raw(value):
+    return value.get("raw") if isinstance(value, dict) else value
 
 
 def _decimal(text):
@@ -87,7 +93,9 @@ def amount(f):
         return _field(f, None)
     status = v.get("parse_status")
     number = _decimal(v.get("parsed")) if status == "ok" else None
-    if status == "empty":
+    if f.get("check_this"):
+        value = Unparsed(v.get("raw"), "check_this")
+    elif status == "empty":
         value = None
     elif number is None:
         value = Unparsed(v.get("raw"), status or "missing_status")
@@ -115,6 +123,8 @@ def measure(f, scale):
                 value = lo * factor if lo == hi else {"min": lo * factor, "max": hi * factor}
         elif (number := _decimal(parsed)) is not None:
             value = number * factor
+    if f.get("check_this"):
+        value = Unparsed(v.get("raw"), "check_this")
     return _field(f, value, raw=v.get("raw"))
 
 

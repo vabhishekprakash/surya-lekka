@@ -4,7 +4,8 @@ user_inputs = {
     "corrections": {path: value},     # e.g. "base_price": "1,85,000",
                                       #      "module_groups[G1].wattage": "550 Wp"
     "confirmations": {name: value},   # e.g. "state": "Telangana", "gst_treatment": "excluded"
-}
+    "verified": [path],               # e.g. "gross_total": the household checked this one value
+}                                     #      against the quote and it is right as read
 
 A corrected field keeps its page and evidence text, gets provenance
 "user_corrected", and holds the original extracted field under "original".
@@ -20,6 +21,7 @@ from .contract import effective_option
 from .parse import parse_amount, parse_capacity
 
 USER_CORRECTED = "user_corrected"
+USER_VERIFIED = "user_verified"
 
 AMOUNT_PATHS = {"base_price", "gst_amount", "discount", "gross_total", "subsidy_central", "subsidy_state",
                 "subsidy_combined", "subsidy_unspecified", "net_cost"}
@@ -118,4 +120,30 @@ def apply_user_inputs(quote, user_inputs=None):
             "original_value": None if original is None else original.get("value"),
             "corrected_value": value,
         })
+    _verify(q, user_inputs.get("verified"))
     return q, corrected
+
+
+def _verify(q, paths):
+    """Mark each named value as checked by the household, one path at a time. There is no
+    way to verify every value at once: each path must name one value read from the quote."""
+    if paths is None:
+        return
+    if not isinstance(paths, list) or not all(isinstance(p, str) for p in paths):
+        raise TypeError("verified must be a list of value paths")
+    for path in paths:
+        if path.startswith("flags."):
+            name = path[len("flags."):]
+            proposed = ((q.get("flags") or {}).get("model_proposed") or {}).get(name)
+            if name not in CONFIRMABLE or not proposed or proposed.get("conflict"):
+                raise KeyError(f"nothing to verify at {path}")
+            q["flags"].setdefault("user_confirmed", {}).setdefault(name, proposed["value"])
+            continue
+        container, key, _ = _locate(q, path)
+        field = container.get(key)
+        if not field or field.get("value") is None:
+            raise KeyError(f"nothing to verify at {path}")
+        if field.get("conflict"):
+            raise ValueError(f"{path} has more than one reading: type the right value instead")
+        if field.get("provenance") is None:
+            container[key] = {**field, "provenance": USER_VERIFIED}

@@ -1,0 +1,13 @@
+{
+  "source": "Development quotes only (8 quotes, hand-made labels, saved Textract replies). Held-out quotes are never used.",
+  "computed_from": "Every value scored wrong or falsely filled on the dev quotes with the reader at d76fa19, traced to the source rules that wrote it.",
+  "low_confidence_below": 80,
+  "rules_with_dev_errors": [
+    "lines.quote_date",
+    "queries.panel_count",
+    "queries.panel_make",
+    "queries.quote_date",
+    "queries.stated_capacity",
+    "queries.vendor_name"
+  ]
+}
