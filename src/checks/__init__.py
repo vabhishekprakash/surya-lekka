@@ -3,7 +3,7 @@ import copy
 from .arithmetic import check_gross_total, check_net_cost
 from .capacity import check_capacity
 from .common import NEEDS_CONFIRMATION, USER_KINDS, field_words, join_words
-from . import check_this, confirm, guards, messages
+from . import check_this, confirm, guards, message_parts, messages
 from .contract import effective_option, normalise
 from .evidence import verify_evidence
 from .missing import check_missing_details
@@ -30,6 +30,10 @@ def _add_keys(findings):
             f["message_key"], f["message_params"] = messages.identify(f["check_id"], f["message"])
         except LookupError:
             f["message_key"], f["message_params"] = "unkeyed", {"text": f["message"]}
+        try:  # the same parameters with every filled-in word as its own key, for translations
+            f["message_parts"] = message_parts.message_parts(f["message_params"], f["message_key"])
+        except (AttributeError, KeyError, StopIteration, ValueError):
+            f["message_parts"] = {k: message_parts.text(v) for k, v in f["message_params"].items()}
 
 
 def _annotate(findings, page_texts):

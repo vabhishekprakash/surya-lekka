@@ -179,7 +179,9 @@ def keyed_questions(questions, findings):
     for f in findings:
         if f.get("question") in QUESTION_TEMPLATES and f["question"] not in params:
             params[f["question"]] = dict(f.get("question_params") or {})
-    return [{**q, "key": f"question.{q['id']}", "params": params.get(q["id"], {})} for q in questions]
+    from .message_parts import message_parts
+    return [{**q, "key": f"question.{q['id']}", "params": params.get(q["id"], {}),
+             "parts": message_parts(params.get(q["id"], {}), f"question.{q['id']}")} for q in questions]
 
 
 def vendor_message_lines(questions):
@@ -187,6 +189,7 @@ def vendor_message_lines(questions):
     if not questions:
         return []
     lines = [{"key": "vendor.intro", "params": {}}, {"key": "vendor.blank", "params": {}}]
-    lines += [{"key": "vendor.question", "params": {"number": i, "text": q["text"], "question_key": q["key"]}}
+    lines += [{"key": "vendor.question", "params": {"number": i, "text": q["text"], "question_key": q["key"]},
+               "parts": {"number": {"text": str(i)}, "text": {"key": q["key"], "params": q.get("parts", {})}}}
               for i, q in enumerate(questions, 1)]
     return lines + [{"key": "vendor.blank", "params": {}}, {"key": "vendor.outro", "params": {}}]
