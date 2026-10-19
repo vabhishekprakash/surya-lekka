@@ -1,6 +1,6 @@
 # Surya Lekka
 
-Video: (link) · Blog: (link)
+Blog: https://builder.aws.com/content/3KYSHhXy6RruFlTW1pnAzvcWZ8J/five-panels-of-500-w-dont-make-3-kw
 
 Surya Lekka checks a household's rooftop solar quote before they sign. It reads the quote, shows the line each number came from, checks the sums and the central subsidy against the government rule, and lists what to ask the vendor.
 
